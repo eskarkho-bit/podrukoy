@@ -1,0 +1,92 @@
+rules_version = '2';
+
+// Правила доступа к Firestore проекта domio-7ad1c.
+// Базовый принцип: запрещено всё, что не разрешено явно ниже.
+// Деплой: firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function authed() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return authed() && request.auth.uid == uid;
+    }
+
+    // Мастер — тот, у кого есть анкета в коллекции masters
+    function isMaster() {
+      return authed()
+        && exists(/databases/$(database)/documents/masters/$(request.auth.uid));
+    }
+
+    // Профиль клиента: имя, адреса, настройки. Виден только владельцу.
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Анкета мастера. Читать может любой авторизованный (клиент видит, кто взял
+    // заявку), править — только сам мастер. Удаление закрыто.
+    match /masters/{uid} {
+      allow read: if authed();
+      allow create, update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    // Заявки. Клиент видит свои; мастер видит свои взятые и те, что ещё в поиске
+    // исполнителя. Поле clientId переписать нельзя — владелец заявки неизменен.
+    match /orders/{orderId} {
+
+      function isClient() {
+        return authed() && resource.data.clientId == request.auth.uid;
+      }
+
+      function isAssignedMaster() {
+        return authed() && resource.data.get('masterId', '') == request.auth.uid;
+      }
+
+      function isOpenForMasters() {
+        return isMaster() && resource.data.status == 'Поиск мастера';
+      }
+
+      allow create: if authed()
+        && request.resource.data.clientId == request.auth.uid;
+
+      allow read: if isClient() || isAssignedMaster() || isOpenForMasters();
+
+      allow update: if (isClient() || isAssignedMaster() || isOpenForMasters())
+        && request.resource.data.clientId == resource.data.clientId;
+
+      // Заявки не удаляются, а переводятся в статус «Отменена»
+      allow delete: if false;
+
+      // Переписка по заявке — только между её участниками
+      match /messages/{messageId} {
+
+        function order() {
+          return get(/databases/$(database)/documents/orders/$(orderId)).data;
+        }
+
+        function isParty() {
+          return authed() && (
+            order().clientId == request.auth.uid
+            || order().get('masterId', '') == request.auth.uid
+          );
+        }
+
+        allow read: if isParty();
+        allow create: if isParty()
+          && request.resource.data.senderId == request.auth.uid;
+
+        // Отправленное сообщение не редактируется и не удаляется
+        allow update, delete: if false;
+      }
+    }
+
+    // Всё, что не описано выше, закрыто наглухо
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
