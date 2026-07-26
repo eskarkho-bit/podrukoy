@@ -28,34 +28,6 @@
       "runtimeArgs": ["run", "web"],
       "port": 8081,
       "autoPort": true
-    },
-    {
-      "name": "podrukoy2 - start",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "podrukoy2", "run", "start"],
-      "port": 8081,
-      "autoPort": true
-    },
-    {
-      "name": "podrukoy2 - android",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "podrukoy2", "run", "android"],
-      "port": 8081,
-      "autoPort": true
-    },
-    {
-      "name": "podrukoy2 - ios",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "podrukoy2", "run", "ios"],
-      "port": 8081,
-      "autoPort": true
-    },
-    {
-      "name": "podrukoy2 - web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "podrukoy2", "run", "web", "--", "--port", "8082"],
-      "port": 8082,
-      "autoPort": false
     }
   ]
 }

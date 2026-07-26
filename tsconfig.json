@@ -3,5 +3,14 @@
   "compilerOptions": {
     "strict": true
   },
-  "exclude": ["node_modules", "podrukoy2"]
+  "exclude": [
+    "node_modules",
+    "podrukoy2"
+  ],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ]
 }

@@ -1,19 +1,18 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
-import { BottomTabs, TabId } from './components/BottomTabs';
-import { OrdersScreen, Order } from './screens/OrdersScreen';
-import { MessagesScreen, Thread } from './screens/MessagesScreen';
-import { ProfileScreen } from './screens/ProfileScreen';
-import { MasterScreen } from './screens/MasterScreen';
-import { OrderDraft } from './components/ActionSheet';
-import { palettes, ThemeContext, ThemeMode } from './theme';
+import { router } from 'expo-router';
+import { ReactNode, createContext, useContext, useEffect, useRef, useState } from 'react';
+import { OrderDraft } from './ActionSheet';
+import { Thread } from '../screens/MessagesScreen';
+import { Order } from '../screens/OrdersScreen';
+import { palettes, ThemeContext, ThemeMode } from '../theme';
 
-const USER_EMAIL = 'dmtr0v@icloud.com';
+// Общее состояние приложения. Раньше жило в App.tsx и раздавалось пропсами —
+// с переходом на роутер экраны стали отдельными маршрутами, и общий стейт
+// поднялся сюда, чтобы переключение вкладок его не сбрасывало.
+
+export const USER_EMAIL = 'dmtr0v@icloud.com';
 const DEFAULT_ADDRESS = 'ул. Ленина, 24';
-const MASTER_THREAD_ID = 'master';
-const SUPPORT_THREAD_ID = 'support';
+export const MASTER_THREAD_ID = 'master';
+export const SUPPORT_THREAD_ID = 'support';
 
 // Ответы «живого» собеседника — подбираются по очереди, чтобы чат не молчал
 const MASTER_REPLIES = [
@@ -43,8 +42,43 @@ function now() {
 let msgSeq = 0;
 const msgId = () => `${Date.now()}-${msgSeq++}`;
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('orders');
+type AppState = {
+  orders: Order[];
+  threads: Thread[];
+  userName: string;
+  addresses: string[];
+  activeAddress: string;
+  typingThreadId: string | null;
+  openThreadRequest: string | null;
+  chatOpen: boolean;
+  overlayOpen: boolean;
+  masterOpen: boolean;
+  hasUnreadMessages: boolean;
+  ordersActive: number;
+  setUserName: (name: string) => void;
+  setActiveAddress: (addr: string) => void;
+  setChatOpen: (open: boolean) => void;
+  setOverlayOpen: (open: boolean) => void;
+  setMasterOpen: (open: boolean) => void;
+  clearOpenThreadRequest: () => void;
+  createOrder: (draft: OrderDraft) => void;
+  confirmOrderDone: (orderId: string) => void;
+  cancelOrder: (orderId: string) => void;
+  addAddress: (addr: string) => void;
+  markThreadRead: (threadId: string) => void;
+  sendMessage: (threadId: string, text: string) => void;
+  openChat: (threadId: string) => void;
+};
+
+const AppStateContext = createContext<AppState | null>(null);
+
+export function useAppState() {
+  const ctx = useContext(AppStateContext);
+  if (!ctx) throw new Error('useAppState вызван вне AppStateProvider');
+  return ctx;
+}
+
+export function AppStateProvider({ children }: { children: ReactNode }) {
   // Заказы и переписка появляются только по факту действий пользователя — без «фейковых» затравок
   const [orders, setOrders] = useState<Order[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -177,7 +211,8 @@ export default function App() {
     });
   };
 
-  // Открыть чат из другого экрана: создаём тред с приветствием, если его ещё нет
+  // Открыть чат из другого экрана: создаём тред с приветствием, если его ещё нет,
+  // и переводим пользователя на вкладку «Сообщения»
   const openChat = (threadId: string) => {
     setThreads((prev) => {
       if (prev.find((t) => t.id === threadId)) return prev;
@@ -195,93 +230,48 @@ export default function App() {
         ...prev,
       ];
     });
-    setActiveTab('messages');
     setOpenThreadRequest(threadId);
+    router.navigate('/messages');
   };
 
   const hasUnreadMessages = threads.some((t) => t.unread);
-  const activeOrders = orders.filter(
+  const ordersActive = orders.filter(
     (o) => o.status !== 'Отменена' && o.status !== 'Завершена',
   ).length;
+
+  const value: AppState = {
+    orders,
+    threads,
+    userName,
+    addresses,
+    activeAddress,
+    typingThreadId,
+    openThreadRequest,
+    chatOpen,
+    overlayOpen,
+    masterOpen,
+    hasUnreadMessages,
+    ordersActive,
+    setUserName,
+    setActiveAddress,
+    setChatOpen,
+    setOverlayOpen,
+    setMasterOpen,
+    clearOpenThreadRequest: () => setOpenThreadRequest(null),
+    createOrder,
+    confirmOrderDone,
+    cancelOrder,
+    addAddress,
+    markThreadRead,
+    sendMessage,
+    openChat,
+  };
 
   return (
     <ThemeContext.Provider
       value={{ mode: themeMode, colors: palettes[themeMode], setMode: setThemeMode }}
     >
-    <View style={[styles.root, { backgroundColor: palettes[themeMode].bg }]}>
-      <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
-
-      <ScreenLayer active={activeTab === 'orders'}>
-        <OrdersScreen
-          orders={orders}
-          addresses={addresses}
-          activeAddress={activeAddress}
-          onSelectAddress={setActiveAddress}
-          onAddAddress={addAddress}
-          onCreateOrder={createOrder}
-          onCancelOrder={cancelOrder}
-          onConfirmOrder={confirmOrderDone}
-          onOpenMasterChat={() => openChat(MASTER_THREAD_ID)}
-          onOverlayOpenChange={setOverlayOpen}
-        />
-      </ScreenLayer>
-
-      <ScreenLayer active={activeTab === 'messages'}>
-        <MessagesScreen
-          threads={threads}
-          typingThreadId={typingThreadId}
-          openRequestId={openThreadRequest}
-          onOpenRequestHandled={() => setOpenThreadRequest(null)}
-          onOpenThread={markThreadRead}
-          onSendMessage={sendMessage}
-          onThreadOpenChange={setChatOpen}
-        />
-      </ScreenLayer>
-
-      <ScreenLayer active={activeTab === 'profile'}>
-        <ProfileScreen
-          name={userName}
-          onChangeName={setUserName}
-          email={USER_EMAIL}
-          address={activeAddress}
-          ordersTotal={orders.length}
-          ordersActive={activeOrders}
-          onContactSupport={() => openChat(SUPPORT_THREAD_ID)}
-          onOpenMaster={() => setMasterOpen(true)}
-        />
-      </ScreenLayer>
-
-      <BottomTabs
-        active={activeTab}
-        onSelect={setActiveTab}
-        hasUnreadMessages={hasUnreadMessages}
-        hidden={
-          (activeTab === 'messages' && chatOpen)
-          || (activeTab === 'orders' && overlayOpen)
-          || masterOpen
-        }
-      />
-
-      <MasterScreen open={masterOpen} onClose={() => setMasterOpen(false)} />
-    </View>
+      <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
     </ThemeContext.Provider>
   );
 }
-
-// Каждый экран остаётся смонтированным — переключение вкладок не сбрасывает его состояние,
-// а лишь тихо перекрёстно затухает (без резких скачков)
-function ScreenLayer({ active, children }: { active: boolean; children: ReactNode }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: withTiming(active ? 1 : 0, { duration: 300 }),
-    transform: [{ translateY: withTiming(active ? 0 : 8, { duration: 300 }) }],
-  }));
-  return (
-    <Animated.View style={[StyleSheet.absoluteFill, style]} pointerEvents={active ? 'auto' : 'none'}>
-      {children}
-    </Animated.View>
-  );
-}
-
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-});
