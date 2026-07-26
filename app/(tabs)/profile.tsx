@@ -1,4 +1,4 @@
-import { useAppState, SUPPORT_THREAD_ID, USER_EMAIL } from '../../components/AppState';
+import { useAppState, SUPPORT_THREAD_ID } from '../../components/AppState';
 import { ProfileScreen } from '../../screens/ProfileScreen';
 
 export default function ProfileRoute() {
@@ -8,7 +8,7 @@ export default function ProfileRoute() {
     <ProfileScreen
       name={s.userName}
       onChangeName={s.setUserName}
-      email={USER_EMAIL}
+      email={s.userEmail}
       address={s.activeAddress}
       ordersTotal={s.orders.length}
       ordersActive={s.ordersActive}

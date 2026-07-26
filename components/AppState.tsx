@@ -1,15 +1,30 @@
 import { router } from 'expo-router';
+import {
+  addDoc,
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { ReactNode, createContext, useContext, useEffect, useRef, useState } from 'react';
-import { OrderDraft } from './ActionSheet';
-import { Thread } from '../screens/MessagesScreen';
+import { db } from '../firebaseConfig';
+import { ChatMessage, Thread } from '../screens/MessagesScreen';
 import { Order } from '../screens/OrdersScreen';
 import { palettes, ThemeContext, ThemeMode } from '../theme';
+import { useAuth } from './AuthState';
+import { OrderDraft } from './ActionSheet';
+import { uploadOrderPhoto } from './photoUpload';
 
 // Общее состояние приложения. Раньше жило в App.tsx и раздавалось пропсами —
 // с переходом на роутер экраны стали отдельными маршрутами, и общий стейт
-// поднялся сюда, чтобы переключение вкладок его не сбрасывало.
+// поднялся сюда. Данные теперь в Firestore: экраны об этом не знают, они
+// по-прежнему получают готовые массивы и колбэки.
 
-export const USER_EMAIL = 'dmtr0v@icloud.com';
 const DEFAULT_ADDRESS = 'ул. Ленина, 24';
 export const MASTER_THREAD_ID = 'master';
 export const SUPPORT_THREAD_ID = 'support';
@@ -39,13 +54,11 @@ function now() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-let msgSeq = 0;
-const msgId = () => `${Date.now()}-${msgSeq++}`;
-
 type AppState = {
   orders: Order[];
   threads: Thread[];
   userName: string;
+  userEmail: string;
   addresses: string[];
   activeAddress: string;
   typingThreadId: string | null;
@@ -79,23 +92,23 @@ export function useAppState() {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  // Заказы и переписка появляются только по факту действий пользователя — без «фейковых» затравок
+  const { user } = useAuth();
+  const uid = user?.uid ?? null;
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
-  const [userName, setUserName] = useState('Дмитрий');
-  // Адреса пользователя: активный показывается в сцене, подписях и новых заявках
+  const [userName, setUserNameLocal] = useState('');
   const [addresses, setAddresses] = useState<string[]>([DEFAULT_ADDRESS]);
-  const [activeAddress, setActiveAddress] = useState(DEFAULT_ADDRESS);
+  const [activeAddress, setActiveAddressLocal] = useState(DEFAULT_ADDRESS);
   // Тема оформления — переключается тумблером в настройках профиля
-  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
+  const [themeMode, setThemeModeLocal] = useState<ThemeMode>('light');
   // Открытая переписка — это вложенный экран поверх вкладки «Сообщения»
   const [chatOpen, setChatOpen] = useState(false);
   // Шторки поверх «Заказов» (действия по объекту, детали заказа) тоже прячут нижнюю панель
   const [overlayOpen, setOverlayOpen] = useState(false);
   // Просьба открыть конкретный чат (из профиля или из деталей заказа)
   const [openThreadRequest, setOpenThreadRequest] = useState<string | null>(null);
-  // Режим мастера — оверлей поверх всего приложения (экран остаётся смонтированным,
-  // чтобы сессия мастера и его заявки не сбрасывались при выходе в профиль)
+  // Режим мастера — оверлей поверх всего приложения
   const [masterOpen, setMasterOpen] = useState(false);
   // В каком чате сейчас «печатает» собеседник
   const [typingThreadId, setTypingThreadId] = useState<string | null>(null);
@@ -109,92 +122,256 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     timers.current.push(setTimeout(fn, ms));
   };
 
-  // Сообщение от мастера/поддержки: дописывает в тред или создаёт его
-  const incomingMessage = (threadId: string, name: string, icon: string, text: string) => {
-    setThreads((prev) => {
-      const msg = { id: msgId(), from: 'master' as const, text, time: now() };
-      const existing = prev.find((t) => t.id === threadId);
-      if (existing) {
-        return prev.map((t) => (t.id === threadId
-          ? { ...t, unread: true, messages: [...t.messages, msg] }
-          : t));
+  const userDoc = () => (uid ? doc(db, 'users', uid) : null);
+
+  // ---------- профиль ----------
+  // Документ создаётся при первом входе: раньше уйти в базу он не мог,
+  // потому что правила разрешают запись только владельцу, а uid ещё не было.
+  useEffect(() => {
+    if (!uid) {
+      setUserNameLocal('');
+      setAddresses([DEFAULT_ADDRESS]);
+      setActiveAddressLocal(DEFAULT_ADDRESS);
+      return;
+    }
+    const ref = doc(db, 'users', uid);
+    return onSnapshot(ref, (snap) => {
+      if (!snap.exists()) {
+        setDoc(ref, {
+          name: user?.displayName ?? 'Гость',
+          email: user?.email ?? '',
+          addresses: [DEFAULT_ADDRESS],
+          activeAddress: DEFAULT_ADDRESS,
+          themeMode: 'light',
+          createdAt: serverTimestamp(),
+        }).catch((e) => console.warn('Не удалось создать профиль:', e));
+        return;
       }
-      return [{ id: threadId, name, icon, unread: true, messages: [msg] }, ...prev];
-    });
+      const d = snap.data();
+      setUserNameLocal(d.name ?? '');
+      setAddresses(Array.isArray(d.addresses) && d.addresses.length ? d.addresses : [DEFAULT_ADDRESS]);
+      setActiveAddressLocal(d.activeAddress ?? DEFAULT_ADDRESS);
+      setThemeModeLocal(d.themeMode === 'dark' ? 'dark' : 'light');
+    }, (e) => console.warn('Профиль недоступен:', e));
+  }, [uid, user?.displayName, user?.email]);
+
+  // ---------- заказы ----------
+  useEffect(() => {
+    if (!uid) {
+      setOrders([]);
+      return;
+    }
+    const q = query(
+      collection(db, 'orders'),
+      where('clientId', '==', uid),
+      orderBy('createdAt', 'desc'),
+    );
+    return onSnapshot(q, (snap) => {
+      setOrders(snap.docs.map((d) => {
+        const v = d.data();
+        return {
+          id: d.id,
+          title: v.title,
+          date: v.date,
+          status: v.status,
+          comment: v.comment ?? undefined,
+          photoUri: v.photoUrl ?? null,
+          address: v.address ?? undefined,
+        };
+      }));
+    }, (e) => console.warn('Заказы недоступны:', e));
+  }, [uid]);
+
+  // ---------- переписка ----------
+  // Треды лежат в поддереве пользователя, поэтому доступны только ему.
+  // На каждый тред — своя подписка на сообщения; их всего два (мастер, поддержка).
+  useEffect(() => {
+    if (!uid) {
+      setThreads([]);
+      return;
+    }
+    const msgUnsubs = new Map<string, () => void>();
+
+    const unsubThreads = onSnapshot(
+      query(collection(db, 'users', uid, 'threads'), orderBy('updatedAt', 'desc')),
+      (snap) => {
+        const ids = new Set(snap.docs.map((d) => d.id));
+
+        setThreads((prev) => snap.docs.map((d) => {
+          const v = d.data();
+          const old = prev.find((t) => t.id === d.id);
+          return {
+            id: d.id,
+            name: v.name,
+            icon: v.icon,
+            unread: !!v.unread,
+            messages: old?.messages ?? [],
+          };
+        }));
+
+        // подписываемся на сообщения новых тредов
+        snap.docs.forEach((d) => {
+          if (msgUnsubs.has(d.id)) return;
+          const unsub = onSnapshot(
+            query(collection(db, 'users', uid, 'threads', d.id, 'messages'), orderBy('createdAt', 'asc')),
+            (msgSnap) => {
+              const messages: ChatMessage[] = msgSnap.docs.map((m) => {
+                const v = m.data();
+                return { id: m.id, from: v.from, text: v.text, time: v.time };
+              });
+              setThreads((prev) => prev.map((t) => (t.id === d.id ? { ...t, messages } : t)));
+            },
+            (e) => console.warn('Сообщения недоступны:', e),
+          );
+          msgUnsubs.set(d.id, unsub);
+        });
+
+        // отписываемся от исчезнувших
+        msgUnsubs.forEach((unsub, id) => {
+          if (!ids.has(id)) {
+            unsub();
+            msgUnsubs.delete(id);
+          }
+        });
+      },
+      (e) => console.warn('Переписка недоступна:', e),
+    );
+
+    return () => {
+      unsubThreads();
+      msgUnsubs.forEach((unsub) => unsub());
+      msgUnsubs.clear();
+    };
+  }, [uid]);
+
+  // ---------- действия ----------
+
+  // Сообщение от мастера/поддержки: дописывает в тред или создаёт его
+  const incomingMessage = async (threadId: string, name: string, icon: string, text: string) => {
+    if (!uid) return;
+    const threadRef = doc(db, 'users', uid, 'threads', threadId);
+    try {
+      await setDoc(threadRef, { name, icon, unread: true, updatedAt: serverTimestamp() }, { merge: true });
+      await addDoc(collection(threadRef, 'messages'), {
+        from: 'master', text, time: now(), createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Не удалось доставить сообщение:', e);
+    }
   };
 
-  const createOrder = ({ title, comment, photoUri }: OrderDraft) => {
-    const orderId = String(Date.now());
-    setOrders((prev) => [
-      { id: orderId, title, date: today(), status: 'Поиск мастера', comment, photoUri, address: activeAddress },
-      ...prev,
-    ]);
-    incomingMessage(MASTER_THREAD_ID, 'Мастер', '🧑‍🔧', `Заявка «${title}» принята. Подбираем мастера…`);
+  const createOrder = async ({ title, comment, photoUri }: OrderDraft) => {
+    if (!uid) return;
+    try {
+      // Фото сначала уезжает в Storage: локальный URI с телефона другому
+      // устройству ничего не скажет
+      const photoUrl = photoUri ? await uploadOrderPhoto(uid, photoUri) : null;
 
-    // Через несколько секунд мастер «находится» и берёт заявку в работу
-    later(6000, () => {
-      setOrders((prev) => prev.map((o) => (o.id === orderId && o.status === 'Поиск мастера'
-        ? { ...o, status: 'В работе' }
-        : o)));
-      incomingMessage(
-        MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-        'Я взял вашу заявку в работу. Напишите сюда, если есть детали — или пришлите фото.',
-      );
-    });
+      const ref = await addDoc(collection(db, 'orders'), {
+        clientId: uid,
+        masterId: null,
+        title,
+        date: today(),
+        status: 'Поиск мастера',
+        comment: comment ?? '',
+        photoUrl,
+        address: activeAddress,
+        createdAt: serverTimestamp(),
+      });
+      const orderId = ref.id;
 
-    // Ещё чуть позже мастер заканчивает и просит подтвердить результат
-    later(24000, () => {
-      setOrders((prev) => prev.map((o) => (o.id === orderId && o.status === 'В работе'
-        ? { ...o, status: 'Ждёт подтверждения' }
-        : o)));
-      incomingMessage(
-        MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-        `Работа по заявке «${title}» выполнена. Проверьте результат и подтвердите завершение в карточке заказа.`,
-      );
-    });
+      incomingMessage(MASTER_THREAD_ID, 'Мастер', '🧑‍🔧', `Заявка «${title}» принята. Подбираем мастера…`);
+
+      // Пока нет приложения мастера, заявку двигает имитация — иначе она
+      // навсегда осталась бы в статусе «Поиск мастера»
+      later(6000, () => {
+        updateDoc(doc(db, 'orders', orderId), { status: 'В работе' }).catch(() => {});
+        incomingMessage(
+          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
+          'Я взял вашу заявку в работу. Напишите сюда, если есть детали — или пришлите фото.',
+        );
+      });
+
+      later(24000, () => {
+        updateDoc(doc(db, 'orders', orderId), { status: 'Ждёт подтверждения' }).catch(() => {});
+        incomingMessage(
+          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
+          `Работа по заявке «${title}» выполнена. Проверьте результат и подтвердите завершение в карточке заказа.`,
+        );
+      });
+    } catch (e) {
+      console.warn('Не удалось создать заявку:', e);
+    }
   };
 
   // Пользователь подтверждает, что работа выполнена — заказ закрывается
   const confirmOrderDone = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
-    setOrders((prev) => prev.map((o) => (o.id === orderId && o.status === 'Ждёт подтверждения'
-      ? { ...o, status: 'Завершена' }
-      : o)));
-    if (order) {
-      incomingMessage(
-        MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-        `Спасибо, что подтвердили заявку «${order.title}»! Обращайтесь, если понадобится помощь.`,
-      );
-    }
+    if (!order || order.status !== 'Ждёт подтверждения') return;
+    updateDoc(doc(db, 'orders', orderId), { status: 'Завершена' }).catch(() => {});
+    incomingMessage(
+      MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
+      `Спасибо, что подтвердили заявку «${order.title}»! Обращайтесь, если понадобится помощь.`,
+    );
+  };
+
+  const cancelOrder = (orderId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    updateDoc(doc(db, 'orders', orderId), { status: 'Отменена' }).catch(() => {});
+    incomingMessage(
+      MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
+      `Заявка «${order.title}» отменена. Если передумаете — создайте новую в любой момент.`,
+    );
   };
 
   // Новый адрес: добавляем в список (без дублей) и сразу делаем активным
   const addAddress = (addr: string) => {
     const trimmed = addr.trim();
     if (!trimmed) return;
-    setAddresses((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-    setActiveAddress(trimmed);
+    const next = addresses.includes(trimmed) ? addresses : [...addresses, trimmed];
+    setAddresses(next);
+    setActiveAddressLocal(trimmed);
+    const ref = userDoc();
+    if (ref) updateDoc(ref, { addresses: next, activeAddress: trimmed }).catch(() => {});
   };
 
-  const cancelOrder = (orderId: string) => {
-    const order = orders.find((o) => o.id === orderId);
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: 'Отменена' } : o)));
-    if (order) {
-      incomingMessage(
-        MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-        `Заявка «${order.title}» отменена. Если передумаете — создайте новую в любой момент.`,
-      );
-    }
+  const setActiveAddress = (addr: string) => {
+    setActiveAddressLocal(addr);
+    const ref = userDoc();
+    if (ref) updateDoc(ref, { activeAddress: addr }).catch(() => {});
+  };
+
+  const setUserName = (name: string) => {
+    setUserNameLocal(name);
+    const ref = userDoc();
+    if (ref) updateDoc(ref, { name }).catch(() => {});
+  };
+
+  const setThemeMode = (next: ThemeMode) => {
+    setThemeModeLocal(next);
+    const ref = userDoc();
+    if (ref) updateDoc(ref, { themeMode: next }).catch(() => {});
   };
 
   const markThreadRead = (threadId: string) => {
+    if (!uid) return;
     setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, unread: false } : t)));
+    updateDoc(doc(db, 'users', uid, 'threads', threadId), { unread: false }).catch(() => {});
   };
 
-  const sendMessage = (threadId: string, text: string) => {
-    setThreads((prev) => prev.map((t) => (t.id === threadId
-      ? { ...t, messages: [...t.messages, { id: msgId(), from: 'user', text, time: now() }] }
-      : t)));
+  const sendMessage = async (threadId: string, text: string) => {
+    if (!uid) return;
+    const threadRef = doc(db, 'users', uid, 'threads', threadId);
+    try {
+      await setDoc(threadRef, { updatedAt: serverTimestamp() }, { merge: true });
+      await addDoc(collection(threadRef, 'messages'), {
+        from: 'user', text, time: now(), createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Сообщение не отправлено:', e);
+      return;
+    }
 
     // Собеседник «читает», печатает и отвечает — с живыми паузами
     later(700, () => setTypingThreadId(threadId));
@@ -213,23 +390,23 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   // Открыть чат из другого экрана: создаём тред с приветствием, если его ещё нет,
   // и переводим пользователя на вкладку «Сообщения»
-  const openChat = (threadId: string) => {
-    setThreads((prev) => {
-      if (prev.find((t) => t.id === threadId)) return prev;
+  const openChat = async (threadId: string) => {
+    if (uid && !threads.find((t) => t.id === threadId)) {
       const greeting = threadId === SUPPORT_THREAD_ID
         ? { name: 'Поддержка', icon: '🛟', text: 'Здравствуйте! Чем можем помочь?' }
         : { name: 'Мастер', icon: '🧑‍🔧', text: 'На связи! Опишите, что случилось.' };
-      return [
-        {
-          id: threadId,
-          name: greeting.name,
-          icon: greeting.icon,
-          unread: false,
-          messages: [{ id: msgId(), from: 'master' as const, text: greeting.text, time: now() }],
-        },
-        ...prev,
-      ];
-    });
+      const threadRef = doc(db, 'users', uid, 'threads', threadId);
+      try {
+        await setDoc(threadRef, {
+          name: greeting.name, icon: greeting.icon, unread: false, updatedAt: serverTimestamp(),
+        }, { merge: true });
+        await addDoc(collection(threadRef, 'messages'), {
+          from: 'master', text: greeting.text, time: now(), createdAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.warn('Не удалось открыть переписку:', e);
+      }
+    }
     setOpenThreadRequest(threadId);
     router.navigate('/messages');
   };
@@ -243,6 +420,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     orders,
     threads,
     userName,
+    userEmail: user?.email ?? '',
     addresses,
     activeAddress,
     typingThreadId,

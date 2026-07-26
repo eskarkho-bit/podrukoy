@@ -23,12 +23,17 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
+import { useAuth } from '../components/AuthState';
+import { db } from '../firebaseConfig';
 
 // Режим мастера — отдельный «мир» поверх клиентского приложения.
-// Доступ только после входа в аккаунт мастера; сессия живёт, пока открыто приложение.
+// Аккаунт один на человека: роль мастера — это анкета masters/{uid}.
+// На её существовании построена проверка isMaster() в firestore.rules,
+// поэтому отдельного «входа для мастеров» больше нет: есть анкета — есть доступ.
 
 type JobStatus = 'new' | 'offered' | 'accepted' | 'done';
 
@@ -133,9 +138,10 @@ type Props = {
 export function MasterScreen({ open, onClose }: Props) {
   const { mode } = useTheme();
   const styles = themed[mode];
-  // Вход в аккаунт мастера — обязательный «замок» перед разделом
-  const [authed, setAuthed] = useState(false);
-  const [masterEmail, setMasterEmail] = useState('');
+  const { user } = useAuth();
+  const myUid = user?.uid ?? null;
+  // Анкета мастера: есть — раздел открыт, нет — предлагаем её заполнить
+  const [master, setMaster] = useState<{ name: string } | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [openJobId, setOpenJobId] = useState<string | null>(null);
   // В какой заявке клиент сейчас «печатает»
@@ -157,35 +163,50 @@ export function MasterScreen({ open, onClose }: Props) {
     transform: [{ translateX: withSpring(open ? 0 : 60, springs.nav) }],
   }));
 
-  const handleLogin = (email: string) => {
-    setMasterEmail(email);
-    setAuthed(true);
-    if (!seeded.current) {
-      seeded.current = true;
-      setJobs(seedJobs());
-      // Чуть позже «прилетает» ещё одна заявка — лента живая
-      later(20000, () => {
-        setJobs((prev) => [
-          {
-            id: uid(),
-            title: 'Собрать шкаф из IKEA',
-            client: 'Олег',
-            address: 'ул. Полевая, 3',
-            date: today(),
-            desc: 'Шкаф ПАКС, две секции. Все коробки дома, нужна только сборка.',
-            status: 'new',
-            unread: true,
-            messages: [],
-          },
-          ...prev,
-        ]);
-      });
-    }
-  };
+  // Анкету проверяем при каждом открытии раздела: она могла появиться
+  // на другом устройстве под тем же аккаунтом
+  useEffect(() => {
+    if (!open || !myUid) return;
+    let alive = true;
+    getDoc(doc(db, 'masters', myUid))
+      .then((snap) => {
+        if (!alive) return;
+        setMaster(snap.exists() ? { name: String(snap.data().name ?? '') } : null);
+      })
+      .catch((e) => console.warn('Анкета мастера недоступна:', e));
+    return () => { alive = false; };
+  }, [open, myUid]);
 
+  // Лента заявок наполняется один раз, когда доступ уже подтверждён.
+  // Пока нет серверного подбора, заявки имитируются — иначе лента пустая.
+  useEffect(() => {
+    if (!master || seeded.current) return;
+    seeded.current = true;
+    setJobs(seedJobs());
+    // Чуть позже «прилетает» ещё одна заявка — лента живая
+    later(20000, () => {
+      setJobs((prev) => [
+        {
+          id: uid(),
+          title: 'Собрать шкаф из IKEA',
+          client: 'Олег',
+          address: 'ул. Полевая, 3',
+          date: today(),
+          desc: 'Шкаф ПАКС, две секции. Все коробки дома, нужна только сборка.',
+          status: 'new',
+          unread: true,
+          messages: [],
+        },
+        ...prev,
+      ]);
+    });
+  }, [master]);
+
+  // «Выйти» в режиме мастера теперь означает выход из раздела: сам аккаунт
+  // остаётся тем же, анкета никуда не девается
   const handleLogout = () => {
-    setAuthed(false);
     setOpenJobId(null);
+    onClose();
   };
 
   const patchJob = (jobId: string, patch: (j: Job) => Job) => {
@@ -265,12 +286,17 @@ export function MasterScreen({ open, onClose }: Props) {
       style={[StyleSheet.absoluteFill, styles.root, layerStyle]}
       pointerEvents={open ? 'auto' : 'none'}
     >
-      {!authed ? (
-        <MasterLogin onClose={onClose} onLogin={handleLogin} />
+      {!master ? (
+        <MasterOnboarding
+          uid={myUid}
+          defaultName={user?.displayName ?? ''}
+          onClose={onClose}
+          onDone={(name) => setMaster({ name })}
+        />
       ) : (
         <View style={styles.fill}>
           <JobList
-            email={masterEmail}
+            email={user?.email ?? ''}
             jobs={jobs}
             typingJobId={typingJobId}
             onOpenJob={handleOpenJob}
@@ -300,48 +326,48 @@ export function MasterScreen({ open, onClose }: Props) {
   );
 }
 
-// ---------- Вход мастера ----------
+// ---------- Анкета мастера ----------
 
-function MasterLogin({ onClose, onLogin }: { onClose: () => void; onLogin: (email: string) => void }) {
+function MasterOnboarding({
+  uid: myUid, defaultName, onClose, onDone,
+}: {
+  uid: string | null;
+  defaultName: string;
+  onClose: () => void;
+  onDone: (name: string) => void;
+}) {
   const { mode: themeMode, colors: t } = useTheme();
   const styles = themed[themeMode];
-  // Один экран — два режима: вход и регистрация нового мастера
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [name, setName] = useState(defaultName);
+  const [skills, setSkills] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
 
-  const isRegister = mode === 'register';
-
-  const switchMode = () => {
-    setMode(isRegister ? 'login' : 'register');
-    setError(null);
-  };
-
-  const submit = () => {
-    if (isRegister && name.trim().length < 2) {
+  const submit = async () => {
+    if (name.trim().length < 2) {
       setError('Напишите, как вас зовут');
       return;
     }
-    const e = email.trim().toLowerCase();
-    if (!/^\S+@\S+\.\S+$/.test(e)) {
-      setError('Похоже, в email опечатка');
-      return;
-    }
-    if (password.length < 6) {
-      setError('Пароль — не короче 6 символов');
+    if (!myUid) {
+      setError('Сессия не найдена — войдите в приложение заново');
       return;
     }
     setError(null);
     setLoading(true);
-    // Здесь будет запрос к серверу; пока — короткая пауза «проверки»
-    timer.current = setTimeout(() => onLogin(e), 900);
+    try {
+      // Документ masters/{uid} и есть роль мастера: на его существовании
+      // держится проверка isMaster() в правилах доступа
+      await setDoc(doc(db, 'masters', myUid), {
+        name: name.trim(),
+        skills: skills.split(',').map((s) => s.trim()).filter(Boolean),
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+      onDone(name.trim());
+    } catch (e) {
+      console.warn('Не удалось сохранить анкету мастера:', e);
+      setError('Не удалось сохранить анкету. Попробуйте ещё раз');
+      setLoading(false);
+    }
   };
 
   return (
@@ -362,57 +388,37 @@ function MasterLogin({ onClose, onLogin }: { onClose: () => void; onLogin: (emai
         </Animated.View>
 
         <Animated.Text
-          key={`title-${mode}`}
           entering={FadeInDown.delay(60).duration(380)}
           style={styles.loginTitle}
         >
-          {isRegister ? 'Регистрация мастера' : 'Вход для мастеров'}
+          Стать мастером
         </Animated.Text>
         <Animated.Text
-          key={`sub-${mode}`}
           entering={FadeInDown.delay(100).duration(380)}
           style={styles.loginSub}
         >
-          {isRegister
-            ? 'Расскажите о себе — и начните получать заказы рядом с вами.'
-            : 'Раздел доступен только зарегистрированным мастерам. Войдите в свой аккаунт.'}
+          Расскажите о себе — и начните получать заказы рядом с вами.
+          Отдельный аккаунт не нужен: роль добавится к текущему.
         </Animated.Text>
 
         <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.loginCard}>
-          {isRegister && (
-            <Animated.View entering={FadeInDown.duration(260)}>
-              <Text style={styles.fieldLabel}>Имя</Text>
-              <TextInput
-                style={styles.fieldInput}
-                value={name}
-                onChangeText={setName}
-                placeholder="Иван Петров"
-                placeholderTextColor={t.textMuted}
-                editable={!loading}
-              />
-            </Animated.View>
-          )}
-
-          <Text style={[styles.fieldLabel, isRegister && styles.fieldLabelGap]}>Email</Text>
+          <Text style={styles.fieldLabel}>Имя</Text>
           <TextInput
             style={styles.fieldInput}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="master@example.ru"
+            value={name}
+            onChangeText={setName}
+            placeholder="Иван Петров"
             placeholderTextColor={t.textMuted}
-            autoCapitalize="none"
-            keyboardType="email-address"
             editable={!loading}
           />
 
-          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Пароль</Text>
+          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Что умеете</Text>
           <TextInput
             style={styles.fieldInput}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="••••••"
+            value={skills}
+            onChangeText={setSkills}
+            placeholder="электрика, сантехника, мебель"
             placeholderTextColor={t.textMuted}
-            secureTextEntry
             editable={!loading}
             onSubmitEditing={submit}
             returnKeyType="go"
@@ -430,22 +436,13 @@ function MasterLogin({ onClose, onLogin }: { onClose: () => void; onLogin: (emai
             disabled={loading}
           >
             <Text style={styles.loginBtnText}>
-              {loading
-                ? (isRegister ? 'Создаём аккаунт…' : 'Входим…')
-                : (isRegister ? 'Зарегистрироваться' : 'Войти')}
+              {loading ? 'Сохраняем…' : 'Начать получать заказы'}
             </Text>
           </PressableScale>
         </Animated.View>
 
         <Animated.View entering={FadeIn.delay(240).duration(360)} style={styles.loginSwitchRow}>
-          <Text style={styles.loginHint}>
-            {isRegister ? 'Уже есть аккаунт?' : 'Ещё не работаете с нами?'}
-          </Text>
-          <PressableScale onPress={switchMode} disabled={loading}>
-            <Text style={styles.loginSwitchText}>
-              {isRegister ? 'Войти' : 'Зарегистрироваться'}
-            </Text>
-          </PressableScale>
+          <Text style={styles.loginHint}>Анкету можно будет дополнить позже</Text>
         </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>

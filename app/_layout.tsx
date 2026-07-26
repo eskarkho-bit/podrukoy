@@ -1,23 +1,38 @@
-import { Stack } from 'expo-router';
+import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 import { AppStateProvider, useAppState } from '../components/AppState';
+import { AuthProvider, useAuth } from '../components/AuthState';
 import { MasterScreen } from '../screens/MasterScreen';
 import { useTheme } from '../theme';
 
 export default function RootLayout() {
   return (
-    <AppStateProvider>
-      <RootShell />
-    </AppStateProvider>
+    <AuthProvider>
+      <AppStateProvider>
+        <RootShell />
+      </AppStateProvider>
+    </AuthProvider>
   );
 }
 
-// Оболочка живёт внутри провайдера — только так она видит тему и режим мастера
+// Оболочка живёт внутри провайдеров — только так она видит тему, сессию и режим мастера
 function RootShell() {
   const { mode, colors } = useTheme();
+  const { user, initializing } = useAuth();
   const { masterOpen, setMasterOpen } = useAppState();
+  const segments = useSegments();
+
+  // Без сессии данные всё равно не сохранить — правила Firestore требуют
+  // авторизации. Поэтому неавторизованного уводим на вход, а вошедшего — с него.
+  useEffect(() => {
+    if (initializing) return;
+    const onLogin = segments[0] === 'login';
+    if (!user && !onLogin) router.replace('/login');
+    else if (user && onLogin) router.replace('/');
+  }, [user, initializing, segments]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
@@ -33,7 +48,7 @@ function RootShell() {
       {/* Режим мастера — оверлей поверх всего приложения. Он намеренно остаётся
           смонтированным: иначе сессия мастера и его заявки сбрасывались бы при
           каждом выходе в профиль. */}
-      <MasterScreen open={masterOpen} onClose={() => setMasterOpen(false)} />
+      {user && <MasterScreen open={masterOpen} onClose={() => setMasterOpen(false)} />}
     </View>
   );
 }
