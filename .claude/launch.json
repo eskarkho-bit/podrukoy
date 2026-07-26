@@ -1,0 +1,61 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "podrukoy - start",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "podrukoy - android",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "android"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "podrukoy - ios",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "ios"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "podrukoy - web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "web"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "podrukoy2 - start",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "podrukoy2", "run", "start"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "podrukoy2 - android",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "podrukoy2", "run", "android"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "podrukoy2 - ios",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "podrukoy2", "run", "ios"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "podrukoy2 - web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "podrukoy2", "run", "web", "--", "--port", "8082"],
+      "port": 8082,
+      "autoPort": false
+    }
+  ]
+}
