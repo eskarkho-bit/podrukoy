@@ -280,11 +280,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const createOrder = async ({ title, comment, photoUri }: OrderDraft) => {
     if (!uid) return;
-    try {
-      // Фото сначала уезжает в Storage: локальный URI с телефона другому
-      // устройству ничего не скажет
-      const photoUrl = photoUri ? await uploadOrderPhoto(uid, photoUri) : null;
+    // Фото уезжает в Storage: локальный URI с телефона другому устройству
+    // ничего не скажет. Но Storage требует платного тарифа Blaze и может быть
+    // не подключён — тогда заявку всё равно создаём, оставив локальную ссылку.
+    // Она видна на своём устройстве и не мешает остальному.
+    let photoUrl: string | null = photoUri ?? null;
+    if (photoUri) {
+      try {
+        photoUrl = await uploadOrderPhoto(uid, photoUri);
+      } catch (e) {
+        console.warn('Фото не загрузилось — заявка создаётся с локальной ссылкой:', e);
+      }
+    }
 
+    try {
       const ref = await addDoc(collection(db, 'orders'), {
         clientId: uid,
         masterId: null,
