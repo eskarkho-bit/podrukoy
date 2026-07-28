@@ -1,6 +1,7 @@
+import * as Notifications from 'expo-notifications';
 import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 import { AppStateProvider, useAppState } from '../components/AppState';
@@ -33,6 +34,27 @@ function RootShell() {
     if (!user && !onLogin) router.replace('/login');
     else if (user && onLogin) router.replace('/');
   }, [user, initializing, segments]);
+
+  // Нажатие на уведомление ведёт на нужный экран. Без роутера этого нельзя
+  // было сделать в принципе — вкладка жила в useState и адреса не имела.
+  const coldStartHandled = useRef(false);
+  useEffect(() => {
+    if (!user) return;
+
+    const go = (response: Notifications.NotificationResponse | null) => {
+      const href = response?.notification.request.content.data?.href;
+      if (typeof href === 'string') router.navigate(href as never);
+    };
+
+    // приложение открыли нажатием на уведомление из закрытого состояния
+    if (!coldStartHandled.current) {
+      coldStartHandled.current = true;
+      Notifications.getLastNotificationResponseAsync().then(go).catch(() => {});
+    }
+
+    const sub = Notifications.addNotificationResponseReceivedListener(go);
+    return () => sub.remove();
+  }, [user]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>

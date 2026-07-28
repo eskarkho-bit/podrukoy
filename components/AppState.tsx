@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import {
   addDoc,
+  arrayUnion,
   collection,
   doc,
   onSnapshot,
@@ -18,6 +19,7 @@ import { Order } from '../screens/OrdersScreen';
 import { palettes, ThemeContext, ThemeMode } from '../theme';
 import { useAuth } from './AuthState';
 import { OrderDraft } from './ActionSheet';
+import { getPushToken, notifyLocal } from './notifications';
 import { uploadOrderPhoto } from './photoUpload';
 
 // Общее состояние приложения. Раньше жило в App.tsx и раздавалось пропсами —
@@ -155,6 +157,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }, (e) => console.warn('Профиль недоступен:', e));
   }, [uid, user?.displayName, user?.email]);
 
+  // ---------- push-токен ----------
+  // Складываем в профиль список токенов: у одного человека может быть
+  // несколько устройств, и серверу потом нужно знать их все
+  useEffect(() => {
+    if (!uid) return;
+    let alive = true;
+    getPushToken().then((token) => {
+      if (!alive || !token) return;
+      updateDoc(doc(db, 'users', uid), { pushTokens: arrayUnion(token) })
+        .catch((e) => console.warn('Не удалось сохранить push-токен:', e));
+    });
+    return () => { alive = false; };
+  }, [uid]);
+
   // ---------- заказы ----------
   useEffect(() => {
     if (!uid) {
@@ -255,6 +271,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       await addDoc(collection(threadRef, 'messages'), {
         from: 'master', text, time: now(), createdAt: serverTimestamp(),
       });
+      // Сообщение от мастера — ровно тот случай, ради которого нужны уведомления
+      notifyLocal(name, text, { href: '/messages' });
     } catch (e) {
       console.warn('Не удалось доставить сообщение:', e);
     }
@@ -286,6 +304,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       // навсегда осталась бы в статусе «Поиск мастера»
       later(6000, () => {
         updateDoc(doc(db, 'orders', orderId), { status: 'В работе' }).catch(() => {});
+        notifyLocal('Мастер найден', `Заявку «${title}» взяли в работу`, { href: '/' });
         incomingMessage(
           MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
           'Я взял вашу заявку в работу. Напишите сюда, если есть детали — или пришлите фото.',
@@ -294,6 +313,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
       later(24000, () => {
         updateDoc(doc(db, 'orders', orderId), { status: 'Ждёт подтверждения' }).catch(() => {});
+        notifyLocal('Работа выполнена', `Подтвердите завершение заявки «${title}»`, { href: '/' });
         incomingMessage(
           MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
           `Работа по заявке «${title}» выполнена. Проверьте результат и подтвердите завершение в карточке заказа.`,
