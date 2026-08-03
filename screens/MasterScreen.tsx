@@ -238,22 +238,29 @@ export function MasterScreen({ open, onClose }: Props) {
   // Предложение цены уходит в саму заявку. Ответа здесь не подделываем:
   // статус изменится, только когда клиент реально нажмёт «Принять».
   // Повторное предложение перетирает прежнее и снова требует согласия.
-  const offerPrice = (jobId: string, price: number) => {
+  const offerPrice = async (jobId: string, price: number) => {
     if (!myUid) return;
     const previous = jobs.find((j) => j.id === jobId)?.price;
 
-    updateDoc(doc(db, 'orders', jobId), {
-      masterId: myUid,
-      masterName: master?.name ?? 'Мастер',
-      price,
-      priceStatus: 'offered',
-      priceHistory: arrayUnion({
-        amount: price,
-        by: 'master',
-        action: previous == null ? 'offered' : 'changed',
-        at: new Date().toISOString(),
-      }),
-    }).catch((e) => console.warn('Не удалось предложить цену:', e));
+    // Сначала дожидаемся записи masterId: до неё мастер не участник заявки,
+    // и правила отклонят его сообщение в переписку
+    try {
+      await updateDoc(doc(db, 'orders', jobId), {
+        masterId: myUid,
+        masterName: master?.name ?? 'Мастер',
+        price,
+        priceStatus: 'offered',
+        priceHistory: arrayUnion({
+          amount: price,
+          by: 'master',
+          action: previous == null ? 'offered' : 'changed',
+          at: new Date().toISOString(),
+        }),
+      });
+    } catch (e) {
+      console.warn('Не удалось предложить цену:', e);
+      return;
+    }
 
     pushMessage(jobId, previous == null
       ? `Готов взяться. Моя цена — ${rub(price)}.`
