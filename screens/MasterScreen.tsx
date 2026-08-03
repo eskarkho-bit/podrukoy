@@ -24,11 +24,13 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import {
+  addDoc,
   arrayUnion,
   collection,
   doc,
   getDoc,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -78,14 +80,6 @@ const statusColorFor = (status: JobStatus, t: Palette): string => ({
   done: t.textMuted,
 }[status]);
 
-// Ответы клиента в чате — по очереди, чтобы переписка не молчала
-const CLIENT_REPLIES = [
-  'Хорошо, жду вас!',
-  'Подскажите, во сколько сможете подъехать?',
-  'Да, всё верно. Код домофона — 24В.',
-  'Спасибо! До встречи.',
-];
-
 function now() {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -114,12 +108,6 @@ export function MasterScreen({ open, onClose }: Props) {
   // В какой заявке клиент сейчас «печатает»
   const [typingJobId, setTypingJobId] = useState<string | null>(null);
 
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const replyIdx = useRef(0);
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
-  const later = (ms: number, fn: () => void) => {
-    timers.current.push(setTimeout(fn, ms));
-  };
 
   const openJob = jobs.find((j) => j.id === openJobId) ?? null;
 
@@ -217,13 +205,35 @@ export function MasterScreen({ open, onClose }: Props) {
     setJobs((prev) => prev.map((j) => (j.id === jobId ? patch(j) : j)));
   };
 
-  const clientMessage = (jobId: string, text: string) => {
-    patchJob(jobId, (j) => ({
-      ...j,
-      unread: true,
-      messages: [...j.messages, { id: uid(), from: 'client', text, time: now() }],
-    }));
+  // Сообщение уходит в общую переписку заявки — ту же, что видит клиент
+  const pushMessage = (jobId: string, text: string) => {
+    if (!myUid) return;
+    addDoc(collection(db, 'orders', jobId, 'messages'), {
+      senderId: myUid, text, time: now(), createdAt: serverTimestamp(),
+    }).catch((e) => console.warn('Сообщение не отправлено:', e));
   };
+
+  // Переписка открытой заявки. Подписываемся только на неё: держать живыми
+  // подписки на все заявки сразу незачем.
+  useEffect(() => {
+    if (!openJobId || !myUid) return;
+    return onSnapshot(
+      query(collection(db, 'orders', openJobId, 'messages'), orderBy('createdAt', 'asc')),
+      (snap) => {
+        const messages: JobMessage[] = snap.docs.map((m) => {
+          const v = m.data();
+          return {
+            id: m.id,
+            from: v.senderId === myUid ? 'me' : 'client',
+            text: v.text,
+            time: v.time,
+          };
+        });
+        patchJob(openJobId, (j) => ({ ...j, messages }));
+      },
+      (e) => console.warn('Переписка недоступна:', e),
+    );
+  }, [openJobId, myUid]);
 
   // Предложение цены уходит в саму заявку. Ответа здесь не подделываем:
   // статус изменится, только когда клиент реально нажмёт «Принять».
@@ -245,20 +255,9 @@ export function MasterScreen({ open, onClose }: Props) {
       }),
     }).catch((e) => console.warn('Не удалось предложить цену:', e));
 
-    patchJob(jobId, (j) => ({
-      ...j,
-      messages: [
-        ...j.messages,
-        {
-          id: uid(),
-          from: 'me',
-          text: previous == null
-            ? `Готов взяться. Моя цена — ${rub(price)}.`
-            : `Пересмотрел цену: теперь ${rub(price)}.`,
-          time: now(),
-        },
-      ],
-    }));
+    pushMessage(jobId, previous == null
+      ? `Готов взяться. Моя цена — ${rub(price)}.`
+      : `Пересмотрел цену: теперь ${rub(price)}.`);
   };
 
   // Мастер отмечает работу выполненной — подтверждать её будет клиент
@@ -266,28 +265,12 @@ export function MasterScreen({ open, onClose }: Props) {
     updateDoc(doc(db, 'orders', jobId), { status: 'Ждёт подтверждения' })
       .catch((e) => console.warn('Не удалось завершить заявку:', e));
 
-    patchJob(jobId, (j) => ({
-      ...j,
-      messages: [
-        ...j.messages,
-        { id: uid(), from: 'me', text: 'Работа выполнена. Спасибо, что выбрали меня!', time: now() },
-      ],
-    }));
+    pushMessage(jobId, 'Работа выполнена. Спасибо, что выбрали меня!');
   };
 
+  // Ответ клиента здесь больше не подделывается: на том конце живой человек
   const sendMessage = (jobId: string, text: string) => {
-    patchJob(jobId, (j) => ({
-      ...j,
-      messages: [...j.messages, { id: uid(), from: 'me', text, time: now() }],
-    }));
-    // Клиент «читает», печатает и отвечает
-    later(700, () => setTypingJobId(jobId));
-    later(2300, () => {
-      setTypingJobId((cur) => (cur === jobId ? null : cur));
-      const reply = CLIENT_REPLIES[replyIdx.current % CLIENT_REPLIES.length];
-      replyIdx.current += 1;
-      clientMessage(jobId, reply);
-    });
+    pushMessage(jobId, text);
   };
 
   const handleOpenJob = (jobId: string) => {

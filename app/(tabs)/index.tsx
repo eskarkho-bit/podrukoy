@@ -1,4 +1,4 @@
-import { useAppState, MASTER_THREAD_ID } from '../../components/AppState';
+import { useAppState } from '../../components/AppState';
 import { OrdersScreen } from '../../screens/OrdersScreen';
 
 export default function OrdersRoute() {
@@ -16,7 +16,7 @@ export default function OrdersRoute() {
       onConfirmOrder={s.confirmOrderDone}
       onAcceptPrice={s.acceptPrice}
       onDeclinePrice={s.declinePrice}
-      onOpenMasterChat={() => s.openChat(MASTER_THREAD_ID)}
+      onOpenOrderChat={s.openChat}
       onOverlayOpenChange={s.setOverlayOpen}
     />
   );

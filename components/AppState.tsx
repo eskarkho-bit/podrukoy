@@ -28,16 +28,10 @@ import { uploadOrderPhoto } from './photoUpload';
 // по-прежнему получают готовые массивы и колбэки.
 
 const DEFAULT_ADDRESS = 'ул. Ленина, 24';
-export const MASTER_THREAD_ID = 'master';
 export const SUPPORT_THREAD_ID = 'support';
 
-// Ответы «живого» собеседника — подбираются по очереди, чтобы чат не молчал
-const MASTER_REPLIES = [
-  'Понял вас! Уточню детали и вернусь с ответом.',
-  'Принято. Могу подъехать завтра после 14:00 — удобно?',
-  'Хорошо, зафиксировал. Если появятся фото — присылайте прямо сюда.',
-  'Спасибо, всё ясно. Возьму с собой нужный инструмент.',
-];
+// Поддержка отвечает заготовками — живой службы поддержки пока нет.
+// С мастером переписка настоящая, там ничего не подставляется.
 const SUPPORT_REPLIES = [
   'Спасибо за обращение! Разберёмся и ответим в течение часа.',
   'Передали вопрос специалисту — он свяжется с вами здесь.',
@@ -102,7 +96,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const uid = user?.uid ?? null;
 
   const [orders, setOrders] = useState<Order[]>([]);
-  const [threads, setThreads] = useState<Thread[]>([]);
+  // Переписка складывается из двух источников: чаты по заявкам (общие с
+  // мастером, лежат в самой заявке) и обращение в поддержку (личное)
+  const [orderThreads, setOrderThreads] = useState<Thread[]>([]);
+  const [supportThreads, setSupportThreads] = useState<Thread[]>([]);
+  // Прочитанность считаем на устройстве: писать её в базу на каждое открытие
+  // чата — лишние запросы ради бейджа
+  const [readThreads, setReadThreads] = useState<Set<string>>(new Set());
   const [userName, setUserNameLocal] = useState('');
   const [addresses, setAddresses] = useState<string[]>([DEFAULT_ADDRESS]);
   const [activeAddress, setActiveAddressLocal] = useState(DEFAULT_ADDRESS);
@@ -236,40 +236,79 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       // приложения сыпались бы уведомления о старых событиях
       if (!primed.current) return;
 
+      // Только уведомление: писать сообщение «от мастера» нельзя — чат теперь
+      // общий, и такое сообщение ушло бы от имени клиента. Само предложение
+      // видно в карточке заказа.
       if (offered && prevOffer !== o.price) {
-        const who = o.masterName ? `Мастер ${o.masterName}` : 'Мастер';
-        const isChange = prevOffer != null;
         notifyLocal(
-          isChange ? 'Мастер изменил цену' : 'Мастер предложил цену',
+          prevOffer != null ? 'Мастер изменил цену' : 'Мастер предложил цену',
           `${o.title} — ${rub(o.price as number)}`,
           { href: '/' },
-        );
-        incomingMessage(
-          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-          isChange
-            ? `${who} изменил цену по заявке «${o.title}» — теперь ${rub(o.price as number)}. Примите или отклоните в карточке заказа.`
-            : `${who} готов взяться за «${o.title}» за ${rub(o.price as number)}. Примите или отклоните в карточке заказа.`,
         );
       }
 
       if (prevStatus && prevStatus !== o.status && o.status === 'Ждёт подтверждения') {
         notifyLocal('Работа выполнена', `Подтвердите завершение заявки «${o.title}»`, { href: '/' });
-        incomingMessage(
-          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-          `Работа по заявке «${o.title}» выполнена. Проверьте результат и подтвердите завершение в карточке заказа.`,
-        );
       }
     });
 
     primed.current = true;
   }, [orders, uid]);
 
-  // ---------- переписка ----------
-  // Треды лежат в поддереве пользователя, поэтому доступны только ему.
-  // На каждый тред — своя подписка на сообщения; их всего два (мастер, поддержка).
+  // ---------- переписка по заявкам ----------
+  // Общий чат клиента и мастера лежит внутри самой заявки: права доступа
+  // выводятся из неё, и обе стороны видят одни и те же сообщения.
+  const orderIdsKey = orders.map((o) => o.id).join(',');
+
   useEffect(() => {
     if (!uid) {
-      setThreads([]);
+      setOrderThreads([]);
+      return;
+    }
+    const ids = orderIdsKey ? orderIdsKey.split(',') : [];
+    if (!ids.length) {
+      setOrderThreads([]);
+      return;
+    }
+
+    const unsubs = ids.map((orderId) => onSnapshot(
+      query(collection(db, 'orders', orderId, 'messages'), orderBy('createdAt', 'asc')),
+      (snap) => {
+        const messages: ChatMessage[] = snap.docs.map((m) => {
+          const v = m.data();
+          return {
+            id: m.id,
+            // «свой» — тот, кто отправил; для клиента это он сам
+            from: v.senderId === uid ? 'user' : 'master',
+            text: v.text,
+            time: v.time,
+          };
+        });
+        const order = orders.find((o) => o.id === orderId);
+        setOrderThreads((prev) => {
+          const next: Thread = {
+            id: orderId,
+            name: order?.masterName ? `Мастер ${order.masterName}` : 'Мастер',
+            icon: '🧑‍🔧',
+            unread: false,
+            messages,
+          };
+          const rest = prev.filter((t) => t.id !== orderId);
+          // чаты без сообщений не показываем — пустой список выглядел бы мусором
+          return messages.length ? [next, ...rest] : rest;
+        });
+      },
+      (e) => console.warn('Переписка по заявке недоступна:', e),
+    ));
+
+    return () => unsubs.forEach((u) => u());
+  }, [uid, orderIdsKey]);
+
+  // ---------- обращение в поддержку ----------
+  // Оно личное, поэтому остаётся в поддереве пользователя
+  useEffect(() => {
+    if (!uid) {
+      setSupportThreads([]);
       return;
     }
     const msgUnsubs = new Map<string, () => void>();
@@ -279,7 +318,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       (snap) => {
         const ids = new Set(snap.docs.map((d) => d.id));
 
-        setThreads((prev) => snap.docs.map((d) => {
+        setSupportThreads((prev) => snap.docs.map((d) => {
           const v = d.data();
           const old = prev.find((t) => t.id === d.id);
           return {
@@ -301,7 +340,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
                 const v = m.data();
                 return { id: m.id, from: v.from, text: v.text, time: v.time };
               });
-              setThreads((prev) => prev.map((t) => (t.id === d.id ? { ...t, messages } : t)));
+              setSupportThreads((prev) => prev.map((t) => (t.id === d.id ? { ...t, messages } : t)));
             },
             (e) => console.warn('Сообщения недоступны:', e),
           );
@@ -382,7 +421,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       void ref;
       // Дальше заявку двигает живой мастер: он видит её в своём разделе,
       // предлагает цену и меняет статус. Имитации здесь больше нет.
-      incomingMessage(MASTER_THREAD_ID, 'Мастер', '🧑‍🔧', `Заявка «${title}» принята. Подбираем мастера…`);
     } catch (e) {
       console.warn('Не удалось создать заявку:', e);
     }
@@ -408,11 +446,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         at: new Date().toISOString(),
       }),
     }).catch((e) => console.warn('Не удалось принять цену:', e));
-
-    incomingMessage(
-      MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-      `Спасибо, цена ${rub(order.price)} согласована. Приступаю к работе.`,
-    );
   };
 
   // Отклонение не закрывает заявку: мастер может предложить другую цену
@@ -435,20 +468,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     const order = orders.find((o) => o.id === orderId);
     if (!order || order.status !== 'Ждёт подтверждения') return;
     updateDoc(doc(db, 'orders', orderId), { status: 'Завершена' }).catch(() => {});
-    incomingMessage(
-      MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-      `Спасибо, что подтвердили заявку «${order.title}»! Обращайтесь, если понадобится помощь.`,
-    );
   };
 
   const cancelOrder = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return;
     updateDoc(doc(db, 'orders', orderId), { status: 'Отменена' }).catch(() => {});
-    incomingMessage(
-      MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-      `Заявка «${order.title}» отменена. Если передумаете — создайте новую в любой момент.`,
-    );
   };
 
   // Новый адрес: добавляем в список (без дублей) и сразу делаем активным
@@ -482,12 +507,29 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const markThreadRead = (threadId: string) => {
     if (!uid) return;
-    setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, unread: false } : t)));
-    updateDoc(doc(db, 'users', uid, 'threads', threadId), { unread: false }).catch(() => {});
+    setReadThreads((prev) => new Set(prev).add(threadId));
+    if (threadId === SUPPORT_THREAD_ID) {
+      updateDoc(doc(db, 'users', uid, 'threads', threadId), { unread: false }).catch(() => {});
+    }
   };
 
   const sendMessage = async (threadId: string, text: string) => {
     if (!uid) return;
+
+    // Поддержка — личный тред с заготовленными ответами. Заявка — общий чат
+    // с мастером внутри самой заявки: там отвечает живой человек, и подделывать
+    // ответ за него нельзя.
+    if (threadId !== SUPPORT_THREAD_ID) {
+      try {
+        await addDoc(collection(db, 'orders', threadId, 'messages'), {
+          senderId: uid, text, time: now(), createdAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.warn('Сообщение не отправлено:', e);
+      }
+      return;
+    }
+
     const threadRef = doc(db, 'users', uid, 'threads', threadId);
     try {
       await setDoc(threadRef, { updatedAt: serverTimestamp() }, { merge: true });
@@ -499,35 +541,27 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Собеседник «читает», печатает и отвечает — с живыми паузами
     later(700, () => setTypingThreadId(threadId));
     later(2300, () => {
       setTypingThreadId((cur) => (cur === threadId ? null : cur));
-      const pool = threadId === SUPPORT_THREAD_ID ? SUPPORT_REPLIES : MASTER_REPLIES;
-      const reply = pool[replyIdx.current % pool.length];
+      const reply = SUPPORT_REPLIES[replyIdx.current % SUPPORT_REPLIES.length];
       replyIdx.current += 1;
-      if (threadId === SUPPORT_THREAD_ID) {
-        incomingMessage(SUPPORT_THREAD_ID, 'Поддержка', '🛟', reply);
-      } else {
-        incomingMessage(threadId, 'Мастер', '🧑‍🔧', reply);
-      }
+      incomingMessage(SUPPORT_THREAD_ID, 'Поддержка', '🛟', reply);
     });
   };
 
-  // Открыть чат из другого экрана: создаём тред с приветствием, если его ещё нет,
-  // и переводим пользователя на вкладку «Сообщения»
+  // Открыть чат из другого экрана и перевести на вкладку «Сообщения».
+  // Для поддержки создаём тред с приветствием, для заявки он появится сам,
+  // как только кто-то напишет первое сообщение.
   const openChat = async (threadId: string) => {
-    if (uid && !threads.find((t) => t.id === threadId)) {
-      const greeting = threadId === SUPPORT_THREAD_ID
-        ? { name: 'Поддержка', icon: '🛟', text: 'Здравствуйте! Чем можем помочь?' }
-        : { name: 'Мастер', icon: '🧑‍🔧', text: 'На связи! Опишите, что случилось.' };
+    if (uid && threadId === SUPPORT_THREAD_ID && !supportThreads.find((t) => t.id === threadId)) {
       const threadRef = doc(db, 'users', uid, 'threads', threadId);
       try {
         await setDoc(threadRef, {
-          name: greeting.name, icon: greeting.icon, unread: false, updatedAt: serverTimestamp(),
+          name: 'Поддержка', icon: '🛟', unread: false, updatedAt: serverTimestamp(),
         }, { merge: true });
         await addDoc(collection(threadRef, 'messages'), {
-          from: 'master', text: greeting.text, time: now(), createdAt: serverTimestamp(),
+          from: 'master', text: 'Здравствуйте! Чем можем помочь?', time: now(), createdAt: serverTimestamp(),
         });
       } catch (e) {
         console.warn('Не удалось открыть переписку:', e);
@@ -536,6 +570,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setOpenThreadRequest(threadId);
     router.navigate('/messages');
   };
+
+  // Непрочитанным считаем чат, где последнее сообщение не наше и который
+  // не открывали в этой сессии
+  const threads: Thread[] = [...orderThreads, ...supportThreads].map((t) => {
+    const last = t.messages[t.messages.length - 1];
+    const unread = t.id === SUPPORT_THREAD_ID
+      ? t.unread && !readThreads.has(t.id)
+      : !!last && last.from === 'master' && !readThreads.has(t.id);
+    return unread === t.unread ? t : { ...t, unread };
+  });
 
   const hasUnreadMessages = threads.some((t) => t.unread);
   const ordersActive = orders.filter(

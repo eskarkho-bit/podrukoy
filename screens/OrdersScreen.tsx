@@ -57,7 +57,8 @@ type Props = {
   onConfirmOrder: (orderId: string) => void;
   onAcceptPrice: (orderId: string) => void;
   onDeclinePrice: (orderId: string) => void;
-  onOpenMasterChat: () => void;
+  // Чат теперь принадлежит заявке, поэтому нужен её идентификатор
+  onOpenOrderChat: (orderId: string) => void;
   // Сообщаем наверх, что открыта какая-то шторка — чтобы спрятать нижнюю панель
   onOverlayOpenChange?: (open: boolean) => void;
 };
@@ -65,7 +66,7 @@ type Props = {
 export function OrdersScreen({
   orders, addresses, activeAddress, onSelectAddress, onAddAddress,
   onCreateOrder, onCancelOrder, onConfirmOrder, onAcceptPrice, onDeclinePrice,
-  onOpenMasterChat, onOverlayOpenChange,
+  onOpenOrderChat, onOverlayOpenChange,
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -290,7 +291,7 @@ export function OrdersScreen({
           onDeclinePrice={() => onDeclinePrice(openedOrder.id)}
           onChat={() => {
             setOpenedOrderId(null);
-            onOpenMasterChat();
+            onOpenOrderChat(openedOrder.id);
           }}
         />
       )}
