@@ -42,6 +42,7 @@ import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
 import { useAuth } from '../components/AuthState';
+import { useAppState } from '../components/AppState';
 import { db } from '../firebaseConfig';
 
 // Режим мастера — отдельный «мир» поверх клиентского приложения.
@@ -100,6 +101,7 @@ export function MasterScreen({ open, onClose }: Props) {
   const { mode } = useTheme();
   const styles = themed[mode];
   const { user } = useAuth();
+  const { showNotice } = useAppState();
   const myUid = user?.uid ?? null;
   // Анкета мастера: есть — раздел открыт, нет — предлагаем её заполнить
   const [master, setMaster] = useState<{ name: string } | null>(null);
@@ -210,7 +212,10 @@ export function MasterScreen({ open, onClose }: Props) {
     if (!myUid) return;
     addDoc(collection(db, 'orders', jobId, 'messages'), {
       senderId: myUid, text, time: now(), createdAt: serverTimestamp(),
-    }).catch((e) => console.warn('Сообщение не отправлено:', e));
+    }).catch((e) => {
+      console.warn('Сообщение не отправлено:', e);
+      showNotice('Сообщение не отправлено. Проверьте связь');
+    });
   };
 
   // Переписка открытой заявки. Подписываемся только на неё: держать живыми
@@ -259,6 +264,7 @@ export function MasterScreen({ open, onClose }: Props) {
       });
     } catch (e) {
       console.warn('Не удалось предложить цену:', e);
+      showNotice('Не удалось отправить цену. Проверьте связь');
       return;
     }
 
@@ -270,7 +276,10 @@ export function MasterScreen({ open, onClose }: Props) {
   // Мастер отмечает работу выполненной — подтверждать её будет клиент
   const finishJob = (jobId: string) => {
     updateDoc(doc(db, 'orders', jobId), { status: 'Ждёт подтверждения' })
-      .catch((e) => console.warn('Не удалось завершить заявку:', e));
+      .catch((e) => {
+        console.warn('Не удалось завершить заявку:', e);
+        showNotice('Не удалось отметить работу выполненной. Проверьте связь');
+      });
 
     pushMessage(jobId, 'Работа выполнена. Спасибо, что выбрали меня!');
   };

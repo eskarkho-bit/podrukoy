@@ -19,7 +19,7 @@ import { Palette, palettes, useTheme } from '../theme';
 export function AuthScreen() {
   const { mode: themeMode, colors: t } = useTheme();
   const styles = themed[themeMode];
-  const { signIn, register } = useAuth();
+  const { signIn, register, resetPassword } = useAuth();
 
   // Один экран — два режима: вход и регистрация
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -27,6 +27,7 @@ export function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const isRegister = mode === 'register';
@@ -34,6 +35,27 @@ export function AuthScreen() {
   const switchMode = () => {
     setMode(isRegister ? 'login' : 'register');
     setError(null);
+    setNotice(null);
+  };
+
+  // Восстановление пароля. Ответ одинаков независимо от того, есть такой
+  // аккаунт или нет — иначе форма стала бы способом проверять чужие email.
+  const forgotPassword = async () => {
+    const e = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(e)) {
+      setError('Введите email — на него придёт ссылка для смены пароля');
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      await resetPassword(e);
+    } catch (err) {
+      // Сообщать об ошибке здесь нельзя по той же причине
+      console.warn('Сброс пароля:', err);
+    }
+    setNotice(`Если аккаунт с ${e} существует, письмо со ссылкой уже отправлено`);
+    setLoading(false);
   };
 
   const submit = async () => {
@@ -137,6 +159,12 @@ export function AuthScreen() {
             </Animated.Text>
           )}
 
+          {notice && (
+            <Animated.Text entering={FadeInDown.duration(240)} style={styles.fieldNotice}>
+              {notice}
+            </Animated.Text>
+          )}
+
           <PressableScale
             style={[styles.btn, loading && styles.btnDim]}
             onPress={submit}
@@ -148,6 +176,13 @@ export function AuthScreen() {
                 : (isRegister ? 'Зарегистрироваться' : 'Войти')}
             </Text>
           </PressableScale>
+
+          {/* Без восстановления пароля забывший его теряет доступ навсегда */}
+          {!isRegister && (
+            <PressableScale onPress={forgotPassword} disabled={loading}>
+              <Text style={styles.forgot}>Забыли пароль?</Text>
+            </PressableScale>
+          )}
         </Animated.View>
 
         <Animated.View entering={FadeIn.delay(240).duration(360)} style={styles.switchRow}>
@@ -211,6 +246,14 @@ const makeStyles = (t: Palette) => StyleSheet.create({
     color: t.text,
   },
   fieldError: { color: t.danger, fontWeight: '700', fontSize: 11.5, marginTop: 10 },
+  fieldNotice: { color: t.accent, fontWeight: '700', fontSize: 11.5, marginTop: 10, lineHeight: 16 },
+  forgot: {
+    color: t.textMuted,
+    fontWeight: '700',
+    fontSize: 11.5,
+    textAlign: 'center',
+    marginTop: 14,
+  },
   btn: {
     backgroundColor: t.accent,
     borderRadius: 16,

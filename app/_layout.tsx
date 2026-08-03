@@ -6,6 +6,7 @@ import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 import { AppStateProvider, useAppState } from '../components/AppState';
 import { AuthProvider, useAuth } from '../components/AuthState';
+import { NoticeBanner } from '../components/NoticeBanner';
 import { MasterScreen } from '../screens/MasterScreen';
 import { useTheme } from '../theme';
 
@@ -23,7 +24,7 @@ export default function RootLayout() {
 function RootShell() {
   const { mode, colors } = useTheme();
   const { user, initializing } = useAuth();
-  const { masterOpen, setMasterOpen } = useAppState();
+  const { masterOpen, setMasterOpen, notice, dismissNotice } = useAppState();
   const segments = useSegments();
 
   // Без сессии данные всё равно не сохранить — правила Firestore требуют
@@ -71,6 +72,9 @@ function RootShell() {
           смонтированным: иначе сессия мастера и его заявки сбрасывались бы при
           каждом выходе в профиль. */}
       {user && <MasterScreen open={masterOpen} onClose={() => setMasterOpen(false)} />}
+
+      {/* Поверх всего, включая режим мастера: сбой важнее того, что открыто */}
+      {notice && <NoticeBanner text={notice} onDismiss={dismissNotice} />}
     </View>
   );
 }

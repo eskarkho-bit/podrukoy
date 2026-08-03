@@ -66,6 +66,11 @@ type AppState = {
   masterOpen: boolean;
   hasUnreadMessages: boolean;
   ordersActive: number;
+  // Сообщение о сбое, которое обязан увидеть человек: молча потерянная
+  // заявка выглядит как успешно созданная
+  notice: string | null;
+  showNotice: (text: string) => void;
+  dismissNotice: () => void;
   setUserName: (name: string) => void;
   setActiveAddress: (addr: string) => void;
   setChatOpen: (open: boolean) => void;
@@ -118,6 +123,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [masterOpen, setMasterOpen] = useState(false);
   // В каком чате сейчас «печатает» собеседник
   const [typingThreadId, setTypingThreadId] = useState<string | null>(null);
+  // Видимое сообщение о сбое
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Ошибку записи нельзя проглатывать: человек должен понять, что действие
+  // не прошло, и повторить его
+  const failed = (text: string) => (e: unknown) => {
+    console.warn(text, e);
+    setNotice(text);
+  };
 
   // Все отложенные события (ответы мастера, смена статуса) — в одном месте,
   // чтобы аккуратно погасить их при размонтировании
@@ -422,7 +436,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       // Дальше заявку двигает живой мастер: он видит её в своём разделе,
       // предлагает цену и меняет статус. Имитации здесь больше нет.
     } catch (e) {
-      console.warn('Не удалось создать заявку:', e);
+      failed('Не удалось создать заявку. Проверьте связь и попробуйте ещё раз')(e);
     }
   };
 
@@ -445,7 +459,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         action: 'accepted',
         at: new Date().toISOString(),
       }),
-    }).catch((e) => console.warn('Не удалось принять цену:', e));
+    }).catch(failed('Не удалось принять цену. Проверьте связь'));
   };
 
   // Отклонение не закрывает заявку: мастер может предложить другую цену
@@ -460,20 +474,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         action: 'declined',
         at: new Date().toISOString(),
       }),
-    }).catch((e) => console.warn('Не удалось отклонить цену:', e));
+    }).catch(failed('Не удалось отклонить цену. Проверьте связь'));
   };
 
   // Пользователь подтверждает, что работа выполнена — заказ закрывается
   const confirmOrderDone = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order || order.status !== 'Ждёт подтверждения') return;
-    updateDoc(doc(db, 'orders', orderId), { status: 'Завершена' }).catch(() => {});
+    updateDoc(doc(db, 'orders', orderId), { status: 'Завершена' })
+      .catch(failed('Не удалось подтвердить выполнение. Проверьте связь'));
   };
 
   const cancelOrder = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return;
-    updateDoc(doc(db, 'orders', orderId), { status: 'Отменена' }).catch(() => {});
+    updateDoc(doc(db, 'orders', orderId), { status: 'Отменена' })
+      .catch(failed('Не удалось отменить заявку. Проверьте связь'));
   };
 
   // Новый адрес: добавляем в список (без дублей) и сразу делаем активным
@@ -525,7 +541,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           senderId: uid, text, time: now(), createdAt: serverTimestamp(),
         });
       } catch (e) {
-        console.warn('Сообщение не отправлено:', e);
+        failed('Сообщение не отправлено. Проверьте связь')(e);
       }
       return;
     }
@@ -537,7 +553,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         from: 'user', text, time: now(), createdAt: serverTimestamp(),
       });
     } catch (e) {
-      console.warn('Сообщение не отправлено:', e);
+      failed('Сообщение не отправлено. Проверьте связь')(e);
       return;
     }
 
@@ -600,6 +616,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     masterOpen,
     hasUnreadMessages,
     ordersActive,
+    notice,
+    showNotice: setNotice,
+    dismissNotice: () => setNotice(null),
     setUserName,
     setActiveAddress,
     setChatOpen,

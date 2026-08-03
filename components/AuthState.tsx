@@ -1,6 +1,7 @@
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
@@ -19,6 +20,7 @@ type AuthState = {
   initializing: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -80,12 +82,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser({ ...cred.user, displayName: name.trim() } as User);
   };
 
+  // Письмо со ссылкой на смену пароля. Firebase не сообщает, есть ли такой
+  // аккаунт, и мы тоже не сообщаем: иначе форма превратится в способ
+  // проверять, зарегистрирован ли человек в сервисе.
+  const resetPassword = async (email: string) => {
+    await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
 
   return (
-    <AuthContext.Provider value={{ user, initializing, signIn, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, initializing, signIn, register, resetPassword, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );
