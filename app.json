@@ -36,6 +36,19 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "28c1b795-47e5-4188-ad30-fd8a9b94a9fa"
+      }
+    },
+    "owner": "kaimetsy",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/28c1b795-47e5-4188-ad30-fd8a9b94a9fa"
     }
   }
 }
