@@ -18,6 +18,11 @@ import { PressableScale } from '../components/PressableScale';
 
 const AREAS: AreaId[] = ['Дом', 'Двор', 'Гараж'];
 
+// Согласование цены: мастер предлагает, клиент принимает или отклоняет.
+// Каждое новое предложение сбрасывает согласие — цена без явного «принять»
+// не считается согласованной.
+export type PriceStatus = 'none' | 'offered' | 'accepted' | 'declined';
+
 export type Order = {
   id: string;
   title: string;
@@ -26,6 +31,13 @@ export type Order = {
   comment?: string;
   photoUri?: string | null;
   address?: string;
+  // Кто взялся за заявку
+  masterName?: string | null;
+  // Текущее предложение мастера и судьба этого предложения
+  price?: number | null;
+  priceStatus?: PriceStatus;
+  // Цена, на которую клиент согласился явно
+  agreedPrice?: number | null;
 };
 
 function today() {
@@ -43,6 +55,8 @@ type Props = {
   onCreateOrder: (draft: OrderDraft) => void;
   onCancelOrder: (orderId: string) => void;
   onConfirmOrder: (orderId: string) => void;
+  onAcceptPrice: (orderId: string) => void;
+  onDeclinePrice: (orderId: string) => void;
   onOpenMasterChat: () => void;
   // Сообщаем наверх, что открыта какая-то шторка — чтобы спрятать нижнюю панель
   onOverlayOpenChange?: (open: boolean) => void;
@@ -50,7 +64,8 @@ type Props = {
 
 export function OrdersScreen({
   orders, addresses, activeAddress, onSelectAddress, onAddAddress,
-  onCreateOrder, onCancelOrder, onConfirmOrder, onOpenMasterChat, onOverlayOpenChange,
+  onCreateOrder, onCancelOrder, onConfirmOrder, onAcceptPrice, onDeclinePrice,
+  onOpenMasterChat, onOverlayOpenChange,
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -271,6 +286,8 @@ export function OrdersScreen({
             setOpenedOrderId(null);
           }}
           onConfirmDone={() => onConfirmOrder(openedOrder.id)}
+          onAcceptPrice={() => onAcceptPrice(openedOrder.id)}
+          onDeclinePrice={() => onDeclinePrice(openedOrder.id)}
           onChat={() => {
             setOpenedOrderId(null);
             onOpenMasterChat();

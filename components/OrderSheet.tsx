@@ -20,7 +20,13 @@ type Props = {
   // Пользователь подтверждает, что мастер закончил работу
   onConfirmDone: () => void;
   onChat: () => void;
+  // Согласование цены: принять или отклонить предложение мастера.
+  // «Обговорить» отдельного обработчика не требует — это переход в чат.
+  onAcceptPrice: () => void;
+  onDeclinePrice: () => void;
 };
+
+const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
 
 export function statusColor(status: string, t: Palette) {
   if (status === 'В работе') return t.blue;
@@ -31,12 +37,20 @@ export function statusColor(status: string, t: Palette) {
 
 // Детали заказа: фото крупно, комментарий, статус и действия.
 // Отмена — в два касания, чтобы не отменить случайно.
-export function OrderSheet({ order, onClose, onCancel, onConfirmDone, onChat }: Props) {
+export function OrderSheet({
+  order, onClose, onCancel, onConfirmDone, onChat, onAcceptPrice, onDeclinePrice,
+}: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [confirming, setConfirming] = useState(false);
   const cancellable = order.status === 'Поиск мастера' || order.status === 'В работе';
   const awaitingConfirm = order.status === 'Ждёт подтверждения';
+
+  // Предложение ждёт ответа, только пока оно именно предложение:
+  // принятая или отклонённая цена показывается, но не переспрашивается
+  const pendingOffer = order.priceStatus === 'offered' && order.price != null;
+  const agreed = order.priceStatus === 'accepted' && order.agreedPrice != null;
+  const declined = order.priceStatus === 'declined' && order.price != null;
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.wrap]}>
@@ -90,6 +104,46 @@ export function OrderSheet({ order, onClose, onCancel, onConfirmDone, onChat }: 
             <Text style={styles.commentText}>{order.comment}</Text>
           </Animated.View>
         ) : null}
+
+        {/* Мастер предложил цену — три исхода: принять, отклонить, обсудить */}
+        {pendingOffer && (
+          <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.offerCard}>
+            <Text style={styles.offerLabel}>
+              {order.masterName ? `Мастер ${order.masterName} предлагает` : 'Мастер предлагает'}
+            </Text>
+            <Text style={styles.offerPrice}>{rub(order.price as number)}</Text>
+
+            <View style={styles.offerRow}>
+              <PressableScale style={[styles.offerBtn, styles.offerAccept]} onPress={onAcceptPrice}>
+                <Text style={styles.offerAcceptText}>✓  Принять</Text>
+              </PressableScale>
+              <PressableScale style={[styles.offerBtn, styles.offerDecline]} onPress={onDeclinePrice}>
+                <Text style={styles.offerDeclineText}>✕  Отклонить</Text>
+              </PressableScale>
+            </View>
+
+            <PressableScale style={styles.offerDiscuss} onPress={onChat}>
+              <Text style={styles.offerDiscussText}>💬  Обговорить цену</Text>
+            </PressableScale>
+          </Animated.View>
+        )}
+
+        {/* Цена согласована — показываем именно ту, на которую человек согласился */}
+        {agreed && (
+          <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.agreedCard}>
+            <Text style={styles.agreedText}>
+              Цена согласована · {rub(order.agreedPrice as number)}
+            </Text>
+          </Animated.View>
+        )}
+
+        {declined && (
+          <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.declinedCard}>
+            <Text style={styles.declinedText}>
+              Вы отклонили {rub(order.price as number)} — мастер может предложить другую цену
+            </Text>
+          </Animated.View>
+        )}
 
         {/* Мастер сообщил, что закончил — просим подтвердить результат */}
         {awaitingConfirm && (
@@ -183,6 +237,44 @@ const makeStyles = (t: Palette) => StyleSheet.create({
   },
   commentLabel: { fontSize: 10.5, fontWeight: '800', color: t.textMuted, marginBottom: 4 },
   commentText: { fontSize: 13, fontWeight: '600', color: t.text, lineHeight: 18 },
+  offerCard: {
+    backgroundColor: t.soft,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: t.accentBorder,
+    padding: 14,
+    marginBottom: 10,
+  },
+  offerLabel: { fontSize: 11, fontWeight: '800', color: t.textMuted },
+  offerPrice: { fontSize: 26, fontWeight: '800', color: t.text, marginTop: 4, marginBottom: 12 },
+  offerRow: { flexDirection: 'row', gap: 8 },
+  offerBtn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
+  offerAccept: { backgroundColor: t.accent },
+  offerAcceptText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
+  offerDecline: { backgroundColor: t.card, borderWidth: 1, borderColor: t.border },
+  offerDeclineText: { color: t.danger, fontWeight: '800', fontSize: 13.5 },
+  offerDiscuss: { alignItems: 'center', paddingVertical: 11, marginTop: 4 },
+  offerDiscussText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+  agreedCard: {
+    backgroundColor: t.accentFaint,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: t.accentBorder,
+    padding: 13,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  agreedText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+  declinedCard: {
+    backgroundColor: t.soft,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: 13,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  declinedText: { color: t.textSoft, fontWeight: '700', fontSize: 12, textAlign: 'center' },
   confirmBtn: {
     borderRadius: 16,
     paddingVertical: 14,

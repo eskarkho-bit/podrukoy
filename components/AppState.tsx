@@ -56,6 +56,8 @@ function now() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
+
 type AppState = {
   orders: Order[];
   threads: Thread[];
@@ -79,6 +81,8 @@ type AppState = {
   createOrder: (draft: OrderDraft) => void;
   confirmOrderDone: (orderId: string) => void;
   cancelOrder: (orderId: string) => void;
+  acceptPrice: (orderId: string) => void;
+  declinePrice: (orderId: string) => void;
   addAddress: (addr: string) => void;
   markThreadRead: (threadId: string) => void;
   sendMessage: (threadId: string, text: string) => void;
@@ -177,11 +181,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setOrders([]);
       return;
     }
-    const q = query(
-      collection(db, 'orders'),
-      where('clientId', '==', uid),
-      orderBy('createdAt', 'desc'),
-    );
+    // Без orderBy: связка where + orderBy по разным полям потребовала бы
+    // составного индекса, а без него запрос падает. Сортируем на месте.
+    const q = query(collection(db, 'orders'), where('clientId', '==', uid));
     return onSnapshot(q, (snap) => {
       setOrders(snap.docs.map((d) => {
         const v = d.data();
@@ -193,10 +195,74 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           comment: v.comment ?? undefined,
           photoUri: v.photoUrl ?? null,
           address: v.address ?? undefined,
+          masterName: v.masterName ?? null,
+          price: v.price ?? null,
+          priceStatus: v.priceStatus ?? 'none',
+          agreedPrice: v.agreedPrice ?? null,
+          // для сортировки: у только что созданной заявки serverTimestamp
+          // ещё null, поэтому такие показываем сверху
+          createdMs: v.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER,
         };
-      }));
+      }).sort((a, b) => b.createdMs - a.createdMs)
+        .map(({ createdMs, ...o }) => { void createdMs; return o; }));
     }, (e) => console.warn('Заказы недоступны:', e));
   }, [uid]);
+
+  // ---------- реакция на действия мастера ----------
+  // Заявку теперь меняет другой человек со своего устройства. Подписка приносит
+  // изменения, а здесь они превращаются в уведомление и сообщение в чате.
+  const seenOffers = useRef(new Map<string, number>());
+  const seenStatus = useRef(new Map<string, string>());
+  const primed = useRef(false);
+
+  useEffect(() => {
+    if (!uid) {
+      seenOffers.current.clear();
+      seenStatus.current.clear();
+      primed.current = false;
+      return;
+    }
+
+    orders.forEach((o) => {
+      const prevStatus = seenStatus.current.get(o.id);
+      seenStatus.current.set(o.id, o.status);
+
+      const offered = o.priceStatus === 'offered' && o.price != null;
+      const prevOffer = seenOffers.current.get(o.id);
+      if (offered) seenOffers.current.set(o.id, o.price as number);
+      else seenOffers.current.delete(o.id);
+
+      // Первый проход только запоминает состояние: иначе при каждом запуске
+      // приложения сыпались бы уведомления о старых событиях
+      if (!primed.current) return;
+
+      if (offered && prevOffer !== o.price) {
+        const who = o.masterName ? `Мастер ${o.masterName}` : 'Мастер';
+        const isChange = prevOffer != null;
+        notifyLocal(
+          isChange ? 'Мастер изменил цену' : 'Мастер предложил цену',
+          `${o.title} — ${rub(o.price as number)}`,
+          { href: '/' },
+        );
+        incomingMessage(
+          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
+          isChange
+            ? `${who} изменил цену по заявке «${o.title}» — теперь ${rub(o.price as number)}. Примите или отклоните в карточке заказа.`
+            : `${who} готов взяться за «${o.title}» за ${rub(o.price as number)}. Примите или отклоните в карточке заказа.`,
+        );
+      }
+
+      if (prevStatus && prevStatus !== o.status && o.status === 'Ждёт подтверждения') {
+        notifyLocal('Работа выполнена', `Подтвердите завершение заявки «${o.title}»`, { href: '/' });
+        incomingMessage(
+          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
+          `Работа по заявке «${o.title}» выполнена. Проверьте результат и подтвердите завершение в карточке заказа.`,
+        );
+      }
+    });
+
+    primed.current = true;
+  }, [orders, uid]);
 
   // ---------- переписка ----------
   // Треды лежат в поддереве пользователя, поэтому доступны только ему.
@@ -296,41 +362,72 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try {
       const ref = await addDoc(collection(db, 'orders'), {
         clientId: uid,
+        clientName: userName || 'Клиент',
         masterId: null,
+        masterName: null,
         title,
         date: today(),
         status: 'Поиск мастера',
         comment: comment ?? '',
         photoUrl,
         address: activeAddress,
+        // Цена появится, когда мастер её предложит
+        price: null,
+        priceStatus: 'none',
+        agreedPrice: null,
+        agreedAt: null,
+        priceHistory: [],
         createdAt: serverTimestamp(),
       });
-      const orderId = ref.id;
-
+      void ref;
+      // Дальше заявку двигает живой мастер: он видит её в своём разделе,
+      // предлагает цену и меняет статус. Имитации здесь больше нет.
       incomingMessage(MASTER_THREAD_ID, 'Мастер', '🧑‍🔧', `Заявка «${title}» принята. Подбираем мастера…`);
-
-      // Пока нет приложения мастера, заявку двигает имитация — иначе она
-      // навсегда осталась бы в статусе «Поиск мастера»
-      later(6000, () => {
-        updateDoc(doc(db, 'orders', orderId), { status: 'В работе' }).catch(() => {});
-        notifyLocal('Мастер найден', `Заявку «${title}» взяли в работу`, { href: '/' });
-        incomingMessage(
-          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-          'Я взял вашу заявку в работу. Напишите сюда, если есть детали — или пришлите фото.',
-        );
-      });
-
-      later(24000, () => {
-        updateDoc(doc(db, 'orders', orderId), { status: 'Ждёт подтверждения' }).catch(() => {});
-        notifyLocal('Работа выполнена', `Подтвердите завершение заявки «${title}»`, { href: '/' });
-        incomingMessage(
-          MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
-          `Работа по заявке «${title}» выполнена. Проверьте результат и подтвердите завершение в карточке заказа.`,
-        );
-      });
     } catch (e) {
       console.warn('Не удалось создать заявку:', e);
     }
+  };
+
+  // ---------- согласование цены ----------
+
+  // Клиент соглашается с предложенной ценой. Именно этот момент делает цену
+  // согласованной: agreedPrice заполняется только здесь и только по явному
+  // действию человека.
+  const acceptPrice = (orderId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order || order.priceStatus !== 'offered' || order.price == null) return;
+    updateDoc(doc(db, 'orders', orderId), {
+      priceStatus: 'accepted',
+      agreedPrice: order.price,
+      agreedAt: serverTimestamp(),
+      status: 'В работе',
+      priceHistory: arrayUnion({
+        amount: order.price,
+        by: 'client',
+        action: 'accepted',
+        at: new Date().toISOString(),
+      }),
+    }).catch((e) => console.warn('Не удалось принять цену:', e));
+
+    incomingMessage(
+      MASTER_THREAD_ID, 'Мастер', '🧑‍🔧',
+      `Спасибо, цена ${rub(order.price)} согласована. Приступаю к работе.`,
+    );
+  };
+
+  // Отклонение не закрывает заявку: мастер может предложить другую цену
+  const declinePrice = (orderId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order || order.priceStatus !== 'offered' || order.price == null) return;
+    updateDoc(doc(db, 'orders', orderId), {
+      priceStatus: 'declined',
+      priceHistory: arrayUnion({
+        amount: order.price,
+        by: 'client',
+        action: 'declined',
+        at: new Date().toISOString(),
+      }),
+    }).catch((e) => console.warn('Не удалось отклонить цену:', e));
   };
 
   // Пользователь подтверждает, что работа выполнена — заказ закрывается
@@ -468,6 +565,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     createOrder,
     confirmOrderDone,
     cancelOrder,
+    acceptPrice,
+    declinePrice,
     addAddress,
     markThreadRead,
     sendMessage,

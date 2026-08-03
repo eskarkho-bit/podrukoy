@@ -23,7 +23,19 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+  type QueryDocumentSnapshot,
+} from 'firebase/firestore';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
@@ -80,55 +92,10 @@ function now() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function today() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
-}
-
 let seq = 0;
 const uid = () => `m${Date.now()}-${seq++}`;
 
 const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
-
-// Заявки, которые «поступают» мастеру после входа
-function seedJobs(): Job[] {
-  return [
-    {
-      id: uid(),
-      title: 'Протекает кран на кухне',
-      client: 'Анна',
-      address: 'ул. Садовая, 11',
-      date: today(),
-      desc: 'Капает из-под смесителя, под мойкой уже лужа. Нужен мастер сегодня-завтра.',
-      status: 'new',
-      unread: true,
-      messages: [],
-    },
-    {
-      id: uid(),
-      title: 'Повесить полки и зеркало',
-      client: 'Игорь',
-      address: 'пр. Мира, 8',
-      date: today(),
-      desc: 'Три полки в гостиной и зеркало в прихожей. Стены бетонные, инструмент есть не весь.',
-      status: 'new',
-      unread: true,
-      messages: [],
-    },
-    {
-      id: uid(),
-      title: 'Не работает розетка в спальне',
-      client: 'Мария',
-      address: 'ул. Ленина, 40',
-      date: today(),
-      desc: 'Розетка у кровати перестала работать, остальные в комнате в порядке.',
-      status: 'new',
-      unread: false,
-      messages: [],
-    },
-  ];
-}
 
 type Props = {
   open: boolean;
@@ -149,7 +116,6 @@ export function MasterScreen({ open, onClose }: Props) {
 
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const replyIdx = useRef(0);
-  const seeded = useRef(false);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
   const later = (ms: number, fn: () => void) => {
     timers.current.push(setTimeout(fn, ms));
@@ -177,30 +143,68 @@ export function MasterScreen({ open, onClose }: Props) {
     return () => { alive = false; };
   }, [open, myUid]);
 
-  // Лента заявок наполняется один раз, когда доступ уже подтверждён.
-  // Пока нет серверного подбора, заявки имитируются — иначе лента пустая.
+  // Настоящие заявки из Firestore: свободные, которые вправе видеть любой
+  // мастер, и свои уже взятые. Запроса два, потому что Firestore не умеет
+  // «ИЛИ» по разным полям, а результаты склеиваются по id.
+  const buckets = useRef<{ open: Job[]; mine: Job[] }>({ open: [], mine: [] });
+
   useEffect(() => {
-    if (!master || seeded.current) return;
-    seeded.current = true;
-    setJobs(seedJobs());
-    // Чуть позже «прилетает» ещё одна заявка — лента живая
-    later(20000, () => {
-      setJobs((prev) => [
-        {
-          id: uid(),
-          title: 'Собрать шкаф из IKEA',
-          client: 'Олег',
-          address: 'ул. Полевая, 3',
-          date: today(),
-          desc: 'Шкаф ПАКС, две секции. Все коробки дома, нужна только сборка.',
-          status: 'new',
-          unread: true,
-          messages: [],
-        },
-        ...prev,
-      ]);
-    });
-  }, [master]);
+    if (!master || !myUid) {
+      setJobs([]);
+      buckets.current = { open: [], mine: [] };
+      return;
+    }
+
+    const toJob = (d: QueryDocumentSnapshot): Job => {
+      const v = d.data();
+      const status: JobStatus = (v.status === 'Завершена' || v.status === 'Ждёт подтверждения')
+        ? 'done'
+        : v.priceStatus === 'accepted'
+          ? 'accepted'
+          : v.priceStatus === 'offered'
+            ? 'offered'
+            : 'new';
+      return {
+        id: d.id,
+        title: v.title ?? 'Заявка',
+        client: v.clientName ?? 'Клиент',
+        address: v.address ?? '',
+        date: v.date ?? '',
+        desc: v.comment || 'Клиент не оставил комментарий.',
+        status,
+        price: v.price ?? undefined,
+        unread: false,
+        messages: [],
+      };
+    };
+
+    // Переписка и отметка «прочитано» живут только на устройстве мастера,
+    // поэтому при обновлении списка их нужно сохранить
+    const merge = () => {
+      const all = new Map<string, Job>();
+      [...buckets.current.open, ...buckets.current.mine].forEach((j) => all.set(j.id, j));
+      setJobs((prev) => [...all.values()]
+        .map((j) => {
+          const old = prev.find((p) => p.id === j.id);
+          return old ? { ...j, unread: old.unread, messages: old.messages } : j;
+        })
+        .sort((a, b) => b.id.localeCompare(a.id)));
+    };
+
+    const unsubOpen = onSnapshot(
+      query(collection(db, 'orders'), where('status', '==', 'Поиск мастера')),
+      (snap) => { buckets.current.open = snap.docs.map(toJob); merge(); },
+      (e) => console.warn('Свободные заявки недоступны:', e),
+    );
+
+    const unsubMine = onSnapshot(
+      query(collection(db, 'orders'), where('masterId', '==', myUid)),
+      (snap) => { buckets.current.mine = snap.docs.map(toJob); merge(); },
+      (e) => console.warn('Свои заявки недоступны:', e),
+    );
+
+    return () => { unsubOpen(); unsubMine(); };
+  }, [master, myUid]);
 
   // «Выйти» в режиме мастера теперь означает выход из раздела: сам аккаунт
   // остаётся тем же, анкета никуда не девается
@@ -221,38 +225,54 @@ export function MasterScreen({ open, onClose }: Props) {
     }));
   };
 
+  // Предложение цены уходит в саму заявку. Ответа здесь не подделываем:
+  // статус изменится, только когда клиент реально нажмёт «Принять».
+  // Повторное предложение перетирает прежнее и снова требует согласия.
   const offerPrice = (jobId: string, price: number) => {
+    if (!myUid) return;
+    const previous = jobs.find((j) => j.id === jobId)?.price;
+
+    updateDoc(doc(db, 'orders', jobId), {
+      masterId: myUid,
+      masterName: master?.name ?? 'Мастер',
+      price,
+      priceStatus: 'offered',
+      priceHistory: arrayUnion({
+        amount: price,
+        by: 'master',
+        action: previous == null ? 'offered' : 'changed',
+        at: new Date().toISOString(),
+      }),
+    }).catch((e) => console.warn('Не удалось предложить цену:', e));
+
     patchJob(jobId, (j) => ({
       ...j,
-      status: 'offered',
-      price,
       messages: [
         ...j.messages,
-        { id: uid(), from: 'me', text: `Готов взяться. Моя цена — ${rub(price)}.`, time: now() },
+        {
+          id: uid(),
+          from: 'me',
+          text: previous == null
+            ? `Готов взяться. Моя цена — ${rub(price)}.`
+            : `Пересмотрел цену: теперь ${rub(price)}.`,
+          time: now(),
+        },
       ],
     }));
-    // Клиент думает и принимает цену
-    later(7000, () => {
-      patchJob(jobId, (j) => (j.status === 'offered' ? { ...j, status: 'accepted' } : j));
-      clientMessage(jobId, 'Цена подходит! Когда сможете приехать?');
-    });
   };
 
-  // Мастер отмечает работу выполненной — клиент благодарит и «оплачивает»
+  // Мастер отмечает работу выполненной — подтверждать её будет клиент
   const finishJob = (jobId: string) => {
-    patchJob(jobId, (j) => (j.status === 'accepted'
-      ? {
-        ...j,
-        status: 'done',
-        messages: [
-          ...j.messages,
-          { id: uid(), from: 'me', text: 'Работа выполнена. Спасибо, что выбрали меня!', time: now() },
-        ],
-      }
-      : j));
-    later(4000, () => {
-      clientMessage(jobId, 'Спасибо, всё отлично! Оплату перевёл. 🙏');
-    });
+    updateDoc(doc(db, 'orders', jobId), { status: 'Ждёт подтверждения' })
+      .catch((e) => console.warn('Не удалось завершить заявку:', e));
+
+    patchJob(jobId, (j) => ({
+      ...j,
+      messages: [
+        ...j.messages,
+        { id: uid(), from: 'me', text: 'Работа выполнена. Спасибо, что выбрали меня!', time: now() },
+      ],
+    }));
   };
 
   const sendMessage = (jobId: string, text: string) => {

@@ -14,6 +14,8 @@ export default function OrdersRoute() {
       onCreateOrder={s.createOrder}
       onCancelOrder={s.cancelOrder}
       onConfirmOrder={s.confirmOrderDone}
+      onAcceptPrice={s.acceptPrice}
+      onDeclinePrice={s.declinePrice}
       onOpenMasterChat={() => s.openChat(MASTER_THREAD_ID)}
       onOverlayOpenChange={s.setOverlayOpen}
     />

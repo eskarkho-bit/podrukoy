@@ -60,16 +60,34 @@ createdAt: timestamp
 
 ```
 clientId: string        // uid клиента, владелец заявки
+clientName: string      // чтобы мастер видел, к кому едет
 masterId: string | null // uid взявшего мастера
+masterName: string | null
 title: string           // «Не работает розетка»
-category: string
 comment: string
-photoUrl: string | null // ссылка на Storage
+photoUrl: string | null // ссылка на Storage либо локальный URI
 address: string
 status: 'Поиск мастера' | 'В работе' | 'Ждёт подтверждения' | 'Завершена' | 'Отменена'
-price: number | null
 createdAt: timestamp
+
+// согласование цены
+price: number | null    // текущее предложение мастера
+priceStatus: 'none' | 'offered' | 'accepted' | 'declined'
+agreedPrice: number | null  // заполняется только явным «Принять»
+agreedAt: timestamp | null
+priceHistory: [{ amount, by: 'master'|'client', action, at }]
 ```
+
+**Как согласуется цена.** Мастер видит свободные заявки (правило
+`isOpenForMasters`) и предлагает цену — она пишется в саму заявку вместе с
+`masterId`. Клиент видит предложение в карточке заказа и выбирает одно из
+трёх: принять, отклонить, обговорить.
+
+Согласованной цена считается только после явного «Принять»: тогда
+заполняется `agreedPrice` и заявка переходит в работу. Отклонение не
+закрывает заявку — мастер может предложить другую цену, и **каждое новое
+предложение снова требует согласия**, даже если цена стала ниже. Вся
+переписка по цене остаётся в `priceHistory`.
 
 ### `users/{uid}/threads/{threadId}` и `.../messages/{messageId}`
 
