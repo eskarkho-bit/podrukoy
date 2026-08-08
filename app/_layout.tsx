@@ -6,7 +6,10 @@ import { StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 import { AppStateProvider, useAppState } from '../components/AppState';
 import { AuthProvider, useAuth } from '../components/AuthState';
+import { ConsentGate } from '../components/ConsentGate';
+import { consentsCurrent } from '../components/legal';
 import { NoticeBanner } from '../components/NoticeBanner';
+import { AdminScreen } from '../screens/AdminScreen';
 import { MasterScreen } from '../screens/MasterScreen';
 import { useTheme } from '../theme';
 
@@ -24,7 +27,13 @@ export default function RootLayout() {
 function RootShell() {
   const { mode, colors } = useTheme();
   const { user, initializing } = useAuth();
-  const { masterOpen, setMasterOpen, notice, dismissNotice } = useAppState();
+  const {
+    masterOpen, setMasterOpen, isAdmin, adminOpen, setAdminOpen, notice, dismissNotice,
+    consents, acceptConsents, logout,
+  } = useAppState();
+  // Профиль ещё грузится, пока consents === null: показывать в этот момент
+  // требование принять документы значит мигать им у тех, кто их уже принял
+  const needsConsent = !!user && consents !== null && !consentsCurrent(consents);
   const segments = useSegments();
 
   // Без сессии данные всё равно не сохранить — правила Firestore требуют
@@ -72,6 +81,16 @@ function RootShell() {
           смонтированным: иначе сессия мастера и его заявки сбрасывались бы при
           каждом выходе в профиль. */}
       {user && <MasterScreen open={masterOpen} onClose={() => setMasterOpen(false)} />}
+
+      {/* Модерация — такой же оверлей. Монтируется только у модераторов:
+          у остальных правила всё равно не дадут прочитать очередь. */}
+      {user && isAdmin && (
+        <AdminScreen open={adminOpen} onClose={() => setAdminOpen(false)} />
+      )}
+
+      {/* Поверх всего, кроме сообщения о сбое: без действующего согласия
+          пользоваться сервисом нельзя вообще */}
+      {needsConsent && <ConsentGate onAccept={acceptConsents} onLogout={logout} />}
 
       {/* Поверх всего, включая режим мастера: сбой важнее того, что открыто */}
       {notice && <NoticeBanner text={notice} onDismiss={dismissNotice} />}

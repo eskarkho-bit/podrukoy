@@ -3,7 +3,10 @@ import {
   addDoc,
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
+  getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -11,16 +14,20 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { ReactNode, createContext, useContext, useEffect, useRef, useState } from 'react';
 import { db } from '../firebaseConfig';
 import { ChatMessage, Thread } from '../screens/MessagesScreen';
-import { Order } from '../screens/OrdersScreen';
+import { Offer, Order } from '../screens/OrdersScreen';
+import { cityKey } from './serviceOptions';
 import { palettes, ThemeContext, ThemeMode } from '../theme';
-import { useAuth } from './AuthState';
+import { authErrorText, useAuth } from './AuthState';
+import { firestoreErrorText } from './firestoreError';
+import { currentConsents, takePendingConsent, type Consents } from './legal';
 import { OrderDraft } from './ActionSheet';
 import { getPushToken, notifyLocal } from './notifications';
-import { uploadOrderPhoto } from './photoUpload';
+import { deleteVerificationPhoto, uploadOrderPhoto } from './photoUpload';
 
 // Общее состояние приложения. Раньше жило в App.tsx и раздавалось пропсами —
 // с переходом на роутер экраны стали отдельными маршрутами, и общий стейт
@@ -29,6 +36,11 @@ import { uploadOrderPhoto } from './photoUpload';
 
 const DEFAULT_ADDRESS = 'ул. Ленина, 24';
 export const SUPPORT_THREAD_ID = 'support';
+
+// Незакрытые статусы заявки: их можно отменить, и они же считаются активными.
+// Перечень должен совпадать с clientCancels() в firestore.rules.
+const CANCELLABLE = ['Поиск мастера', 'Есть предложения', 'В работе'];
+const CLOSED = ['Завершена', 'Отменена'];
 
 // Поддержка отвечает заготовками — живой службы поддержки пока нет.
 // С мастером переписка настоящая, там ничего не подставляется.
@@ -50,8 +62,6 @@ function now() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
-
 type AppState = {
   orders: Order[];
   threads: Thread[];
@@ -59,11 +69,17 @@ type AppState = {
   userEmail: string;
   addresses: string[];
   activeAddress: string;
+  city: string;
+  // Принятые редакции документов. null — профиль ещё не загружен.
+  consents: Consents | null;
+  acceptConsents: () => Promise<void>;
   typingThreadId: string | null;
   openThreadRequest: string | null;
   chatOpen: boolean;
   overlayOpen: boolean;
   masterOpen: boolean;
+  isAdmin: boolean;
+  adminOpen: boolean;
   hasUnreadMessages: boolean;
   ordersActive: number;
   // Сообщение о сбое, которое обязан увидеть человек: молча потерянная
@@ -73,19 +89,29 @@ type AppState = {
   dismissNotice: () => void;
   setUserName: (name: string) => void;
   setActiveAddress: (addr: string) => void;
+  setCity: (city: string) => void;
   setChatOpen: (open: boolean) => void;
   setOverlayOpen: (open: boolean) => void;
   setMasterOpen: (open: boolean) => void;
+  setAdminOpen: (open: boolean) => void;
   clearOpenThreadRequest: () => void;
   createOrder: (draft: OrderDraft) => void;
   confirmOrderDone: (orderId: string) => void;
   cancelOrder: (orderId: string) => void;
+  // Выбор предложения — он же назначение мастера
+  acceptOffer: (orderId: string, masterId: string) => void;
+  submitReview: (orderId: string, stars: number, text: string) => void;
+  // Заявки, созданные до появления offers
   acceptPrice: (orderId: string) => void;
   declinePrice: (orderId: string) => void;
   addAddress: (addr: string) => void;
   markThreadRead: (threadId: string) => void;
   sendMessage: (threadId: string, text: string) => void;
   openChat: (threadId: string) => void;
+  logout: () => Promise<void>;
+  // Пароль — подтверждение, что удаляет владелец телефона, а не тот,
+  // кому он попал в руки разблокированным
+  deleteAccount: (password: string) => Promise<void>;
 };
 
 const AppStateContext = createContext<AppState | null>(null);
@@ -97,7 +123,9 @@ export function useAppState() {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const {
+    user, logout: signOutUser, reauthenticate, deleteAccount: deleteAuthUser,
+  } = useAuth();
   const uid = user?.uid ?? null;
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -111,6 +139,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [userName, setUserNameLocal] = useState('');
   const [addresses, setAddresses] = useState<string[]>([DEFAULT_ADDRESS]);
   const [activeAddress, setActiveAddressLocal] = useState(DEFAULT_ADDRESS);
+  // Город — то единственное, по чему заявка находит мастеров рядом.
+  // Геокодирования нет, поэтому это отдельное поле, а не часть адреса.
+  const [city, setCityLocal] = useState('');
+  // Какие редакции документов человек принял. Пусто — значит, пользоваться
+  // сервисом ещё нельзя: обработка данных без согласия недопустима.
+  const [consents, setConsentsLocal] = useState<Consents | null>(null);
   // Тема оформления — переключается тумблером в настройках профиля
   const [themeMode, setThemeModeLocal] = useState<ThemeMode>('light');
   // Открытая переписка — это вложенный экран поверх вкладки «Сообщения»
@@ -121,6 +155,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [openThreadRequest, setOpenThreadRequest] = useState<string | null>(null);
   // Режим мастера — оверлей поверх всего приложения
   const [masterOpen, setMasterOpen] = useState(false);
+  // Раздел модерации. Открыт только владельцам документа admins/{uid} —
+  // завести его можно лишь в консоли Firebase, правила запись запрещают.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   // В каком чате сейчас «печатает» собеседник
   const [typingThreadId, setTypingThreadId] = useState<string | null>(null);
   // Видимое сообщение о сбое
@@ -130,7 +168,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // не прошло, и повторить его
   const failed = (text: string) => (e: unknown) => {
     console.warn(text, e);
-    setNotice(text);
+    // Код ошибки точнее общей фразы: отказ по правам — это не «нет связи»,
+    // и предлагать проверить интернет в таком случае бесполезно
+    setNotice(firestoreErrorText(e, text));
   };
 
   // Все отложенные события (ответы мастера, смена статуса) — в одном месте,
@@ -144,6 +184,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const userDoc = () => (uid ? doc(db, 'users', uid) : null);
 
+  // Идёт удаление аккаунта. Без этого флага подписка на профиль увидела бы
+  // только что удалённый документ и тут же создала его заново.
+  const deleting = useRef(false);
+
   // ---------- профиль ----------
   // Документ создаётся при первом входе: раньше уйти в базу он не мог,
   // потому что правила разрешают запись только владельцу, а uid ещё не было.
@@ -152,17 +196,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setUserNameLocal('');
       setAddresses([DEFAULT_ADDRESS]);
       setActiveAddressLocal(DEFAULT_ADDRESS);
+      setCityLocal('');
+      setConsentsLocal(null);
+      deleting.current = false;
       return;
     }
     const ref = doc(db, 'users', uid);
     return onSnapshot(ref, (snap) => {
       if (!snap.exists()) {
+        if (deleting.current) return;
         setDoc(ref, {
           name: user?.displayName ?? 'Гость',
           email: user?.email ?? '',
           addresses: [DEFAULT_ADDRESS],
           activeAddress: DEFAULT_ADDRESS,
+          city: '',
           themeMode: 'light',
+          // Согласие человек дал на экране регистрации — записываем его тем
+          // же действием, что создаёт профиль
+          consents: takePendingConsent() ?? {},
           createdAt: serverTimestamp(),
         }).catch((e) => console.warn('Не удалось создать профиль:', e));
         return;
@@ -171,9 +223,27 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setUserNameLocal(d.name ?? '');
       setAddresses(Array.isArray(d.addresses) && d.addresses.length ? d.addresses : [DEFAULT_ADDRESS]);
       setActiveAddressLocal(d.activeAddress ?? DEFAULT_ADDRESS);
+      setCityLocal(d.city ?? '');
+      setConsentsLocal((d.consents ?? {}) as Consents);
       setThemeModeLocal(d.themeMode === 'dark' ? 'dark' : 'light');
     }, (e) => console.warn('Профиль недоступен:', e));
   }, [uid, user?.displayName, user?.email]);
+
+  // ---------- права модератора ----------
+  useEffect(() => {
+    if (!uid) {
+      setIsAdmin(false);
+      setAdminOpen(false);
+      return;
+    }
+    let alive = true;
+    getDoc(doc(db, 'admins', uid))
+      .then((snap) => { if (alive) setIsAdmin(snap.exists()); })
+      // Правила разрешают читать только свой документ, поэтому отказ здесь —
+      // нормальный ответ «вы не модератор», а не сбой
+      .catch(() => { if (alive) setIsAdmin(false); });
+    return () => { alive = false; };
+  }, [uid]);
 
   // ---------- push-токен ----------
   // Складываем в профиль список токенов: у одного человека может быть
@@ -209,10 +279,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           comment: v.comment ?? undefined,
           photoUri: v.photoUrl ?? null,
           address: v.address ?? undefined,
+          masterId: v.masterId ?? null,
           masterName: v.masterName ?? null,
+          agreedPrice: v.agreedPrice ?? null,
+          reviewed: !!v.reviewed,
           price: v.price ?? null,
           priceStatus: v.priceStatus ?? 'none',
-          agreedPrice: v.agreedPrice ?? null,
           // для сортировки: у только что созданной заявки serverTimestamp
           // ещё null, поэтому такие показываем сверху
           createdMs: v.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER,
@@ -222,52 +294,78 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }, (e) => console.warn('Заказы недоступны:', e));
   }, [uid]);
 
-  // ---------- реакция на действия мастера ----------
-  // Заявку теперь меняет другой человек со своего устройства. Подписка приносит
-  // изменения, а здесь они превращаются в уведомление и сообщение в чате.
-  const seenOffers = useRef(new Map<string, number>());
-  const seenStatus = useRef(new Map<string, string>());
-  const primed = useRef(false);
+  // ---------- предложения мастеров ----------
+  // Каждый мастер пишет свой документ в orders/{id}/offers, поэтому чужое
+  // предложение перебить нельзя, а заявка остаётся открытой, пока клиент
+  // не выбрал, — в этом и смысл: цены конкурируют.
+  const [offersByOrder, setOffersByOrder] = useState<Record<string, Offer[]>>({});
+  // Рейтинг мастера лежит в его анкете, а не в предложении: иначе мастер мог
+  // бы прислать любые звёзды вместе с ценой
+  const [masterCards, setMasterCards] = useState<
+    Record<string, { rating: number | null; reviewsCount: number }>
+  >({});
+  const masterCardsAsked = useRef(new Set<string>());
+
+  const ensureMasterCard = (masterId: string) => {
+    if (masterCardsAsked.current.has(masterId)) return;
+    masterCardsAsked.current.add(masterId);
+    getDoc(doc(db, 'masters', masterId))
+      .then((snap) => {
+        const v = snap.data();
+        setMasterCards((prev) => ({
+          ...prev,
+          [masterId]: {
+            // Агрегат считает Cloud Function: пока её нет, рейтинга просто
+            // не будет — врать про «5.0» хуже, чем молчать
+            rating: typeof v?.rating === 'number' ? v.rating : null,
+            reviewsCount: typeof v?.reviewsCount === 'number' ? v.reviewsCount : 0,
+          },
+        }));
+      })
+      .catch((e) => console.warn('Анкета мастера недоступна:', e));
+  };
+
+  // Подписываемся только на заявки в поиске: после выбора мастера предложения
+  // уже ничего не решают
+  const openOrderIdsKey = orders
+    .filter((o) => o.status === 'Поиск мастера')
+    .map((o) => o.id)
+    .join(',');
 
   useEffect(() => {
     if (!uid) {
-      seenOffers.current.clear();
-      seenStatus.current.clear();
-      primed.current = false;
+      setOffersByOrder({});
+      return;
+    }
+    const ids = openOrderIdsKey ? openOrderIdsKey.split(',') : [];
+    if (!ids.length) {
+      setOffersByOrder({});
       return;
     }
 
-    orders.forEach((o) => {
-      const prevStatus = seenStatus.current.get(o.id);
-      seenStatus.current.set(o.id, o.status);
+    const unsubs = ids.map((orderId) => onSnapshot(
+      query(collection(db, 'orders', orderId, 'offers'), orderBy('price', 'asc')),
+      (snap) => {
+        const list: Offer[] = snap.docs.map((d) => {
+          const v = d.data();
+          ensureMasterCard(v.masterId);
+          return {
+            masterId: v.masterId,
+            masterName: v.masterName ?? 'Мастер',
+            price: v.price,
+            comment: v.comment ?? '',
+            status: v.status === 'accepted' ? 'accepted' : 'pending',
+            rating: null,
+            reviewsCount: 0,
+          };
+        });
+        setOffersByOrder((prev) => ({ ...prev, [orderId]: list }));
+      },
+      (e) => console.warn('Предложения недоступны:', e),
+    ));
 
-      const offered = o.priceStatus === 'offered' && o.price != null;
-      const prevOffer = seenOffers.current.get(o.id);
-      if (offered) seenOffers.current.set(o.id, o.price as number);
-      else seenOffers.current.delete(o.id);
-
-      // Первый проход только запоминает состояние: иначе при каждом запуске
-      // приложения сыпались бы уведомления о старых событиях
-      if (!primed.current) return;
-
-      // Только уведомление: писать сообщение «от мастера» нельзя — чат теперь
-      // общий, и такое сообщение ушло бы от имени клиента. Само предложение
-      // видно в карточке заказа.
-      if (offered && prevOffer !== o.price) {
-        notifyLocal(
-          prevOffer != null ? 'Мастер изменил цену' : 'Мастер предложил цену',
-          `${o.title} — ${rub(o.price as number)}`,
-          { href: '/' },
-        );
-      }
-
-      if (prevStatus && prevStatus !== o.status && o.status === 'Ждёт подтверждения') {
-        notifyLocal('Работа выполнена', `Подтвердите завершение заявки «${o.title}»`, { href: '/' });
-      }
-    });
-
-    primed.current = true;
-  }, [orders, uid]);
+    return () => unsubs.forEach((u) => u());
+  }, [uid, openOrderIdsKey]);
 
   // ---------- переписка по заявкам ----------
   // Общий чат клиента и мастера лежит внутри самой заявки: права доступа
@@ -390,30 +488,23 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       await addDoc(collection(threadRef, 'messages'), {
         from: 'master', text, time: now(), createdAt: serverTimestamp(),
       });
-      // Сообщение от мастера — ровно тот случай, ради которого нужны уведомления
+      // Поддержку изображает само приложение, поэтому и уведомление о её
+      // ответе локальное. Всё остальное — заявки, предложения, сообщения
+      // мастера — присылает сервер: Cloud Functions в functions/.
       notifyLocal(name, text, { href: '/messages' });
     } catch (e) {
       console.warn('Не удалось доставить сообщение:', e);
     }
   };
 
-  const createOrder = async ({ title, comment, photoUri }: OrderDraft) => {
+  // Заявка пишется по идентификатору, выданному шторкой заранее: setDoc по
+  // известному id идемпотентен, а addDoc на каждый вызов создавал новую
+  // заявку — двойное нажатие давало два заказа.
+  const createOrder = async ({ id, title, comment, photoUri, category }: OrderDraft) => {
     if (!uid) return;
-    // Фото уезжает в Storage: локальный URI с телефона другому устройству
-    // ничего не скажет. Но Storage требует платного тарифа Blaze и может быть
-    // не подключён — тогда заявку всё равно создаём, оставив локальную ссылку.
-    // Она видна на своём устройстве и не мешает остальному.
-    let photoUrl: string | null = photoUri ?? null;
-    if (photoUri) {
-      try {
-        photoUrl = await uploadOrderPhoto(uid, photoUri);
-      } catch (e) {
-        console.warn('Фото не загрузилось — заявка создаётся с локальной ссылкой:', e);
-      }
-    }
 
     try {
-      const ref = await addDoc(collection(db, 'orders'), {
+      await setDoc(doc(db, 'orders', id), {
         clientId: uid,
         clientName: userName || 'Клиент',
         masterId: null,
@@ -422,25 +513,94 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         date: today(),
         status: 'Поиск мастера',
         comment: comment ?? '',
-        photoUrl,
+        // Фото прикладывается следующим шагом: правила Storage разрешают
+        // писать в orders/{id}/ только владельцу заявки, а чтобы это
+        // проверить, заявка уже должна существовать
+        photoUrl: null,
         address: activeAddress,
-        // Цена появится, когда мастер её предложит
-        price: null,
-        priceStatus: 'none',
+        // По городу и специальности заявку находят мастера нужного профиля.
+        // Город пустой — заявку увидят только те, кто не ограничил себя
+        // городом; об этом предупреждает профиль.
+        city: cityKey(city),
+        category,
+        // Цена появится, когда мастер пришлёт предложение в orders/{id}/offers
         agreedPrice: null,
         agreedAt: null,
-        priceHistory: [],
+        reviewed: false,
         createdAt: serverTimestamp(),
       });
-      void ref;
-      // Дальше заявку двигает живой мастер: он видит её в своём разделе,
-      // предлагает цену и меняет статус. Имитации здесь больше нет.
     } catch (e) {
       failed('Не удалось создать заявку. Проверьте связь и попробуйте ещё раз')(e);
+      return;
+    }
+
+    // Заявка уже работает, поэтому неудача с фото её не отменяет — но и
+    // молчать нельзя: человек прикладывал снимок не просто так
+    if (!photoUri) return;
+    try {
+      const photoUrl = await uploadOrderPhoto(id, photoUri);
+      await updateDoc(doc(db, 'orders', id), { photoUrl });
+    } catch (e) {
+      console.warn('Фото к заявке не загрузилось:', e);
+      setNotice(firestoreErrorText(e, 'Заявка создана, но фото не загрузилось'));
     }
   };
 
-  // ---------- согласование цены ----------
+  // ---------- выбор мастера ----------
+
+  // Клиент выбирает одно из предложений. Это единственный момент, когда у
+  // заявки появляется мастер: до него masterId пуст, и никакой мастер не может
+  // назначить себя сам. Обе записи идут одним пакетом — заявка без отметки в
+  // предложении (или наоборот) означала бы разъехавшуюся картину у двух сторон.
+  const acceptOffer = async (orderId: string, masterId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    const offer = (offersByOrder[orderId] ?? []).find((o) => o.masterId === masterId);
+    if (!order || !offer || order.status !== 'Поиск мастера') return;
+
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'orders', orderId), {
+        masterId: offer.masterId,
+        masterName: offer.masterName,
+        agreedPrice: offer.price,
+        agreedAt: serverTimestamp(),
+        status: 'В работе',
+      });
+      batch.update(doc(db, 'orders', orderId, 'offers', masterId), { status: 'accepted' });
+      await batch.commit();
+    } catch (e) {
+      failed('Не удалось выбрать мастера. Проверьте связь')(e);
+    }
+  };
+
+  // ---------- отзыв о работе ----------
+
+  // Отзыв и отметка о нём — тоже одним пакетом: иначе можно было бы попросить
+  // оценку второй раз или, наоборот, потерять её.
+  const submitReview = async (orderId: string, stars: number, text: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!uid || !order || !order.masterId) return;
+    if (order.status !== 'Завершена' || order.reviewed) return;
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) return;
+
+    try {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'masters', order.masterId, 'reviews', orderId), {
+        orderId,
+        clientId: uid,
+        clientName: userName || 'Клиент',
+        stars,
+        text: text.slice(0, 1000),
+        createdAt: serverTimestamp(),
+      });
+      batch.update(doc(db, 'orders', orderId), { reviewed: true });
+      await batch.commit();
+    } catch (e) {
+      failed('Не удалось отправить отзыв. Проверьте связь')(e);
+    }
+  };
+
+  // ---------- согласование цены у заявок до появления offers ----------
 
   // Клиент соглашается с предложенной ценой. Именно этот момент делает цену
   // согласованной: agreedPrice заполняется только здесь и только по явному
@@ -487,7 +647,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const cancelOrder = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
-    if (!order) return;
+    if (!order || !CANCELLABLE.includes(order.status)) return;
     updateDoc(doc(db, 'orders', orderId), { status: 'Отменена' })
       .catch(failed('Не удалось отменить заявку. Проверьте связь'));
   };
@@ -513,6 +673,30 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setUserNameLocal(name);
     const ref = userDoc();
     if (ref) updateDoc(ref, { name }).catch(() => {});
+  };
+
+  // Принятие новой редакции документов. Нужно и тем, кто регистрировался до
+  // их появления, и всем остальным, когда редакция изменится.
+  const acceptConsents = async () => {
+    const ref = userDoc();
+    if (!ref) return;
+    const next = currentConsents();
+    try {
+      await setDoc(ref, { consents: next, consentsAt: serverTimestamp() }, { merge: true });
+      setConsentsLocal(next);
+    } catch (e) {
+      failed('Не удалось сохранить согласие. Проверьте связь')(e);
+      throw e;
+    }
+  };
+
+  // Город меняется только для будущих заявок: у созданных он уже записан,
+  // и переезд не должен переносить старые заявки в другой город
+  const setCity = (next: string) => {
+    const trimmed = next.trim();
+    setCityLocal(trimmed);
+    const ref = userDoc();
+    if (ref) updateDoc(ref, { city: trimmed }).catch(() => {});
   };
 
   const setThemeMode = (next: ThemeMode) => {
@@ -587,6 +771,64 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     router.navigate('/messages');
   };
 
+  // ---------- аккаунт ----------
+
+  // Оверлеи закрываем до выхода: иначе следующий вошедший увидит раздел
+  // мастера или чужой чат, открытые не им
+  const logout = async () => {
+    setMasterOpen(false);
+    setChatOpen(false);
+    setOverlayOpen(false);
+    await signOutUser();
+  };
+
+  // Удаление аккаунта — требование магазинов приложений и просто честность.
+  // Уходит всё личное: профиль с адресами, переписка, анкета мастера.
+  // Заявки остаются: они общие с мастером и служат историей расчётов, —
+  // но незакрытые отменяются, чтобы никто не ехал к исчезнувшему клиенту.
+  const deleteAccount = async (password: string) => {
+    if (!uid) return;
+
+    // Пароль проверяем до того, как удалено хоть что-то
+    try {
+      await reauthenticate(password);
+    } catch (e) {
+      throw new Error(authErrorText(e));
+    }
+
+    deleting.current = true;
+    try {
+      await Promise.all(orders
+        .filter((o) => CANCELLABLE.includes(o.status))
+        .map((o) => updateDoc(doc(db, 'orders', o.id), { status: 'Отменена' })));
+
+      // Вложенные документы Firestore сам не удаляет — обходим поддерево руками
+      const threadsSnap = await getDocs(collection(db, 'users', uid, 'threads'));
+      for (const thread of threadsSnap.docs) {
+        const messages = await getDocs(collection(thread.ref, 'messages'));
+        await Promise.all(messages.docs.map((m) => deleteDoc(m.ref)));
+        await deleteDoc(thread.ref);
+      }
+
+      // Заявка на проверку и снимок лица — самое чувствительное, что есть
+      // в базе: они уходят раньше всего остального
+      await deleteDoc(doc(db, 'masters', uid, 'verification', 'application'));
+      await deleteVerificationPhoto(uid);
+
+      // Без анкеты пропадает и роль мастера: на её существовании держится
+      // проверка мастера в правилах доступа
+      await deleteDoc(doc(db, 'masters', uid));
+      await deleteDoc(doc(db, 'users', uid));
+
+      // Сам аккаунт — последним: после него правила уже ничего не разрешат
+      await deleteAuthUser();
+    } catch (e) {
+      deleting.current = false;
+      console.warn('Не удалось удалить аккаунт:', e);
+      throw new Error('Не удалось удалить аккаунт. Проверьте связь и попробуйте ещё раз');
+    }
+  };
+
   // Непрочитанным считаем чат, где последнее сообщение не наше и который
   // не открывали в этой сессии
   const threads: Thread[] = [...orderThreads, ...supportThreads].map((t) => {
@@ -598,22 +840,40 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   });
 
   const hasUnreadMessages = threads.some((t) => t.unread);
-  const ordersActive = orders.filter(
-    (o) => o.status !== 'Отменена' && o.status !== 'Завершена',
-  ).length;
+  const ordersActive = orders.filter((o) => !CLOSED.includes(o.status)).length;
+
+  // Предложения и рейтинги живут отдельными подписками — экрану они нужны
+  // внутри заявки, поэтому сшиваем их здесь, а не в UI
+  const ordersWithOffers: Order[] = orders.map((o) => {
+    const list = offersByOrder[o.id];
+    if (!list?.length) return o;
+    return {
+      ...o,
+      offers: list.map((offer) => ({
+        ...offer,
+        rating: masterCards[offer.masterId]?.rating ?? null,
+        reviewsCount: masterCards[offer.masterId]?.reviewsCount ?? 0,
+      })),
+    };
+  });
 
   const value: AppState = {
-    orders,
+    orders: ordersWithOffers,
     threads,
     userName,
     userEmail: user?.email ?? '',
     addresses,
     activeAddress,
+    city,
+    consents,
+    acceptConsents,
     typingThreadId,
     openThreadRequest,
     chatOpen,
     overlayOpen,
     masterOpen,
+    isAdmin,
+    adminOpen,
     hasUnreadMessages,
     ordersActive,
     notice,
@@ -621,19 +881,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     dismissNotice: () => setNotice(null),
     setUserName,
     setActiveAddress,
+    setCity,
     setChatOpen,
     setOverlayOpen,
     setMasterOpen,
+    setAdminOpen,
     clearOpenThreadRequest: () => setOpenThreadRequest(null),
     createOrder,
     confirmOrderDone,
     cancelOrder,
+    acceptOffer,
+    submitReview,
     acceptPrice,
     declinePrice,
     addAddress,
     markThreadRead,
     sendMessage,
     openChat,
+    logout,
+    deleteAccount,
   };
 
   return (

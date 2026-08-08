@@ -24,13 +24,21 @@ import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
-import { flowFor, ServiceType } from './serviceOptions';
+import { categoryFor, flowFor, ServiceType, type Category } from './serviceOptions';
+import { newOrderId } from '../firebaseConfig';
 import type { SceneObject } from './HouseScene';
 
 export type OrderDraft = {
+  // Идентификатор выдаётся при открытии шторки и не меняется до её закрытия.
+  // Благодаря этому повторная отправка перезапишет ту же заявку, а не создаст
+  // вторую — см. newOrderId().
+  id: string;
   title: string;
   comment: string;
   photoUri: string | null;
+  // Специальность выводится из объекта дома: клиент её не выбирает, но по ней
+  // заявка находит мастеров нужного профиля
+  category: Category;
 };
 
 type Props = {
@@ -57,6 +65,10 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   // Направление последнего перехода — от него зависит, откуда «въезжает» новый шаг
   const [dir, setDir] = useState<'forward' | 'back'>('forward');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Заявка отправлена — второй раз не отправляем
+  const submitted = useRef(false);
+  // Идентификатор будущей заявки, один на всю жизнь шторки
+  const [draftId] = useState(newOrderId);
 
   const flow = flowFor(object.id);
 
@@ -104,13 +116,21 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   };
 
   const submit = () => {
+    // Два быстрых нажатия успевают пройти до перерисовки, потому что setState
+    // асинхронен, — и планировали два таймера, то есть две заявки. Флаг
+    // синхронный, поэтому ловит и это.
+    if (submitted.current) return;
+    submitted.current = true;
+
     goForward('done');
     // Даём «галочке» отыграть, затем закрываем и создаём заявку
     timer.current = setTimeout(() => {
       onComplete({
+        id: draftId,
         title: `${object.title} · ${serviceType?.label} · ${serviceSub}`,
         comment: comment.trim(),
         photoUri,
+        category: categoryFor(object.id),
       });
     }, 1400);
   };

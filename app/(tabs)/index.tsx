@@ -14,6 +14,8 @@ export default function OrdersRoute() {
       onCreateOrder={s.createOrder}
       onCancelOrder={s.cancelOrder}
       onConfirmOrder={s.confirmOrderDone}
+      onAcceptOffer={s.acceptOffer}
+      onSubmitReview={s.submitReview}
       onAcceptPrice={s.acceptPrice}
       onDeclinePrice={s.declinePrice}
       onOpenOrderChat={s.openChat}

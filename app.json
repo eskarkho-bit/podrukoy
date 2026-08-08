@@ -32,6 +32,14 @@
         {
           "color": "#5E7A56"
         }
+      ],
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Фотографии нужны, чтобы приложить снимок поломки к заявке.",
+          "cameraPermission": "Камера нужна для снимка поломки и для фотографии лица при проверке мастера."
+        }
       ]
     ],
     "experiments": {

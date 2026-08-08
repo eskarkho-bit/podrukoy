@@ -1,6 +1,9 @@
 import {
+  EmailAuthProvider,
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
@@ -22,6 +25,10 @@ type AuthState = {
   register: (name: string, email: string, password: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
+  // Firebase не даёт удалить аккаунт по старой сессии — сначала повторный
+  // вход. Заодно это проверка, что телефон в руках у владельца.
+  reauthenticate: (password: string) => Promise<void>;
+  deleteAccount: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -56,6 +63,10 @@ export function authErrorText(e: unknown): string {
     case 'auth/configuration-not-found':
       // Раздел Authentication в проекте Firebase ещё не включён — дело не в пароле
       return 'Авторизация не настроена в проекте Firebase';
+    case 'auth/missing-password':
+      return 'Введите пароль';
+    case 'auth/requires-recent-login':
+      return 'Сессия устарела — войдите заново и повторите';
     default:
       return 'Не удалось войти. Попробуйте ещё раз';
   }
@@ -93,9 +104,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOut(auth);
   };
 
+  // Работаем с auth.currentUser, а не с user из состояния: после register
+  // туда кладётся копия объекта, у которой нет методов настоящего User.
+  const reauthenticate = async (password: string) => {
+    const current = auth.currentUser;
+    if (!current?.email) throw new Error('Сессия не найдена — войдите заново');
+    await reauthenticateWithCredential(
+      current,
+      EmailAuthProvider.credential(current.email, password),
+    );
+  };
+
+  const deleteAccount = async () => {
+    const current = auth.currentUser;
+    if (!current) throw new Error('Сессия не найдена — войдите заново');
+    await deleteUser(current);
+  };
+
   return (
     <AuthContext.Provider
-      value={{ user, initializing, signIn, register, resetPassword, logout }}
+      value={{
+        user, initializing, signIn, register, resetPassword, logout,
+        reauthenticate, deleteAccount,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -10,29 +10,52 @@ import Animated, {
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
+import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
+import { LegalScreen } from './LegalScreen';
 
 type Props = {
   name: string;
   onChangeName: (name: string) => void;
   email: string;
   address: string;
+  // Город определяет, каким мастерам покажут новую заявку
+  city: string;
+  onChangeCity: (city: string) => void;
   ordersTotal: number;
   ordersActive: number;
   onContactSupport: () => void;
   // Вход в режим мастера (перед ним — обязательная авторизация)
   onOpenMaster: () => void;
+  // Модерация мастеров — только у владельцев admins/{uid}
+  isAdmin: boolean;
+  onOpenAdmin: () => void;
+  onLogout: () => void;
+  // Пароль подтверждает, что удаляет владелец. Ошибку возвращаем текстом,
+  // готовым к показу: экран про Firebase ничего не знает.
+  onDeleteAccount: (password: string) => Promise<void>;
 };
 
 export function ProfileScreen({
-  name, onChangeName, email, address, ordersTotal, ordersActive, onContactSupport, onOpenMaster,
+  name, onChangeName, email, address, city, onChangeCity,
+  ordersTotal, ordersActive, onContactSupport, onOpenMaster,
+  isAdmin, onOpenAdmin, onLogout, onDeleteAccount,
 }: Props) {
-  const { mode, setMode } = useTheme();
+  const { mode, colors: t, setMode } = useTheme();
   const styles = themed[mode];
   const [pushOn, setPushOn] = useState(true);
   const [emailOn, setEmailOn] = useState(false);
   // Редактирование имени прямо в карточке — без отдельного экрана
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
+  const [editingCity, setEditingCity] = useState(false);
+  const [cityDraft, setCityDraft] = useState(city);
+  const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
+  // Удаление аккаунта разворачивается прямо в списке: сначала предупреждение
+  // и пароль, и только потом кнопка, которую уже нельзя отменить
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [password, setPassword] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const startEdit = () => {
     setDraft(name);
@@ -45,7 +68,40 @@ export function ProfileScreen({
     setEditing(false);
   };
 
+  const startEditCity = () => {
+    setCityDraft(city);
+    setEditingCity(true);
+  };
+
+  const saveCity = () => {
+    onChangeCity(cityDraft.trim());
+    setEditingCity(false);
+  };
+
+  const cancelDelete = () => {
+    setConfirmingDelete(false);
+    setPassword('');
+    setDeleteError(null);
+  };
+
+  const submitDelete = async () => {
+    if (!password) {
+      setDeleteError('Введите пароль, чтобы подтвердить удаление');
+      return;
+    }
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await onDeleteAccount(password);
+      // Дальше экран исчезнет сам: без сессии приложение уводит на вход
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Не удалось удалить аккаунт');
+      setDeleting(false);
+    }
+  };
+
   return (
+    <View style={styles.fill}>
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
         Профиль
@@ -107,6 +163,23 @@ export function ProfileScreen({
         </PressableScale>
       </Animated.View>
 
+      {/* Модерация мастеров. Пункта нет у всех, кроме владельцев
+          admins/{uid} — и очередь им всё равно не отдадут правила. */}
+      {isAdmin && (
+        <Animated.View entering={FadeInDown.delay(150).duration(360)}>
+          <PressableScale style={styles.masterCard} onPress={onOpenAdmin}>
+            <View style={styles.masterIconWrap}>
+              <Text style={styles.masterIcon}>🛡️</Text>
+            </View>
+            <View style={styles.masterBody}>
+              <Text style={styles.masterTitle}>Модерация</Text>
+              <Text style={styles.masterSub}>Заявки мастеров на проверку</Text>
+            </View>
+            <Text style={styles.masterChevron}>›</Text>
+          </PressableScale>
+        </Animated.View>
+      )}
+
       <Animated.Text
         entering={FadeInDown.delay(160).duration(360)}
         style={styles.sectionTitle}
@@ -149,6 +222,36 @@ export function ProfileScreen({
         <Text style={styles.rowValue}>{address}</Text>
       </Animated.View>
 
+      {/* Город — единственное, по чему заявка находит мастеров рядом.
+          Пустой означает, что её увидят только мастера без ограничения
+          по городу, поэтому пустоту показываем предупреждением. */}
+      <Animated.View entering={FadeInDown.delay(160 + STAGGER * 4.5).duration(340)}>
+        {editingCity ? (
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Город</Text>
+            <TextInput
+              style={styles.cityInput}
+              value={cityDraft}
+              onChangeText={setCityDraft}
+              placeholder="Москва"
+              placeholderTextColor={t.textMuted}
+              autoFocus
+              autoCapitalize="words"
+              onSubmitEditing={saveCity}
+              onBlur={saveCity}
+              returnKeyType="done"
+            />
+          </View>
+        ) : (
+          <PressableScale style={styles.row} onPress={startEditCity}>
+            <Text style={styles.rowLabel}>Город</Text>
+            <Text style={[styles.rowValue, !city && styles.rowValueWarn]}>
+              {city || 'Не указан — мастера не найдут  ✎'}
+            </Text>
+          </PressableScale>
+        )}
+      </Animated.View>
+
       <Animated.View entering={FadeInDown.delay(160 + STAGGER * 5).duration(340)}>
         <PressableScale style={styles.row} onPress={onContactSupport}>
           <Text style={styles.rowLabel}>Написать в поддержку</Text>
@@ -156,14 +259,94 @@ export function ProfileScreen({
         </PressableScale>
       </Animated.View>
 
+      {/* Документы должны открываться из приложения, а не искаться на сайте:
+          человек принимал их здесь, читать перечитывать тоже должен здесь */}
+      {(['terms', 'privacy'] as const).map((id, i) => (
+        <Animated.View
+          key={id}
+          entering={FadeInDown.delay(160 + STAGGER * (6 + i)).duration(340)}
+        >
+          <PressableScale style={styles.row} onPress={() => setOpenDoc(id)}>
+            <Text style={styles.rowLabel}>{LEGAL_DOCS[id].title}</Text>
+            <Text style={styles.rowChevron}>›</Text>
+          </PressableScale>
+        </Animated.View>
+      ))}
+
       <Animated.View
-        entering={FadeInDown.delay(160 + STAGGER * 6).duration(340)}
+        entering={FadeInDown.delay(160 + STAGGER * 8).duration(340)}
         style={styles.row}
       >
         <Text style={styles.rowLabel}>О приложении</Text>
         <Text style={styles.rowValue}>Подрукой · v1.0.0</Text>
       </Animated.View>
+
+      {/* Выход и удаление аккаунта. Удаление обязано быть здесь, а не письмом
+          в поддержку: этого требуют правила магазинов приложений. */}
+      <Animated.View entering={FadeInDown.delay(160 + STAGGER * 7).duration(340)}>
+        <PressableScale style={styles.row} onPress={onLogout}>
+          <Text style={styles.rowLabelAccent}>Выйти из аккаунта</Text>
+          <Text style={styles.rowChevron}>›</Text>
+        </PressableScale>
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(160 + STAGGER * 8).duration(340)}>
+        {confirmingDelete ? (
+          <Animated.View entering={FadeIn.duration(220)} style={styles.deleteCard}>
+            <Text style={styles.deleteTitle}>Удалить аккаунт навсегда?</Text>
+            <Text style={styles.deleteText}>
+              Пропадут профиль, адреса, переписка и анкета мастера.
+              Незакрытые заявки будут отменены. Отменить удаление нельзя.
+            </Text>
+
+            <TextInput
+              style={styles.deleteInput}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Ваш пароль"
+              placeholderTextColor={t.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              editable={!deleting}
+            />
+
+            {deleteError && (
+              <Animated.Text entering={FadeIn.duration(200)} style={styles.deleteError}>
+                {deleteError}
+              </Animated.Text>
+            )}
+
+            <PressableScale
+              style={[styles.deleteBtn, deleting && styles.deleteBtnDim]}
+              onPress={submitDelete}
+              disabled={deleting}
+            >
+              <Text style={styles.deleteBtnText}>
+                {deleting ? 'Удаляем…' : 'Удалить навсегда'}
+              </Text>
+            </PressableScale>
+
+            <PressableScale
+              style={styles.deleteCancel}
+              onPress={cancelDelete}
+              disabled={deleting}
+            >
+              <Text style={styles.deleteCancelText}>Отмена</Text>
+            </PressableScale>
+          </Animated.View>
+        ) : (
+          <PressableScale style={styles.row} onPress={() => setConfirmingDelete(true)}>
+            <Text style={styles.rowLabelDanger}>Удалить аккаунт</Text>
+            <Text style={styles.rowChevron}>›</Text>
+          </PressableScale>
+        )}
+      </Animated.View>
     </ScrollView>
+
+    {/* Поверх экрана, а не внутри списка: absoluteFill внутри ScrollView
+        считается от содержимого и уехал бы вместе с прокруткой */}
+    {openDoc && <LegalScreen docId={openDoc} onClose={() => setOpenDoc(null)} />}
+    </View>
   );
 }
 
@@ -187,6 +370,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
 }
 
 const makeStyles = (t: Palette) => StyleSheet.create({
+  fill: { flex: 1 },
   root: { flex: 1, backgroundColor: t.bg },
   content: { padding: 16, paddingTop: 60, paddingBottom: 120 },
   header: { fontSize: 20, fontWeight: '800', marginBottom: 16, color: t.text },
@@ -279,8 +463,64 @@ const makeStyles = (t: Palette) => StyleSheet.create({
     borderColor: t.border,
   },
   rowLabel: { fontWeight: '700', fontSize: 13.5, color: t.text },
+  rowLabelAccent: { fontWeight: '700', fontSize: 13.5, color: t.accent },
+  rowLabelDanger: { fontWeight: '700', fontSize: 13.5, color: t.danger },
   rowValue: { fontWeight: '600', fontSize: 12, color: t.textMuted },
+  rowValueWarn: { color: t.warn, fontWeight: '700' },
+  cityInput: {
+    borderWidth: 1,
+    borderColor: t.inputBorder,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: t.text,
+    backgroundColor: t.inputBg,
+    minWidth: 130,
+    textAlign: 'right',
+  },
   rowChevron: { fontSize: 18, color: t.textMuted, fontWeight: '700' },
+  deleteCard: {
+    backgroundColor: t.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: t.danger,
+    padding: 16,
+    marginBottom: 9,
+  },
+  deleteTitle: { fontWeight: '800', fontSize: 14, color: t.danger },
+  deleteText: {
+    fontWeight: '600',
+    fontSize: 12,
+    color: t.textSoft,
+    lineHeight: 17,
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  deleteInput: {
+    borderWidth: 1,
+    borderColor: t.inputBorder,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
+    fontWeight: '600',
+    color: t.text,
+    backgroundColor: t.inputBg,
+  },
+  deleteError: { color: t.danger, fontWeight: '700', fontSize: 12, marginTop: 8 },
+  deleteBtn: {
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    backgroundColor: t.danger,
+    marginTop: 12,
+  },
+  deleteBtnDim: { opacity: 0.6 },
+  deleteBtnText: { fontWeight: '800', fontSize: 13.5, color: '#FFFFFF' },
+  deleteCancel: { alignItems: 'center', paddingVertical: 11, marginTop: 2 },
+  deleteCancelText: { fontWeight: '700', fontSize: 13, color: t.textMuted },
   toggleHit: { padding: 2 },
   toggleTrack: {
     width: 44,

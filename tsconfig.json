@@ -5,7 +5,8 @@
   },
   "exclude": [
     "node_modules",
-    "podrukoy2"
+    "podrukoy2",
+    "functions"
   ],
   "include": [
     "**/*.ts",

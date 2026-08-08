@@ -11,6 +11,8 @@ import {
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { PressableScale } from '../components/PressableScale';
 import { authErrorText, useAuth } from '../components/AuthState';
+import { currentConsents, LEGAL_DOCS, rememberConsent, type LegalDocId } from '../components/legal';
+import { LegalScreen } from './LegalScreen';
 import { Palette, palettes, useTheme } from '../theme';
 
 // Вход в приложение. Показывается вместо всего остального, пока нет сессии:
@@ -29,6 +31,9 @@ export function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Галочка снята по умолчанию: предустановленное согласие согласием не является
+  const [accepted, setAccepted] = useState(false);
+  const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
 
   const isRegister = mode === 'register';
 
@@ -72,12 +77,22 @@ export function AuthScreen() {
       setError('Пароль — не короче 6 символов');
       return;
     }
+    // Согласие должно быть получено до того, как мы начали обрабатывать
+    // данные, а регистрация — это уже обработка имени и email
+    if (isRegister && !accepted) {
+      setError('Чтобы зарегистрироваться, примите соглашение и политику');
+      return;
+    }
 
     setError(null);
     setLoading(true);
     try {
-      if (isRegister) await register(name, e, password);
-      else await signIn(e, password);
+      if (isRegister) {
+        // Согласие даётся здесь, а профиль в базе создаётся после входа,
+        // когда появится uid, — передаём его туда через legal.ts
+        rememberConsent(currentConsents());
+        await register(name, e, password);
+      } else await signIn(e, password);
       // При успехе экран пропадёт сам: сессия появится в AuthProvider
     } catch (err) {
       setError(authErrorText(err));
@@ -153,6 +168,31 @@ export function AuthScreen() {
             returnKeyType="go"
           />
 
+          {/* Согласие — до регистрации, а не после: она уже обработка данных */}
+          {isRegister && (
+            <Animated.View entering={FadeInDown.duration(260)} style={styles.consentRow}>
+              <PressableScale
+                style={[styles.checkbox, accepted && styles.checkboxOn]}
+                onPress={() => setAccepted((v) => !v)}
+                disabled={loading}
+              >
+                {accepted && <Text style={styles.checkboxTick}>✓</Text>}
+              </PressableScale>
+              {/* Падеж не выводится из заголовка документа: «принимаю ...
+                  политика конфиденциальности» читается как машинный перевод */}
+              <Text style={styles.consentText}>
+                Принимаю{' '}
+                <Text style={styles.consentLink} onPress={() => setOpenDoc('terms')}>
+                  пользовательское соглашение
+                </Text>
+                {' '}и{' '}
+                <Text style={styles.consentLink} onPress={() => setOpenDoc('privacy')}>
+                  политику конфиденциальности
+                </Text>
+              </Text>
+            </Animated.View>
+          )}
+
           {error && (
             <Animated.Text entering={FadeInDown.duration(240)} style={styles.fieldError}>
               {error}
@@ -196,6 +236,8 @@ export function AuthScreen() {
           </PressableScale>
         </Animated.View>
       </ScrollView>
+
+      {openDoc && <LegalScreen docId={openDoc} onClose={() => setOpenDoc(null)} />}
     </KeyboardAvoidingView>
   );
 }
@@ -245,6 +287,27 @@ const makeStyles = (t: Palette) => StyleSheet.create({
     fontSize: 13.5,
     color: t.text,
   },
+  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginTop: 16 },
+  checkbox: {
+    width: 21,
+    height: 21,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: t.inputBorder,
+    backgroundColor: t.inputBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
+  checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
+  consentText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: t.textMuted,
+    lineHeight: 17,
+  },
+  consentLink: { color: t.accent, fontWeight: '800' },
   fieldError: { color: t.danger, fontWeight: '700', fontSize: 11.5, marginTop: 10 },
   fieldNotice: { color: t.accent, fontWeight: '700', fontSize: 11.5, marginTop: 10, lineHeight: 16 },
   forgot: {

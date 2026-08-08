@@ -14,13 +14,27 @@ import { palettes, Palette, useTheme } from '../theme';
 import { AreaId, HouseScene, ROOMS, Room, SceneObject, Stage } from '../components/HouseScene';
 import { ActionSheet, OrderDraft } from '../components/ActionSheet';
 import { OrderSheet, statusColor } from '../components/OrderSheet';
+import { counted } from '../components/format';
 import { PressableScale } from '../components/PressableScale';
 
 const AREAS: AreaId[] = ['Дом', 'Двор', 'Гараж'];
 
-// Согласование цены: мастер предлагает, клиент принимает или отклоняет.
-// Каждое новое предложение сбрасывает согласие — цена без явного «принять»
-// не считается согласованной.
+// Предложение мастера. Их может быть несколько на одну заявку — клиент
+// выбирает, и только выбор делает цену согласованной.
+export type Offer = {
+  masterId: string;
+  masterName: string;
+  price: number;
+  comment: string;
+  status: 'pending' | 'accepted';
+  // Рейтинг мастера на момент показа. null — отзывов ещё нет или агрегат
+  // не посчитан (его ведёт Cloud Function).
+  rating: number | null;
+  reviewsCount: number;
+};
+
+// Согласование цены у заявок, созданных до появления offers: предложение
+// лежало в самой заявке. Новые заявки этим путём не ходят.
 export type PriceStatus = 'none' | 'offered' | 'accepted' | 'declined';
 
 export type Order = {
@@ -32,12 +46,17 @@ export type Order = {
   photoUri?: string | null;
   address?: string;
   // Кто взялся за заявку
+  masterId?: string | null;
   masterName?: string | null;
-  // Текущее предложение мастера и судьба этого предложения
-  price?: number | null;
-  priceStatus?: PriceStatus;
+  // Предложения мастеров, дешёвые сверху
+  offers?: Offer[];
   // Цена, на которую клиент согласился явно
   agreedPrice?: number | null;
+  // Отзыв о работе уже оставлен — просить повторно не нужно
+  reviewed?: boolean;
+  // Только у старых заявок: предложение внутри самой заявки
+  price?: number | null;
+  priceStatus?: PriceStatus;
 };
 
 function today() {
@@ -55,6 +74,10 @@ type Props = {
   onCreateOrder: (draft: OrderDraft) => void;
   onCancelOrder: (orderId: string) => void;
   onConfirmOrder: (orderId: string) => void;
+  // Клиент выбирает одно из предложений — этот выбор и назначает мастера
+  onAcceptOffer: (orderId: string, masterId: string) => void;
+  onSubmitReview: (orderId: string, stars: number, text: string) => void;
+  // Старые заявки, где предложение лежит в самой заявке
   onAcceptPrice: (orderId: string) => void;
   onDeclinePrice: (orderId: string) => void;
   // Чат теперь принадлежит заявке, поэтому нужен её идентификатор
@@ -65,8 +88,8 @@ type Props = {
 
 export function OrdersScreen({
   orders, addresses, activeAddress, onSelectAddress, onAddAddress,
-  onCreateOrder, onCancelOrder, onConfirmOrder, onAcceptPrice, onDeclinePrice,
-  onOpenOrderChat, onOverlayOpenChange,
+  onCreateOrder, onCancelOrder, onConfirmOrder, onAcceptOffer, onSubmitReview,
+  onAcceptPrice, onDeclinePrice, onOpenOrderChat, onOverlayOpenChange,
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -243,29 +266,43 @@ export function OrdersScreen({
             <Text style={styles.emptySub}>Коснитесь объекта в доме, чтобы создать первую заявку</Text>
           </Animated.View>
         ) : (
-          orders.map((order, i) => (
-            <Animated.View
-              key={order.id}
-              entering={FadeInDown.delay(mountedWithStagger ? 240 + i * STAGGER : 0).duration(360)}
-              layout={LinearTransition.springify().damping(20).stiffness(170)}
-            >
-              <PressableScale style={styles.orderItem} onPress={() => setOpenedOrderId(order.id)}>
-                {order.photoUri ? (
-                  <Image source={{ uri: order.photoUri }} style={styles.orderPhoto} />
-                ) : null}
-                <View style={styles.orderBody}>
-                  <Text style={styles.orderTitle}>{order.title}</Text>
-                  {order.comment ? (
-                    <Text style={styles.orderComment} numberOfLines={1}>{order.comment}</Text>
+          orders.map((order, i) => {
+            // Пока заявка в поиске, полезнее числа откликов, чем слово «Поиск
+            // мастера»: именно оно говорит, есть ли что решать
+            const pending = (order.offers ?? []).filter((o) => o.status === 'pending').length;
+            const waitingReview = order.status === 'Завершена' && !order.reviewed;
+            return (
+              <Animated.View
+                key={order.id}
+                entering={FadeInDown.delay(mountedWithStagger ? 240 + i * STAGGER : 0).duration(360)}
+                layout={LinearTransition.springify().damping(20).stiffness(170)}
+              >
+                <PressableScale style={styles.orderItem} onPress={() => setOpenedOrderId(order.id)}>
+                  {order.photoUri ? (
+                    <Image source={{ uri: order.photoUri }} style={styles.orderPhoto} />
                   ) : null}
-                  <Text style={styles.orderDate}>{order.date}</Text>
-                </View>
-                <Text style={[styles.orderStatus, { color: statusColor(order.status, t) }]}>
-                  {order.status}
-                </Text>
-              </PressableScale>
-            </Animated.View>
-          ))
+                  <View style={styles.orderBody}>
+                    <Text style={styles.orderTitle}>{order.title}</Text>
+                    {order.comment ? (
+                      <Text style={styles.orderComment} numberOfLines={1}>{order.comment}</Text>
+                    ) : null}
+                    <Text style={styles.orderDate}>{order.date}</Text>
+                  </View>
+                  {pending > 0 ? (
+                    <Text style={[styles.orderStatus, { color: t.accent }]}>
+                      {counted(pending, 'предложение', 'предложения', 'предложений')}
+                    </Text>
+                  ) : waitingReview ? (
+                    <Text style={[styles.orderStatus, { color: t.warn }]}>Оцените работу</Text>
+                  ) : (
+                    <Text style={[styles.orderStatus, { color: statusColor(order.status, t) }]}>
+                      {order.status}
+                    </Text>
+                  )}
+                </PressableScale>
+              </Animated.View>
+            );
+          })
         )}
       </ScrollView>
 
@@ -287,6 +324,8 @@ export function OrdersScreen({
             setOpenedOrderId(null);
           }}
           onConfirmDone={() => onConfirmOrder(openedOrder.id)}
+          onAcceptOffer={(masterId) => onAcceptOffer(openedOrder.id, masterId)}
+          onSubmitReview={(stars, text) => onSubmitReview(openedOrder.id, stars, text)}
           onAcceptPrice={() => onAcceptPrice(openedOrder.id)}
           onDeclinePrice={() => onDeclinePrice(openedOrder.id)}
           onChat={() => {

@@ -75,3 +75,48 @@ const DEFAULT_FLOW: ServiceType[] = [
 export function flowFor(objectId: string): ServiceType[] {
   return SERVICE_FLOWS[objectId] ?? DEFAULT_FLOW;
 }
+
+// Специальности. Список закрытый и общий для двух сторон: мастер отмечает
+// свои в анкете, заявка получает одну при создании, лента мастера
+// фильтруется их сравнением. Свободный текст здесь не годится — по нему
+// нельзя построить запрос.
+export const CATEGORIES = [
+  'электрика',
+  'сантехника',
+  'бытовая техника',
+  'окна',
+  'участок',
+  'ворота',
+  'инструмент',
+  'разное',
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
+
+const CATEGORY_BY_OBJECT: Record<string, Category> = {
+  socket: 'электрика',
+  light: 'электрика',
+  sink: 'сантехника',
+  shower: 'сантехника',
+  pipe: 'сантехника',
+  stove: 'бытовая техника',
+  window: 'окна',
+  lawn: 'участок',
+  trees: 'участок',
+  gate: 'ворота',
+  tools: 'инструмент',
+};
+
+/** Специальность, к которой относится объект дома. */
+export function categoryFor(objectId: string): Category {
+  return CATEGORY_BY_OBJECT[objectId] ?? 'разное';
+}
+
+/**
+ * Город к виду, пригодному для сравнения: регистр и лишние пробелы не должны
+ * прятать заявку от мастера из того же города. Геокодирования нет — это
+ * сравнение строк, и оно не переживёт «Питер» против «Санкт-Петербург».
+ */
+export function cityKey(city: string): string {
+  return city.trim().toLowerCase().replace(/\s+/g, ' ').replace(/ё/g, 'е');
+}
