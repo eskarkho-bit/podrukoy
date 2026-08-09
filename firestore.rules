@@ -42,6 +42,23 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Заявка на удаление аккаунта.
+    //
+    // Единственная запись, которую делает клиент, — сама просьба. Дальше
+    // работает функция: она обходит данные этапами, отмечая прогресс, и
+    // переживает обрыв на любом шаге. Раньше всё удаление шло с телефона
+    // семью подряд идущими операциями без транзакции: сбой посередине
+    // оставлял наполовину удалённый аккаунт, а подписка на профиль тут же
+    // создавала удалённый документ заново.
+    match /deletions/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['requestedAt'])
+        && request.resource.data.requestedAt == request.time;
+      // Этап и отметку о завершении пишет только сервер
+      allow update, delete: if false;
+    }
+
     function validCategory(c) {
       return c in [
         'электрика', 'сантехника', 'бытовая техника', 'окна',

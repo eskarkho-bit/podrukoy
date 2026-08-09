@@ -15,7 +15,7 @@ import {
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import {
-  addDoc, collection, deleteDoc, doc, getDoc, setDoc, updateDoc, writeBatch,
+  addDoc, collection, deleteDoc, doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch,
 } from 'firebase/firestore';
 
 // Префикс demo- гарантирует, что обращения никогда не уйдут в настоящий проект
@@ -727,6 +727,44 @@ describe('Решение модератора', () => {
 
   test('вердикт выносится только по заявке на проверке', async () => {
     await assertFails(decide(as('admin1'), 'newbie', true));
+  });
+});
+
+describe('Заявка на удаление аккаунта', () => {
+  test('человек просит удалить свой аккаунт', async () => {
+    await assertSucceeds(setDoc(doc(as('client1'), 'deletions/client1'), {
+      requestedAt: serverTimestamp(),
+    }));
+  });
+
+  test('чужой аккаунт удалить не попросишь', async () => {
+    await assertFails(setDoc(doc(as('client2'), 'deletions/client1'), {
+      requestedAt: serverTimestamp(),
+    }));
+  });
+
+  test('нельзя подсунуть готовый этап или отметку о завершении', async () => {
+    await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), {
+      requestedAt: serverTimestamp(), stage: 'done',
+    }));
+  });
+
+  // Прогресс ведёт только функция: если бы его правил клиент, он мог бы
+  // объявить удаление завершённым, не дав ему начаться
+  test('прогресс и отмену клиент не пишет', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'deletions/client1'), { stage: 'orders' });
+    });
+    await assertFails(updateDoc(doc(as('client1'), 'deletions/client1'), { stage: 'done' }));
+    await assertFails(deleteDoc(doc(as('client1'), 'deletions/client1')));
+  });
+
+  test('свою заявку видно, чужую нет', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'deletions/client1'), { stage: 'orders' });
+    });
+    await assertSucceeds(getDoc(doc(as('client1'), 'deletions/client1')));
+    await assertFails(getDoc(doc(as('client2'), 'deletions/client1')));
   });
 });
 

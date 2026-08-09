@@ -797,36 +797,49 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
 
     deleting.current = true;
-    try {
-      await Promise.all(orders
-        .filter((o) => CANCELLABLE.includes(o.status))
-        .map((o) => updateDoc(doc(db, 'orders', o.id), { status: 'Отменена' })));
 
-      // Вложенные документы Firestore сам не удаляет — обходим поддерево руками
+    // Просьба об удалении — единственное, что обязано записаться. Дальше
+    // работает функция: она обходит данные этапами и переживает обрыв на
+    // любом шаге. Раньше весь обход шёл отсюда, и сбой посередине оставлял
+    // наполовину удалённый аккаунт.
+    try {
+      await setDoc(doc(db, 'deletions', uid), { requestedAt: serverTimestamp() });
+    } catch (e) {
+      deleting.current = false;
+      console.warn('Не удалось создать заявку на удаление:', e);
+      throw new Error(firestoreErrorText(e, 'Не удалось удалить аккаунт. Попробуйте ещё раз'));
+    }
+
+    // Дальше — то же самое, но своими силами и без права на ошибку каждого
+    // шага: функции могут быть не развёрнуты (для них нужен тариф Blaze), а
+    // удаление аккаунта обязано работать всегда. Обе стороны идемпотентны,
+    // поэтому двойная работа безвредна: что успел клиент, функция пропустит.
+    const quietly = (p: Promise<unknown>) => p.catch(() => {});
+
+    await Promise.all(orders
+      .filter((o) => CANCELLABLE.includes(o.status))
+      .map((o) => quietly(updateDoc(doc(db, 'orders', o.id), { status: 'Отменена' }))));
+
+    try {
       const threadsSnap = await getDocs(collection(db, 'users', uid, 'threads'));
       for (const thread of threadsSnap.docs) {
         const messages = await getDocs(collection(thread.ref, 'messages'));
-        await Promise.all(messages.docs.map((m) => deleteDoc(m.ref)));
-        await deleteDoc(thread.ref);
+        await Promise.all(messages.docs.map((m) => quietly(deleteDoc(m.ref))));
+        await quietly(deleteDoc(thread.ref));
       }
-
-      // Заявка на проверку и снимок лица — самое чувствительное, что есть
-      // в базе: они уходят раньше всего остального
-      await deleteDoc(doc(db, 'masters', uid, 'verification', 'application'));
-      await deleteVerificationPhoto(uid);
-
-      // Без анкеты пропадает и роль мастера: на её существовании держится
-      // проверка мастера в правилах доступа
-      await deleteDoc(doc(db, 'masters', uid));
-      await deleteDoc(doc(db, 'users', uid));
-
-      // Сам аккаунт — последним: после него правила уже ничего не разрешат
-      await deleteAuthUser();
     } catch (e) {
-      deleting.current = false;
-      console.warn('Не удалось удалить аккаунт:', e);
-      throw new Error('Не удалось удалить аккаунт. Проверьте связь и попробуйте ещё раз');
+      console.warn('Переписка не удалена с устройства, доделает функция:', e);
     }
+
+    await quietly(deleteDoc(doc(db, 'masters', uid, 'verification', 'application')));
+    await quietly(deleteVerificationPhoto(uid));
+    await quietly(deleteDoc(doc(db, 'masters', uid)));
+    await quietly(deleteDoc(doc(db, 'users', uid)));
+
+    // Аккаунт — последним: после него правила уже ничего не разрешат.
+    // Если не выйдет, его удалит функция.
+    await quietly(deleteAuthUser());
+    await quietly(signOutUser());
   };
 
   // Непрочитанным считаем чат, где последнее сообщение не наше и который

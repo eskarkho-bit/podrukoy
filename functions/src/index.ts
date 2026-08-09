@@ -10,6 +10,8 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
 
 export { createCardBinding, yookassaWebhook } from './payments';
+export { onDeletionRequested } from './deletion';
+export { onMasterDeleted, onMasterUnverified } from './masterExit';
 
 // Серверная часть «Подрукой». Здесь живёт всё, чему нельзя доверять клиенту:
 // рассылка уведомлений (клиент не вправе читать чужие токены) и пересчёт
