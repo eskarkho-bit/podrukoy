@@ -52,11 +52,28 @@ service cloud.firestore {
     // создавала удалённый документ заново.
     match /deletions/{uid} {
       allow read: if isOwner(uid);
+      // status нужен сверке: она ищет застрявшие удаления запросом по нему,
+      // и без него незапустившийся триггер остался бы незамеченным
       allow create: if isOwner(uid)
-        && request.resource.data.keys().hasOnly(['requestedAt'])
-        && request.resource.data.requestedAt == request.time;
-      // Этап и отметку о завершении пишет только сервер
+        && request.resource.data.keys().hasOnly(['requestedAt', 'status'])
+        && request.resource.data.requestedAt == request.time
+        && request.resource.data.status == 'pending';
+      // Этап, статус и отметку о завершении пишет только сервер
       allow update, delete: if false;
+    }
+
+    // Журнал действий.
+    //
+    // Append-only в самом строгом смысле: писать не может никто, включая
+    // модератора, — записи создаёт только Admin SDK из функций. Читать может
+    // модератор: журнал существует ради разбора спорных ситуаций.
+    //
+    // Персональных данных здесь нет по построению: только идентификаторы и
+    // перечисления. Иначе журнал пережил бы удаление аккаунта и обошёл бы
+    // собственное же удаление данных.
+    match /audit/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     function validCategory(c) {

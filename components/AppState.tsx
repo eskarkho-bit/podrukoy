@@ -803,7 +803,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     // любом шаге. Раньше весь обход шёл отсюда, и сбой посередине оставлял
     // наполовину удалённый аккаунт.
     try {
-      await setDoc(doc(db, 'deletions', uid), { requestedAt: serverTimestamp() });
+      // status нужен сверке: если триггер не запустится, она найдёт заявку
+      // запросом по нему и доведёт удаление до конца
+      await setDoc(doc(db, 'deletions', uid), {
+        requestedAt: serverTimestamp(),
+        status: 'pending',
+      });
     } catch (e) {
       deleting.current = false;
       console.warn('Не удалось создать заявку на удаление:', e);

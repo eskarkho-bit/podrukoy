@@ -3,6 +3,7 @@ import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import { audit, SYSTEM } from './audit';
 
 // Удаление аккаунта.
 //
@@ -30,25 +31,33 @@ const reached = (current: DeletionStage | undefined, stage: DeletionStage) =>
 
 /**
  * Выполняет удаление, начиная с незавершённого этапа.
- * Вызывается и триггером, и почасовой сверкой — поэтому вынесена отдельно.
+ * Вызывается и триггером, и сверкой — поэтому вынесена отдельно.
  */
-export async function runDeletion(uid: string): Promise<void> {
+export async function runDeletion(uid: string, correlationId: string): Promise<void> {
   const db = getFirestore();
   const ref = db.doc(`deletions/${uid}`);
   const snap = await ref.get();
   if (!snap.exists) return;
 
   let stage = (snap.get('stage') ?? 'orders') as DeletionStage;
-  if (stage === 'done') return;
+  if (stage === 'done' || snap.get('status') === 'done') return;
 
   const advance = async (next: DeletionStage) => {
     stage = next;
     await ref.set({ stage: next, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await audit({
+      action: 'account.deletion_stage',
+      actor: SYSTEM,
+      subject: { type: 'user', id: uid },
+      correlationId,
+      details: { stage: next },
+    });
   };
 
   // 1. Заявки: незакрытые отменяем, все — обезличиваем
   if (!reached(stage, 'orders')) {
     const orders = await db.collection('orders').where('clientId', '==', uid).get();
+    let anonymized = 0;
     for (const d of orders.docs) {
       const open = ['Поиск мастера', 'Есть предложения', 'В работе'].includes(d.get('status'));
       await d.ref.set({
@@ -61,7 +70,15 @@ export async function runDeletion(uid: string): Promise<void> {
         anonymizedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
       await deletePrefix(`orders/${d.id}/`);
+      anonymized += 1;
     }
+    await audit({
+      action: 'order.anonymized',
+      actor: SYSTEM,
+      subject: { type: 'user', id: uid },
+      correlationId,
+      details: { count: anonymized },
+    });
     await advance('threads');
   }
 
@@ -107,7 +124,18 @@ export async function runDeletion(uid: string): Promise<void> {
     await advance('done');
   }
 
-  await ref.set({ completedAt: FieldValue.serverTimestamp() }, { merge: true });
+  // status закрывает документ для сверки: она ищет ровно 'pending'
+  await ref.set({
+    status: 'done',
+    completedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  await audit({
+    action: 'account.deleted',
+    actor: SYSTEM,
+    subject: { type: 'user', id: uid },
+    correlationId,
+  });
   logger.info('Аккаунт удалён', { uid });
 }
 
@@ -137,6 +165,13 @@ async function deletePrefix(prefix: string) {
 export const onDeletionRequested = onDocumentCreated(
   { document: 'deletions/{uid}', retry: true },
   async (event) => {
-    await runDeletion(event.params.uid);
+    const uid = event.params.uid;
+    await audit({
+      action: 'account.deletion_requested',
+      actor: { type: 'user', uid },
+      subject: { type: 'user', id: uid },
+      correlationId: event.id,
+    });
+    await runDeletion(uid, event.id);
   },
 );

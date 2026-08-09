@@ -2,6 +2,7 @@ import { logger } from 'firebase-functions';
 import { onDocumentDeleted, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
+import { audit, SYSTEM } from './audit';
 
 // Что делать, когда мастер исчезает.
 //
@@ -68,6 +69,13 @@ export const onMasterDeleted = onDocumentDeleted(
       }
     }
 
+    await audit({
+      action: 'master.deleted',
+      actor: SYSTEM,
+      subject: { type: 'master', id: masterId },
+      correlationId: event.id,
+      details: { offersDropped: dropped, ordersReopened: orders.size },
+    });
     logger.info('Мастер удалён', { masterId, dropped, reopened: orders.size });
   },
 );
@@ -83,6 +91,13 @@ export const onMasterUnverified = onDocumentUpdated(
     // предложения убираем. Уже начатую работу оставляем — исполнитель на
     // месте, и бросать клиента посреди ремонта хуже.
     const dropped = await dropPendingOffers(event.params.masterId);
+    await audit({
+      action: 'master.unverified',
+      actor: SYSTEM,
+      subject: { type: 'master', id: event.params.masterId },
+      correlationId: event.id,
+      details: { offersDropped: dropped },
+    });
     logger.info('Допуск мастера снят', { masterId: event.params.masterId, dropped });
   },
 );

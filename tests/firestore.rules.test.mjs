@@ -731,21 +731,39 @@ describe('Решение модератора', () => {
 });
 
 describe('Заявка на удаление аккаунта', () => {
+  const request = (patch = {}) => ({
+    requestedAt: serverTimestamp(),
+    status: 'pending',
+    ...patch,
+  });
+
   test('человек просит удалить свой аккаунт', async () => {
-    await assertSucceeds(setDoc(doc(as('client1'), 'deletions/client1'), {
-      requestedAt: serverTimestamp(),
-    }));
+    await assertSucceeds(setDoc(doc(as('client1'), 'deletions/client1'), request()));
   });
 
   test('чужой аккаунт удалить не попросишь', async () => {
-    await assertFails(setDoc(doc(as('client2'), 'deletions/client1'), {
-      requestedAt: serverTimestamp(),
-    }));
+    await assertFails(setDoc(doc(as('client2'), 'deletions/client1'), request()));
   });
 
   test('нельзя подсунуть готовый этап или отметку о завершении', async () => {
+    await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), request({ stage: 'done' })));
+    await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), request({
+      completedAt: serverTimestamp(),
+    })));
+  });
+
+  // Заявка, созданная сразу «выполненной», не попала бы в выборку сверки —
+  // и удаление тихо не состоялось бы
+  test('нельзя создать заявку сразу завершённой', async () => {
+    await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), request({
+      status: 'done',
+    })));
+  });
+
+  test('время просьбы нельзя подделать', async () => {
     await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), {
-      requestedAt: serverTimestamp(), stage: 'done',
+      requestedAt: new Date('2020-01-01'),
+      status: 'pending',
     }));
   });
 
@@ -765,6 +783,43 @@ describe('Заявка на удаление аккаунта', () => {
     });
     await assertSucceeds(getDoc(doc(as('client1'), 'deletions/client1')));
     await assertFails(getDoc(doc(as('client2'), 'deletions/client1')));
+  });
+});
+
+describe('Журнал действий', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'audit/e1'), {
+        action: 'order.created',
+        actorType: 'user',
+        actorUid: 'client1',
+        subjectType: 'order',
+        subjectId: 'open',
+        correlationId: 'test',
+        details: {},
+      });
+    });
+  });
+
+  test('модератор читает журнал', async () => {
+    await assertSucceeds(getDoc(doc(as('admin1'), 'audit/e1')));
+  });
+
+  test('обычный пользователь журнал не читает', async () => {
+    await assertFails(getDoc(doc(as('client1'), 'audit/e1')));
+    await assertFails(getDoc(doc(as('master1'), 'audit/e1')));
+    await assertFails(getDoc(doc(anon(), 'audit/e1')));
+  });
+
+  // Смысл журнала в том, что запись нельзя ни подделать, ни стереть.
+  // Модератор здесь не исключение: он — тот, чьи решения журнал и фиксирует.
+  test('писать в журнал не может никто, включая модератора', async () => {
+    await assertFails(setDoc(doc(as('admin1'), 'audit/fake'), {
+      action: 'master.approved', actorType: 'system',
+    }));
+    await assertFails(setDoc(doc(as('client1'), 'audit/fake'), { action: 'order.created' }));
+    await assertFails(updateDoc(doc(as('admin1'), 'audit/e1'), { action: 'order.cancelled' }));
+    await assertFails(deleteDoc(doc(as('admin1'), 'audit/e1')));
   });
 });
 

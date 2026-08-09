@@ -587,6 +587,11 @@ function MasterApplicationScreen({
   const [binding, setBinding] = useState(false);
 
   const cardBound = !!application.cardBindingId;
+  // Платёж создан, банк ещё не ответил. Исход подтвердит сервер — вебхуком
+  // либо сверкой; до этого повторная попытка только создаст второй платёж.
+  const cardAwaiting = !cardBound && application.bindingState === 'pending';
+  const cardFailed = !cardBound
+    && (application.bindingState === 'failed' || application.bindingState === 'canceled');
   // Согласие на фотографию — отдельное и обязательно до съёмки: снимать
   // лицо, а потом спрашивать разрешение, поздно
   const [faceConsent, setFaceConsent] = useState(!!application.biometricConsent);
@@ -654,7 +659,8 @@ function MasterApplicationScreen({
     } else if (result === 'failed') {
       setError('Не удалось начать привязку карты. Попробуйте позже');
     }
-    // 'bound' и 'cancelled' ничего не показывают: результат придёт подпиской
+    // 'awaiting', 'already-bound' и 'cancelled' ничего не показывают: исход
+    // подтверждает сервер, и подписка на заявку принесёт его сама
   };
 
   const save = async (sendForReview: boolean) => {
@@ -948,6 +954,17 @@ function MasterApplicationScreen({
                   </Text>
                   <Text style={styles.cardBoundOk}>привязана</Text>
                 </View>
+              ) : cardAwaiting ? (
+                // Банк ответит не мгновенно, а уведомление от него может и не
+                // дойти — тогда исход доберёт сверка. Показываем ожидание, а
+                // не мнимый успех и не предложение платить второй раз.
+                <View style={styles.cardPending}>
+                  <Text style={styles.cardPendingText}>Проверяем оплату у банка…</Text>
+                  <Text style={styles.fieldHint}>
+                    Обычно занимает меньше минуты. Если банк ответит не сразу,
+                    мы завершим привязку сами — платить второй раз не нужно.
+                  </Text>
+                </View>
               ) : (
                 <PressableScale
                   style={[styles.faceBtn, binding && styles.loginBtnDim]}
@@ -955,15 +972,24 @@ function MasterApplicationScreen({
                   disabled={binding || loading}
                 >
                   <Text style={styles.faceBtnText}>
-                    {binding ? 'Открываем банк…' : 'Привязать карту'}
+                    {binding ? 'Открываем банк…' : cardFailed ? 'Попробовать снова' : 'Привязать карту'}
                   </Text>
                 </PressableScale>
               )}
+
+              {cardFailed && (
+                <Text style={styles.cardWarn}>
+                  {application.bindingState === 'canceled'
+                    ? 'Прошлая попытка не завершилась — карта не привязана.'
+                    : 'Прошлая попытка не удалась — карта не привязана.'}
+                </Text>
+              )}
+
               <Text style={styles.fieldHint}>
                 Номер карты вводится на странице банка — приложение его не видит
                 и не хранит. Нужна для подтверждения личности и будущих выплат.
               </Text>
-              {!cardBound && (
+              {!cardBound && !cardAwaiting && (
                 <Text style={styles.cardWarn}>
                   Без карты заявку отправить можно, но одобрят её вряд ли.
                 </Text>
@@ -1507,6 +1533,15 @@ const makeStyles = (t: Palette) => StyleSheet.create({
   cardBoundText: { color: t.text, fontWeight: '800', fontSize: 13 },
   cardBoundOk: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
   cardWarn: { color: t.warn, fontWeight: '700', fontSize: 11.5, marginTop: 6 },
+  cardPending: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.soft,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  cardPendingText: { color: t.blue, fontWeight: '800', fontSize: 13 },
   consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginBottom: 12 },
   checkbox: {
     width: 21,

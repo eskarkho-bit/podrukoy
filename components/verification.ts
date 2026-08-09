@@ -24,7 +24,15 @@ export type Application = {
   // Редакция согласия на обработку фотографии лица. Пусто — снимать нельзя:
   // это отдельное согласие, а не часть общего.
   biometricConsent: string | null;
+  // Ход последней попытки привязки. Пишет только сервер: 'pending' держится,
+  // пока банк не ответил, и снимается вебхуком либо сверкой.
+  bindingState: BindingState | null;
 };
+
+/** Состояние попытки привязки карты. Совпадает с BindingState в функциях. */
+export type BindingState = 'pending' | 'succeeded' | 'canceled' | 'failed';
+
+const BINDING_STATES: BindingState[] = ['pending', 'succeeded', 'canceled', 'failed'];
 
 export const EMPTY_APPLICATION: Application = {
   phone: '',
@@ -36,6 +44,7 @@ export const EMPTY_APPLICATION: Application = {
   status: 'draft',
   rejectionReason: null,
   biometricConsent: null,
+  bindingState: null,
 };
 
 export function applicationFrom(data: Record<string, unknown> | undefined): Application {
@@ -53,6 +62,9 @@ export function applicationFrom(data: Record<string, unknown> | undefined): Appl
       : 'draft',
     rejectionReason: typeof data.rejectionReason === 'string' ? data.rejectionReason : null,
     biometricConsent: typeof data.biometricConsent === 'string' ? data.biometricConsent : null,
+    bindingState: BINDING_STATES.includes(data.bindingState as BindingState)
+      ? (data.bindingState as BindingState)
+      : null,
   };
 }
 
@@ -61,7 +73,13 @@ export function phoneValid(phone: string): boolean {
   return /^\d{11}$/.test(phone.replace(/\D/g, ''));
 }
 
-export type CardBindingResult = 'bound' | 'cancelled' | 'not-configured' | 'failed';
+export type CardBindingResult =
+  /** Страница банка закрылась успешно — исход подтвердит сервер */
+  | 'awaiting'
+  | 'cancelled'
+  | 'not-configured'
+  | 'already-bound'
+  | 'failed';
 
 /**
  * Привязка карты.
@@ -72,16 +90,23 @@ export type CardBindingResult = 'bound' | 'cancelled' | 'not-configured' | 'fail
  * провайдера — правила Firestore запрещают мастеру писать эти поля самому.
  *
  * Возвращает 'not-configured', пока в функциях не заданы ключи мерчанта.
+ *
+ * Успех здесь означает только то, что человек дошёл до конца страницы банка.
+ * Привязанной карта станет, когда это подтвердит сервер — вебхуком или
+ * сверкой. Считать её привязанной по факту закрытия браузера нельзя: оплата
+ * могла не пройти, а «успешно» на экране при неудаче — худший вид вранья.
  */
 export async function startCardBinding(): Promise<CardBindingResult> {
   try {
-    const create = httpsCallable<unknown, { confirmationUrl?: string; configured?: boolean }>(
-      functions,
-      'createCardBinding',
-    );
+    const create = httpsCallable<unknown, {
+      confirmationUrl?: string;
+      configured?: boolean;
+      alreadyBound?: boolean;
+    }>(functions, 'createCardBinding');
     const { data } = await create({});
 
     if (data?.configured === false) return 'not-configured';
+    if (data?.alreadyBound) return 'already-bound';
     if (!data?.confirmationUrl) return 'failed';
 
     // Возврат в приложение по схеме podrukoy:// — она объявлена в app.json
@@ -91,8 +116,7 @@ export async function startCardBinding(): Promise<CardBindingResult> {
     );
     if (result.type !== 'success') return 'cancelled';
 
-    // Токен придёт от вебхука провайдера: подписка на анкету увидит его сама
-    return 'bound';
+    return 'awaiting';
   } catch (e) {
     console.warn('Не удалось начать привязку карты:', e);
     return 'failed';

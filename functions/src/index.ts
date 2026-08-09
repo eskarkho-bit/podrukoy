@@ -8,10 +8,12 @@ import {
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
+import { audit, SYSTEM, type AuditAction } from './audit';
 
 export { createCardBinding, yookassaWebhook } from './payments';
 export { onDeletionRequested } from './deletion';
 export { onMasterDeleted, onMasterUnverified } from './masterExit';
+export { reconcile } from './reconcile';
 
 // Серверная часть «Подрукой». Здесь живёт всё, чему нельзя доверять клиенту:
 // рассылка уведомлений (клиент не вправе читать чужие токены) и пересчёт
@@ -37,6 +39,14 @@ const MASTERS_SCAN_LIMIT = 1000;
 export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event) => {
   const order = event.data?.data();
   if (!order || order.status !== 'Поиск мастера') return;
+
+  await audit({
+    action: 'order.created',
+    actor: { type: 'user', uid: String(order.clientId ?? '') },
+    subject: { type: 'order', id: event.params.orderId },
+    correlationId: event.id,
+    details: { category: String(order.category ?? ''), hasCity: !!order.city },
+  });
 
   const db = getFirestore();
   const snap = await db.collection('masters').limit(MASTERS_SCAN_LIMIT).get();
@@ -136,6 +146,31 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
   const clientId = after.clientId as string | undefined;
   const masterId = after.masterId as string | undefined;
 
+  // Смена статуса — единственный след того, как двигалась сделка. Без него
+  // спор «я не соглашался на эту цену» разобрать нечем.
+  const ACTION_BY_STATUS: Record<string, AuditAction> = {
+    'В работе': 'order.master_selected',
+    'Ждёт подтверждения': 'order.finished',
+    'Завершена': 'order.confirmed',
+    'Отменена': 'order.cancelled',
+    'Поиск мастера': 'order.reopened',
+  };
+  const action = ACTION_BY_STATUS[after.status as string];
+  if (action) {
+    await audit({
+      action,
+      actor: SYSTEM,
+      subject: { type: 'order', id: event.params.orderId },
+      correlationId: event.id,
+      details: {
+        from: String(before.status ?? ''),
+        to: String(after.status ?? ''),
+        masterId: masterId ?? null,
+        agreedPrice: typeof after.agreedPrice === 'number' ? after.agreedPrice : null,
+      },
+    });
+  }
+
   // Клиент выбрал исполнителя
   if (after.status === 'В работе' && masterId) {
     await pushTo(
@@ -180,6 +215,33 @@ export const onVerificationChanged = onDocumentWritten(
 
     const db = getFirestore();
     const masterId = event.params.masterId;
+
+    // Решение модератора — самое чувствительное действие в системе: оно
+    // открывает доступ к адресам клиентов. Кто и когда его принял, должно
+    // быть видно всегда.
+    const VERDICT: Record<string, AuditAction> = {
+      pending: 'master.applied',
+      approved: 'master.approved',
+      rejected: 'master.rejected',
+    };
+    const action = VERDICT[status as string];
+    if (action) {
+      const reviewer = after.reviewedBy;
+      await audit({
+        action,
+        actor: typeof reviewer === 'string' && reviewer
+          ? { type: 'admin', uid: reviewer }
+          : { type: 'user', uid: masterId },
+        subject: { type: 'master', id: masterId },
+        correlationId: event.id,
+        details: {
+          hasPhoto: !!after.photoUrl,
+          hasCard: !!after.cardLast4,
+          // Причина отказа — свободный текст мастеру, в журнале хватит факта
+          rejected: status === 'rejected',
+        },
+      });
+    }
 
     if (status === 'pending') {
       const admins = await db.collection('admins').get();
@@ -238,6 +300,19 @@ export const onReviewWritten = onDocumentWritten(
       .map((d) => Number(d.get('stars')))
       .filter((n) => Number.isFinite(n) && n >= 1 && n <= 5);
     if (!stars.length) return;
+
+    if (event.data?.after.exists && !event.data.before.exists) {
+      await audit({
+        action: 'review.created',
+        actor: { type: 'user', uid: String(event.data.after.get('clientId') ?? '') },
+        subject: { type: 'master', id: masterId },
+        correlationId: event.id,
+        details: {
+          orderId: event.params.orderId,
+          stars: Number(event.data.after.get('stars')) || 0,
+        },
+      });
+    }
 
     const sum = stars.reduce((acc, n) => acc + n, 0);
     await db.doc(`masters/${masterId}`).set({
