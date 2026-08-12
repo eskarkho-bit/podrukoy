@@ -44,7 +44,8 @@
     "web": "expo start --web",
     "test:rules": "firebase emulators:exec --only firestore --project demo-podrukoy \"node --test tests/firestore.rules.test.mjs\"",
     "rules:check": "node scripts/rules-state.mjs check",
-    "rules:deploy": "firebase deploy --only firestore:rules,firestore:indexes,storage && node scripts/rules-state.mjs record"
+    "rules:deploy": "firebase deploy --only firestore:rules,firestore:indexes && node scripts/rules-state.mjs record firestore.rules firestore.indexes.json",
+    "storage:deploy": "firebase deploy --only storage && node scripts/rules-state.mjs record storage.rules"
   },
   "private": true
 }

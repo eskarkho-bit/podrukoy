@@ -48,7 +48,8 @@ npm start
 | `npm run android` / `ios` / `web` | запуск на платформе |
 | `npm run test:rules` | 103 теста правил доступа на эмуляторе Firestore |
 | `npm run rules:check` | не отстали ли правила в бою от репозитория |
-| `npm run rules:deploy` | выкатить правила, индексы, Storage и записать отпечаток |
+| `npm run rules:deploy` | выкатить правила Firestore и индексы |
+| `npm run storage:deploy` | выкатить правила Storage (нужен подключённый Storage) |
 
 Проверки, которые обязан пройти любой коммит:
 
@@ -81,11 +82,17 @@ YOOKASSA_SECRET_KEY=
 упрётся в старые права.
 
 ```bash
-npm run rules:deploy                      # правила, индексы, Storage
+npm run rules:deploy                      # правила Firestore и индексы
+npm run storage:deploy                    # правила Storage, отдельно (см. ниже)
 cd functions && npm install && cd ..
 firebase deploy --only functions          # 12 функций
 eas update --channel production           # JS-обновление приложения
 ```
+
+Правила Firestore и Storage выкатываются **раздельно** намеренно: Firebase
+готовит все цели одним заходом, и если Storage в проекте не подключён, падение
+на нём отменяет выкатку правил Firestore тоже. Разделение позволяет закрыть
+доступ к данным, не дожидаясь настройки хранилища.
 
 Сборка в сторы — через EAS: профили `development`, `preview`, `production`
 в [`eas.json`](eas.json).
