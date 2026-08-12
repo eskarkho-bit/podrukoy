@@ -69,8 +69,17 @@ export type AuditSubject = {
 export type AuditDetails = Record<string, string | number | boolean | null>;
 
 // Записи не хранятся вечно: год с запасом покрывает и разбор спора, и
-// проверку. Удаляет их Firestore по TTL-политике на поле expiresAt,
-// объявленной в firestore.indexes.json.
+// проверку.
+//
+// Поле expiresAt проставляется всегда, но само удаление делает Firestore по
+// TTL-политике, а она требует включённого биллинга. Пока его нет, политику не
+// выкатить (деплой падает с 403), и записи копятся. Как подключите Blaze —
+// вернуть в firestore.indexes.json:
+//
+//   { "collectionGroup": "audit", "fieldPath": "expiresAt",
+//     "ttl": true, "indexes": [] }
+//
+// До тех пор поле лежит без дела и ничего не ломает.
 const RETENTION_DAYS = 400;
 
 // Даже идентификаторы бывают длинными, а причина отказа модератора —
