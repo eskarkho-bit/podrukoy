@@ -236,13 +236,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setAdminOpen(false);
       return;
     }
-    let alive = true;
-    getDoc(doc(db, 'admins', uid))
-      .then((snap) => { if (alive) setIsAdmin(snap.exists()); })
+    // Подписка, а не разовое чтение: документ модератора заводят вручную в
+    // консоли, обычно при открытом приложении. С разовым чтением раздел не
+    // появлялся до перезапуска, и это выглядело как поломка, хотя всё было
+    // сделано правильно.
+    return onSnapshot(
+      doc(db, 'admins', uid),
+      (snap) => setIsAdmin(snap.exists()),
       // Правила разрешают читать только свой документ, поэтому отказ здесь —
       // нормальный ответ «вы не модератор», а не сбой
-      .catch(() => { if (alive) setIsAdmin(false); });
-    return () => { alive = false; };
+      () => setIsAdmin(false),
+    );
   }, [uid]);
 
   // ---------- push-токен ----------
