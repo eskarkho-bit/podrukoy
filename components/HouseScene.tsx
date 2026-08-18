@@ -6,8 +6,10 @@ import Animated, {
   FadeIn,
   FadeInDown,
   FadeOut,
+  cancelAnimation,
   interpolate,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withSpring,
@@ -101,6 +103,18 @@ function cameraTarget(area: AreaId, stage: Stage, room: Room | null, hasObject: 
   return { s: hasObject ? 2.0 : 1.8, x: room.x, y: room.y };
 }
 
+// Вдох-выдох: 0 в начале и в конце периода, 1 в середине
+function wave(phase: number) {
+  'worklet';
+  return (1 - Math.cos(2 * Math.PI * phase)) / 2;
+}
+
+// Качание: 0 в покое, ±1 по краям размаха
+function swing(phase: number) {
+  'worklet';
+  return Math.sin(2 * Math.PI * phase);
+}
+
 type Props = {
   area: AreaId;
   stage: Stage;
@@ -110,11 +124,14 @@ type Props = {
   onSelectRoom: (room: Room) => void;
   onSelectObject: (obj: SceneObject) => void;
   onBack: () => void;
+  // Сцену не видно: другая вкладка, открытая шторка, режим мастера.
+  // Фоновые циклы на это время останавливаются.
+  paused?: boolean;
 };
 
 export function HouseScene({
   area, stage, roomId, focusedObjectId,
-  onOpenHouse, onSelectRoom, onSelectObject, onBack,
+  onOpenHouse, onSelectRoom, onSelectObject, onBack, paused,
 }: Props) {
   const [w, setW] = useState(0);
   const k = w / 400; // масштаб: координаты сцены → пиксели экрана
@@ -125,25 +142,60 @@ export function HouseScene({
   const cy = useSharedValue(0);
   // Прогресс «открытия» дома: 0 — крыша на месте, 1 — виден план комнат
   const openP = useSharedValue(0);
-  // Дыхание дома и его плавное отключение при входе внутрь
+  // Фазы бесконечных циклов: 0…1 по кругу, а само значение берётся синусом от
+  // фазы. Поэтому ноль — это состояние покоя, и цикл можно оборвать в любой
+  // момент, вернув фазу в ноль, а не доигрывая период до конца.
   const breath = useSharedValue(0);
+  // Амплитуда дыхания отдельно от фазы: при входе в дом она гаснет плавно
   const breathOn = useSharedValue(1);
   const sway = useSharedValue(0);
   const drift = useSharedValue(0);
   const prevStage = useRef<Stage>('exterior');
 
-  // Бесконечные, почти незаметные циклы: дыхание, покачивание деревьев, облака
+  const reduceMotion = useReducedMotion();
+  // Циклы живут на UI-потоке и сами не заканчиваются. Без этого дом дышал, а
+  // облака плыли и под другой вкладкой, и под открытой шторкой: работа, которой
+  // никто не видит, но за которую платит батарея.
+  const idle = !!paused || reduceMotion;
+
+  // Деревья и облака двигаются, только пока сцену видно
   useEffect(() => {
-    breath.value = withRepeat(
-      withTiming(1, { duration: 4200, easing: Easing.inOut(Easing.sin) }), -1, true,
-    );
-    sway.value = withRepeat(
-      withTiming(1, { duration: 5600, easing: Easing.inOut(Easing.sin) }), -1, true,
-    );
-    drift.value = withRepeat(
-      withTiming(1, { duration: 80000, easing: Easing.linear }), -1, false,
-    );
-  }, []);
+    if (idle) {
+      // При фазе 0 первое облако стоит за краем кадра — в покое сдвигаем их так,
+      // чтобы небо не выглядело пустым
+      drift.value = reduceMotion ? 0.25 : 0;
+      return;
+    }
+    sway.value = 0;
+    drift.value = 0;
+    sway.value = withRepeat(withTiming(1, { duration: 11200, easing: Easing.linear }), -1, false);
+    drift.value = withRepeat(withTiming(1, { duration: 80000, easing: Easing.linear }), -1, false);
+    return () => {
+      cancelAnimation(sway);
+      cancelAnimation(drift);
+      sway.value = 0;
+    };
+  }, [idle, reduceMotion]);
+
+  // Дыхание дома: замирает внутри дома и полностью останавливается, когда
+  // сцены не видно
+  useEffect(() => {
+    if (idle || stage !== 'exterior') {
+      // Сперва гаснет амплитуда — оборвать цикл сразу значило бы бросить дом
+      // на полувдохе, — и только по её окончании останавливается сама фаза
+      breathOn.value = withTiming(0, { duration: 600 }, (done) => {
+        if (done) {
+          cancelAnimation(breath);
+          breath.value = 0;
+        }
+      });
+      return;
+    }
+    breath.value = 0;
+    breath.value = withRepeat(withTiming(1, { duration: 8400, easing: Easing.linear }), -1, false);
+    breathOn.value = withTiming(1, { duration: 600 });
+    return () => cancelAnimation(breath);
+  }, [idle, stage]);
 
   // Камера плавно едет к цели при каждой смене состояния
   useEffect(() => {
@@ -170,12 +222,12 @@ export function HouseScene({
   }));
 
   const houseStyle = useAnimatedStyle(() => {
-    const b = breath.value * breathOn.value;
+    const b = wave(breath.value) * breathOn.value;
     return { transform: [{ translateY: -2.6 * b * k }, { scale: 1 + 0.005 * b }] };
   });
 
   const shadowStyle = useAnimatedStyle(() => {
-    const b = breath.value * breathOn.value;
+    const b = wave(breath.value) * breathOn.value;
     return { opacity: 0.09 - 0.02 * b, transform: [{ scale: 1 - 0.02 * b }] };
   });
 
@@ -194,10 +246,12 @@ export function HouseScene({
   }));
 
   const tree1Style = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${interpolate(sway.value, [0, 1], [-1.2, 1.2])}deg` }],
+    transform: [{ rotate: `${1.2 * swing(sway.value)}deg` }],
   }));
+  // Второе дерево качается в противоход первому и слабее — иначе лужайка
+  // выглядит как один механизм
   const tree2Style = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${interpolate(sway.value, [0, 1], [0.9, -0.9])}deg` }],
+    transform: [{ rotate: `${-0.9 * swing(sway.value)}deg` }],
   }));
 
   // Внутри дома облака гаснут, чтобы не отвлекать от плана комнат
@@ -357,9 +411,13 @@ function Layer({ children }: { children: ReactNode }) {
 
 // Комната на плане: гаснет до 25%, когда выбрана другая
 function RoomLayer({ room, dimmed }: { room: Room; dimmed: boolean }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: withTiming(dimmed ? 0.25 : 1, { duration: 320 }),
-  }));
+  // Анимация запускается из эффекта, а не изнутри useAnimatedStyle: там она
+  // пересоздавалась бы на каждой перерисовке и могла оборваться на полпути
+  const opacity = useSharedValue(dimmed ? 0.25 : 1);
+  useEffect(() => {
+    opacity.value = withTiming(dimmed ? 0.25 : 1, { duration: 320 });
+  }, [dimmed]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, style]} pointerEvents="none">
       <Layer>
@@ -382,9 +440,12 @@ function RoomChip({
   mode: 'normal' | 'dim' | 'hidden';
   onPress: () => void;
 }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: withTiming(mode === 'normal' ? 1 : mode === 'dim' ? 0.25 : 0, { duration: 320 }),
-  }));
+  const target = mode === 'normal' ? 1 : mode === 'dim' ? 0.25 : 0;
+  const opacity = useSharedValue(target);
+  useEffect(() => {
+    opacity.value = withTiming(target, { duration: 320 });
+  }, [target]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
     <Animated.View
       entering={FadeInDown.delay(140 + index * 65).duration(340)}
@@ -407,9 +468,11 @@ function ObjectChip({
 }: {
   obj: SceneObject; k: number; index: number; focused: boolean; onPress: () => void;
 }) {
-  const style = useAnimatedStyle(() => ({
-    transform: [{ scale: withSpring(focused ? 1.08 : 1, springs.micro) }],
-  }));
+  const scale = useSharedValue(focused ? 1.08 : 1);
+  useEffect(() => {
+    scale.value = withSpring(focused ? 1.08 : 1, springs.micro);
+  }, [focused]);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
     <Animated.View
       entering={FadeInDown.delay(160 + index * 70).duration(320)}

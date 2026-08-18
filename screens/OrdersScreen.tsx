@@ -3,12 +3,16 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import Animated, {
   FadeIn,
   FadeInDown,
+  FadeOut,
   FadeOutUp,
+  interpolateColor,
   LinearTransition,
   useAnimatedStyle,
+  useSharedValue,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { useIsFocused } from '@react-navigation/native';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { AreaId, HouseScene, ROOMS, Room, SceneObject, Stage } from '../components/HouseScene';
@@ -84,12 +88,14 @@ type Props = {
   onOpenOrderChat: (orderId: string) => void;
   // Сообщаем наверх, что открыта какая-то шторка — чтобы спрятать нижнюю панель
   onOverlayOpenChange?: (open: boolean) => void;
+  // Экран целиком перекрыт другим оверлеем — режимом мастера или модерацией
+  covered?: boolean;
 };
 
 export function OrdersScreen({
   orders, addresses, activeAddress, onSelectAddress, onAddAddress,
   onCreateOrder, onCancelOrder, onConfirmOrder, onAcceptOffer, onSubmitReview,
-  onAcceptPrice, onDeclinePrice, onOpenOrderChat, onOverlayOpenChange,
+  onAcceptPrice, onDeclinePrice, onOpenOrderChat, onOverlayOpenChange, covered,
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -113,6 +119,11 @@ export function OrdersScreen({
 
   // Открытый заказ берём по id из свежего списка — чтобы смена статуса отражалась в шторке
   const openedOrder = orders.find((o) => o.id === openedOrderId) ?? null;
+
+  // Вкладки остаются смонтированными после первого захода, поэтому сцена сама
+  // не узнает, что её больше не видно. Считаем это здесь и говорим ей прямо.
+  const isFocused = useIsFocused();
+  const sceneHidden = !isFocused || !!covered || !!activeObject || !!openedOrder;
 
   useEffect(() => {
     onOverlayOpenChange?.(!!activeObject || !!openedOrder);
@@ -237,6 +248,7 @@ export function OrdersScreen({
             }}
             onSelectObject={setActiveObject}
             onBack={goBack}
+            paused={sceneHidden}
           />
         </Animated.View>
 
@@ -275,6 +287,7 @@ export function OrdersScreen({
               <Animated.View
                 key={order.id}
                 entering={FadeInDown.delay(mountedWithStagger ? 240 + i * STAGGER : 0).duration(360)}
+                exiting={FadeOut.duration(180)}
                 layout={LinearTransition.springify().damping(20).stiffness(170)}
               >
                 <PressableScale style={styles.orderItem} onPress={() => setOpenedOrderId(order.id)}>
@@ -342,8 +355,12 @@ export function OrdersScreen({
 function HeaderChevron({ open }: { open: boolean }) {
   const { mode } = useTheme();
   const styles = themed[mode];
+  const turn = useSharedValue(open ? 1 : 0);
+  useEffect(() => {
+    turn.value = withSpring(open ? 1 : 0, springs.card);
+  }, [open]);
   const style = useAnimatedStyle(() => ({
-    transform: [{ rotate: withSpring(open ? '180deg' : '0deg', springs.card) }],
+    transform: [{ rotate: `${turn.value * 180}deg` }],
   }));
   return <Animated.Text style={[styles.headerChevron, style]}>▾</Animated.Text>;
 }
@@ -356,9 +373,19 @@ function Tabs({ area, onSelect }: { area: AreaId; onSelect: (a: AreaId) => void 
   const pillW = rowW > 0 ? (rowW - 8) / 3 : 0;
   const idx = AREAS.indexOf(area);
 
+  // Подсветка едет к выбранной вкладке, но первое появление — уже на месте:
+  // ширина известна только после замера, и пружина от нуля читалась бы как рывок
+  const x = useSharedValue(0);
+  const measured = useRef(false);
+  useEffect(() => {
+    if (pillW <= 0) return;
+    if (measured.current) x.value = withSpring(idx * pillW, springs.card);
+    else x.value = idx * pillW;
+    measured.current = true;
+  }, [idx, pillW]);
   const pillStyle = useAnimatedStyle(() => ({
     width: pillW,
-    transform: [{ translateX: withSpring(idx * pillW, springs.card) }],
+    transform: [{ translateX: x.value }],
   }));
 
   return (
@@ -382,8 +409,12 @@ function TabLabel({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const on = useSharedValue(selected ? 1 : 0);
+  useEffect(() => {
+    on.value = withTiming(selected ? 1 : 0, { duration: 220 });
+  }, [selected]);
   const style = useAnimatedStyle(() => ({
-    color: withTiming(selected ? t.accentStrong : t.textSoft, { duration: 220 }),
+    color: interpolateColor(on.value, [0, 1], [t.textSoft, t.accentStrong]),
   }));
   return (
     <Pressable style={styles.tab} onPress={onPress}>

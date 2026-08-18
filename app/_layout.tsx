@@ -2,8 +2,9 @@ import * as Notifications from 'expo-notifications';
 import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
-import 'react-native-reanimated';
+import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ReduceMotion, ReducedMotionConfig } from 'react-native-reanimated';
 import { AppStateProvider, useAppState } from '../components/AppState';
 import { AuthProvider, useAuth } from '../components/AuthState';
 import { ConsentGate } from '../components/ConsentGate';
@@ -67,8 +68,14 @@ function RootShell() {
   }, [user]);
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+    // Корень жестов нужен всему, что тянут пальцем, — сейчас это нижние шторки
+    <GestureHandlerRootView style={[styles.root, { backgroundColor: colors.bg }]}>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+
+      {/* Уважаем системное «уменьшение движения»: тогда анимации не
+          проигрываются, а сразу показывают результат. Настройка общая на все
+          анимации Reanimated, поэтому стоит один раз в корне. */}
+      <ReducedMotionConfig mode={ReduceMotion.System} />
 
       <Stack
         screenOptions={{
@@ -94,7 +101,7 @@ function RootShell() {
 
       {/* Поверх всего, включая режим мастера: сбой важнее того, что открыто */}
       {notice && <NoticeBanner text={notice} onDismiss={dismissNotice} />}
-    </View>
+    </GestureHandlerRootView>
   );
 }
 

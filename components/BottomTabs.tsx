@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import Animated, {
+  interpolateColor,
   useAnimatedStyle,
+  useSharedValue,
   withSpring,
   withTiming,
   ZoomIn,
@@ -34,14 +36,36 @@ export function BottomTabs({ active, onSelect, hasUnreadMessages, hidden }: Prop
   const pillW = barW > 0 ? (barW - 12) / 3 : 0;
   const idx = TABS.findIndex((t) => t.id === active);
 
+  // Анимации запускаются из эффектов, а не изнутри useAnimatedStyle: панель
+  // перерисовывается на каждой смене вкладки и на каждом непрочитанном
+  // сообщении, и анимация, созданная в стиле, перезапускалась бы на полпути.
+  const x = useSharedValue(0);
+  const measured = useRef(false);
+  useEffect(() => {
+    if (pillW <= 0) return;
+    // Первое появление — сразу на месте: ширина известна только после замера
+    if (measured.current) x.value = withSpring(idx * pillW, springs.card);
+    else x.value = idx * pillW;
+    measured.current = true;
+  }, [idx, pillW]);
+
+  const away = useSharedValue(hidden ? 1 : 0);
+  useEffect(() => {
+    away.value = withTiming(hidden ? 1 : 0, { duration: 220 });
+  }, [hidden]);
+  const shift = useSharedValue(hidden ? 24 : 0);
+  useEffect(() => {
+    shift.value = withSpring(hidden ? 24 : 0, springs.sheet);
+  }, [hidden]);
+
   const pillStyle = useAnimatedStyle(() => ({
     width: pillW,
-    transform: [{ translateX: withSpring(idx * pillW, springs.card) }],
+    transform: [{ translateX: x.value }],
   }));
 
   const wrapStyle = useAnimatedStyle(() => ({
-    opacity: withTiming(hidden ? 0 : 1, { duration: 220 }),
-    transform: [{ translateY: withSpring(hidden ? 24 : 0, springs.sheet) }],
+    opacity: 1 - away.value,
+    transform: [{ translateY: shift.value }],
   }));
 
   return (
@@ -72,12 +96,21 @@ function TabButton({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const on = useSharedValue(selected ? 1 : 0);
+  useEffect(() => {
+    on.value = withTiming(selected ? 1 : 0, { duration: 220 });
+  }, [selected]);
+  const scale = useSharedValue(selected ? 1.08 : 1);
+  useEffect(() => {
+    scale.value = withSpring(selected ? 1.08 : 1, springs.micro);
+  }, [selected]);
+
   const textStyle = useAnimatedStyle(() => ({
-    color: withTiming(selected ? t.accentStrong : t.textMuted, { duration: 220 }),
-    opacity: withTiming(selected ? 1 : 0.85, { duration: 220 }),
+    color: interpolateColor(on.value, [0, 1], [t.textMuted, t.accentStrong]),
+    opacity: 0.85 + 0.15 * on.value,
   }));
   const iconStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: withSpring(selected ? 1.08 : 1, springs.micro) }],
+    transform: [{ scale: scale.value }],
   }));
 
   return (

@@ -24,6 +24,7 @@ import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
+import { SheetGrabber, useSheetDrag } from './sheetDrag';
 import { categoryFor, flowFor, ServiceType, type Category } from './serviceOptions';
 import { newOrderId } from '../firebaseConfig';
 import type { SceneObject } from './HouseScene';
@@ -71,6 +72,10 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   const [draftId] = useState(newOrderId);
 
   const flow = flowFor(object.id);
+
+  // Пока показываем «Заявка создана», шторка закрывается сама — забирать её
+  // из-под руки пользователя в этот момент нечестно, поэтому жест выключен
+  const { gesture, cardStyle } = useSheetDrag(onClose, step !== 'done');
 
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
@@ -171,9 +176,9 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
           entering={SlideInDown.springify().damping(19).stiffness(150).mass(1)}
           exiting={SlideOutDown.duration(280)}
           layout={LinearTransition.springify().damping(20).stiffness(170)}
-          style={styles.card}
+          style={[styles.card, cardStyle]}
         >
-          <View style={styles.handle} />
+          <SheetGrabber gesture={gesture} />
 
           <Animated.View entering={FadeIn.delay(90).duration(280)} style={styles.header}>
             {/* Стрелка назад появляется, когда есть куда возвращаться */}
@@ -305,14 +310,6 @@ const makeStyles = (t: Palette) => StyleSheet.create({
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: t.toggleOff,
-    marginBottom: 16,
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
   headerText: { flex: 1 },

@@ -12,6 +12,8 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { PressableScale } from '../components/PressableScale';
 import { authErrorText, useAuth } from '../components/AuthState';
 import { currentConsents, LEGAL_DOCS, rememberConsent, type LegalDocId } from '../components/legal';
+import { CityPicker } from '../components/CityPicker';
+import { rememberSignup } from '../components/signupDraft';
 import { LegalScreen } from './LegalScreen';
 import { Palette, palettes, useTheme } from '../theme';
 
@@ -34,6 +36,12 @@ export function AuthScreen() {
   // Галочка снята по умолчанию: предустановленное согласие согласием не является
   const [accepted, setAccepted] = useState(false);
   const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
+  // Город и адрес спрашиваем сразу: без города заявка не найдёт мастеров, а
+  // просить адрес в момент вызова мастера — терять человека на полпути
+  const [cityKey, setCityKey] = useState('');
+  const [cityName, setCityName] = useState('');
+  const [address, setAddress] = useState('');
+  const [pickingCity, setPickingCity] = useState(false);
 
   const isRegister = mode === 'register';
 
@@ -77,6 +85,14 @@ export function AuthScreen() {
       setError('Пароль — не короче 6 символов');
       return;
     }
+    if (isRegister && !cityKey) {
+      setError('Выберите населённый пункт — без него заявку не увидят мастера');
+      return;
+    }
+    if (isRegister && address.trim().length < 5) {
+      setError('Укажите адрес: улицу и дом');
+      return;
+    }
     // Согласие должно быть получено до того, как мы начали обрабатывать
     // данные, а регистрация — это уже обработка имени и email
     if (isRegister && !accepted) {
@@ -88,9 +104,10 @@ export function AuthScreen() {
     setLoading(true);
     try {
       if (isRegister) {
-        // Согласие даётся здесь, а профиль в базе создаётся после входа,
-        // когда появится uid, — передаём его туда через legal.ts
+        // Согласие и профиль даются здесь, а запись в базу происходит после
+        // входа, когда появится uid, — передаём их туда через модули-хранилища
         rememberConsent(currentConsents());
+        rememberSignup({ city: cityKey, address: address.trim() });
         await register(name, e, password);
       } else await signIn(e, password);
       // При успехе экран пропадёт сам: сессия появится в AuthProvider
@@ -168,6 +185,37 @@ export function AuthScreen() {
             returnKeyType="go"
           />
 
+          {isRegister && (
+            <Animated.View entering={FadeInDown.duration(260)}>
+              <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Населённый пункт</Text>
+              {/* Выбор из списка, а не ввод: одинаковое написание у клиента и
+                  мастера — единственное, что связывает заявку с исполнителем */}
+              <PressableScale
+                style={styles.pickerField}
+                onPress={() => setPickingCity(true)}
+                disabled={loading}
+              >
+                <Text style={[styles.pickerValue, !cityName && styles.pickerPlaceholder]}>
+                  {cityName || 'Выберите из списка'}
+                </Text>
+                <Text style={styles.pickerChevron}>›</Text>
+              </PressableScale>
+
+              <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Адрес</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={address}
+                onChangeText={setAddress}
+                placeholder="ул. Ленина, 24, кв. 5"
+                placeholderTextColor={t.textMuted}
+                editable={!loading}
+              />
+              <Text style={styles.fieldHint}>
+                Адрес увидит только тот мастер, которого вы выберете
+              </Text>
+            </Animated.View>
+          )}
+
           {/* Согласие — до регистрации, а не после: она уже обработка данных */}
           {isRegister && (
             <Animated.View entering={FadeInDown.duration(260)} style={styles.consentRow}>
@@ -238,6 +286,18 @@ export function AuthScreen() {
       </ScrollView>
 
       {openDoc && <LegalScreen docId={openDoc} onClose={() => setOpenDoc(null)} />}
+
+      {pickingCity && (
+        <CityPicker
+          value={cityKey}
+          onSelect={(key, name) => {
+            setCityKey(key);
+            setCityName(name);
+            setPickingCity(false);
+          }}
+          onClose={() => setPickingCity(false)}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -287,6 +347,21 @@ const makeStyles = (t: Palette) => StyleSheet.create({
     fontSize: 13.5,
     color: t.text,
   },
+  fieldHint: { color: t.textMuted, fontWeight: '600', fontSize: 11, marginTop: 6 },
+  pickerField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: t.inputBorder,
+    borderRadius: 12,
+    backgroundColor: t.inputBg,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  pickerValue: { flex: 1, fontSize: 14, fontWeight: '700', color: t.text },
+  pickerPlaceholder: { color: t.textMuted, fontWeight: '600' },
+  pickerChevron: { fontSize: 18, fontWeight: '700', color: t.textMuted },
   consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginTop: 16 },
   checkbox: {
     width: 21,

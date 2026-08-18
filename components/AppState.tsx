@@ -25,6 +25,7 @@ import { palettes, ThemeContext, ThemeMode } from '../theme';
 import { authErrorText, useAuth } from './AuthState';
 import { firestoreErrorText } from './firestoreError';
 import { currentConsents, takePendingConsent, type Consents } from './legal';
+import { takeSignupDraft } from './signupDraft';
 import { OrderDraft } from './ActionSheet';
 import { getPushToken, notifyLocal } from './notifications';
 import { deleteVerificationPhoto, uploadOrderPhoto } from './photoUpload';
@@ -205,15 +206,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     return onSnapshot(ref, (snap) => {
       if (!snap.exists()) {
         if (deleting.current) return;
+        // Город, адрес и согласие человек указал на экране регистрации —
+        // записываем их тем же действием, что создаёт профиль. Запасные
+        // значения нужны тем, кто регистрировался до появления этих полей.
+        const signup = takeSignupDraft();
+        const address = signup?.address || DEFAULT_ADDRESS;
         setDoc(ref, {
           name: user?.displayName ?? 'Гость',
           email: user?.email ?? '',
-          addresses: [DEFAULT_ADDRESS],
-          activeAddress: DEFAULT_ADDRESS,
-          city: '',
+          addresses: [address],
+          activeAddress: address,
+          city: signup?.city ?? '',
           themeMode: 'light',
-          // Согласие человек дал на экране регистрации — записываем его тем
-          // же действием, что создаёт профиль
           consents: takePendingConsent() ?? {},
           createdAt: serverTimestamp(),
         }).catch((e) => console.warn('Не удалось создать профиль:', e));

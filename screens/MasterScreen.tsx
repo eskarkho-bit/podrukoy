@@ -19,7 +19,9 @@ import Animated, {
   LinearTransition,
   SlideInRight,
   SlideOutRight,
+  cancelAnimation,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withSpring,
@@ -53,6 +55,8 @@ import { CATEGORIES, cityKey, type Category } from '../components/serviceOptions
 import { deleteVerificationPhoto, uploadVerificationPhoto } from '../components/photoUpload';
 import { firestoreErrorText } from '../components/firestoreError';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
+import { CityPicker } from '../components/CityPicker';
+import { settlementLabel } from '../components/cities';
 import { LegalScreen } from './LegalScreen';
 import {
   applicationFrom,
@@ -178,10 +182,18 @@ export function MasterScreen({ open, onClose }: Props) {
 
   const openJob = jobs.find((j) => j.id === openJobId) ?? null;
 
-  // Весь оверлей мягко выезжает справа, как вложенный экран
+  // Весь оверлей мягко выезжает справа, как вложенный экран. Значения ведём из
+  // эффекта, а не изнутри стиля: экран перерисовывается на каждое обновление
+  // ленты и переписки, и анимация в стиле начиналась бы заново.
+  const shown = useSharedValue(open ? 1 : 0);
+  const slide = useSharedValue(open ? 0 : 60);
+  useEffect(() => {
+    shown.value = withTiming(open ? 1 : 0, { duration: 260 });
+    slide.value = withSpring(open ? 0 : 60, springs.nav);
+  }, [open]);
   const layerStyle = useAnimatedStyle(() => ({
-    opacity: withTiming(open ? 1 : 0, { duration: 260 }),
-    transform: [{ translateX: withSpring(open ? 0 : 60, springs.nav) }],
+    opacity: shown.value,
+    transform: [{ translateX: slide.value }],
   }));
 
   // Анкету проверяем при каждом открытии раздела: она могла появиться
@@ -596,6 +608,7 @@ function MasterApplicationScreen({
   // лицо, а потом спрашивать разрешение, поздно
   const [faceConsent, setFaceConsent] = useState(!!application.biometricConsent);
   const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
+  const [pickingCity, setPickingCity] = useState(false);
 
   const toggleSkill = (c: Category) => {
     setSkills((prev) => (prev.includes(c) ? prev.filter((s) => s !== c) : [...prev, c]));
@@ -756,7 +769,7 @@ function MasterApplicationScreen({
 
           <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.loginCard}>
             <SummaryRow label="Имя" value={name} />
-            <SummaryRow label="Город" value={city || 'не указан'} />
+            <SummaryRow label="Где работает" value={city ? settlementLabel(city) : 'весь регион'} />
             <SummaryRow label="Телефон" value={phone || '—'} />
             <SummaryRow
               label="Фото"
@@ -828,19 +841,28 @@ function MasterApplicationScreen({
             editable={!loading}
           />
 
-          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Город</Text>
-          <TextInput
-            style={styles.fieldInput}
-            value={city}
-            onChangeText={setCity}
-            placeholder="Москва"
-            placeholderTextColor={t.textMuted}
-            editable={!loading}
-            autoCapitalize="words"
-          />
-          <Text style={styles.fieldHint}>
-            Пусто — будете видеть заявки всех городов
-          </Text>
+          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Где работаете</Text>
+          {/* Выбор из списка, а не ввод: заявка находит мастера сравнением
+              строк, и «Грозный» с «грозный» были бы разными местами */}
+          <PressableScale
+            style={styles.pickerField}
+            onPress={() => setPickingCity(true)}
+            disabled={loading}
+          >
+            <Text style={[styles.pickerValue, !city && styles.pickerPlaceholder]}>
+              {city ? settlementLabel(city) : 'Весь регион'}
+            </Text>
+            <Text style={styles.pickerChevron}>›</Text>
+          </PressableScale>
+          {city ? (
+            <PressableScale style={styles.clearCity} onPress={() => setCity('')}>
+              <Text style={styles.clearCityText}>Показывать заявки всех населённых пунктов</Text>
+            </PressableScale>
+          ) : (
+            <Text style={styles.fieldHint}>
+              Не выбрано — в ленте будут заявки со всей республики
+            </Text>
+          )}
 
           <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Что умеете</Text>
           {/* Список закрытый: по свободному тексту заявку не найти */}
@@ -1025,6 +1047,18 @@ function MasterApplicationScreen({
       </ScrollView>
 
       {openDoc && <LegalScreen docId={openDoc} onClose={() => setOpenDoc(null)} />}
+
+      {pickingCity && (
+        <CityPicker
+          value={city}
+          title="Где вы работаете"
+          onSelect={(key) => {
+            setCity(key);
+            setPickingCity(false);
+          }}
+          onClose={() => setPickingCity(false)}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -1057,13 +1091,19 @@ function JobList({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  // Стаггер положен первой пачке — она представляет список целиком. Заявка,
+  // пришедшая из подписки позже, должна появляться сразу, а не ждать очереди
+  // по своему номеру в списке.
+  const listShown = useRef(false);
+  const firstBatch = !listShown.current;
+  if (jobs.length) listShown.current = true;
   // Отклонённая цена требует того же действия, что и новая заявка, —
   // назвать сумму, поэтому считаются вместе
   const newCount = jobs.filter((j) => j.status === 'new' || j.status === 'declined').length;
   const activeCount = jobs.filter((j) => j.status === 'accepted').length;
 
   const filterText = [
-    profile.city || 'все города',
+    profile.city ? settlementLabel(profile.city) : 'вся республика',
     profile.skills.length ? profile.skills.join(', ') : 'все специальности',
   ].join(' · ');
 
@@ -1130,7 +1170,8 @@ function JobList({
             return (
               <Animated.View
                 key={job.id}
-                entering={FadeInDown.delay(140 + i * STAGGER).duration(340)}
+                entering={FadeInDown.delay(firstBatch ? 140 + i * STAGGER : 0).duration(340)}
+                exiting={FadeOut.duration(180)}
                 layout={LinearTransition.springify().damping(20).stiffness(170)}
               >
                 <PressableScale style={styles.jobItem} onPress={() => onOpenJob(job.id)}>
@@ -1389,11 +1430,16 @@ function TypingDots() {
   const { mode } = useTheme();
   const styles = themed[mode];
   const p = useSharedValue(0);
+  // Цикл бесконечный, поэтому обрываем его руками: клиент перестал печатать —
+  // компонент исчез, а анимация без этого осталась бы висеть на UI-потоке
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
+    if (reduceMotion) return;
     p.value = withRepeat(
       withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.sin) }), -1, false,
     );
-  }, []);
+    return () => cancelAnimation(p);
+  }, [reduceMotion]);
 
   const dotStyle = (phase: number) =>
     useAnimatedStyle(() => {
@@ -1486,6 +1532,22 @@ const makeStyles = (t: Palette) => StyleSheet.create({
   },
   fieldError: { color: t.danger, fontWeight: '700', fontSize: 12, marginTop: 10 },
   fieldHint: { color: t.textMuted, fontWeight: '600', fontSize: 11, marginTop: 6 },
+  pickerField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: t.inputBorder,
+    borderRadius: 12,
+    backgroundColor: t.inputBg,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  pickerValue: { flex: 1, fontSize: 14, fontWeight: '700', color: t.text },
+  pickerPlaceholder: { color: t.textMuted, fontWeight: '600' },
+  pickerChevron: { fontSize: 18, fontWeight: '700', color: t.textMuted },
+  clearCity: { paddingVertical: 8, marginTop: 2 },
+  clearCityText: { color: t.accent, fontWeight: '700', fontSize: 11.5 },
   fieldInputArea: { minHeight: 74, textAlignVertical: 'top', paddingTop: 10 },
   rejectCard: {
     backgroundColor: t.card,

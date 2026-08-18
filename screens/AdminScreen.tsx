@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
+  FadeOut,
   LinearTransition,
   useAnimatedStyle,
+  useSharedValue,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -58,10 +60,26 @@ export function AdminScreen({ open, onClose }: Props) {
   const [items, setItems] = useState<Pending[]>([]);
   const [busyUid, setBusyUid] = useState<string | null>(null);
 
+  // Оверлей выезжает справа. Значения ведём из эффекта, а не изнутри стиля:
+  // экран перерисовывается на каждом изменении очереди, и анимация в стиле
+  // начиналась бы заново с текущего места.
+  const shown = useSharedValue(open ? 1 : 0);
+  const slide = useSharedValue(open ? 0 : 60);
+  useEffect(() => {
+    shown.value = withTiming(open ? 1 : 0, { duration: 260 });
+    slide.value = withSpring(open ? 0 : 60, springs.nav);
+  }, [open]);
   const layerStyle = useAnimatedStyle(() => ({
-    opacity: withTiming(open ? 1 : 0, { duration: 260 }),
-    transform: [{ translateX: withSpring(open ? 0 : 60, springs.nav) }],
+    opacity: shown.value,
+    transform: [{ translateX: slide.value }],
   }));
+
+  // Стаггер положен первой пачке — она представляет очередь целиком. Заявка,
+  // приехавшая из подписки позже, должна появляться сразу: ей незачем ждать
+  // очереди по своему номеру в списке.
+  const listShown = useRef(false);
+  const firstBatch = !listShown.current;
+  if (items.length) listShown.current = true;
 
   // Очередь: заявки во всех анкетах сразу, поэтому запрос по группе коллекций
   useEffect(() => {
@@ -145,7 +163,8 @@ export function AdminScreen({ open, onClose }: Props) {
         {items.map((item, i) => (
           <Animated.View
             key={item.uid}
-            entering={FadeInDown.delay(80 + i * STAGGER).duration(360)}
+            entering={FadeInDown.delay(firstBatch ? 80 + i * STAGGER : 0).duration(360)}
+            exiting={FadeOut.duration(180)}
             layout={LinearTransition.springify().damping(20).stiffness(170)}
           >
             <PendingCard

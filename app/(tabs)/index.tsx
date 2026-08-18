@@ -20,6 +20,7 @@ export default function OrdersRoute() {
       onDeclinePrice={s.declinePrice}
       onOpenOrderChat={s.openChat}
       onOverlayOpenChange={s.setOverlayOpen}
+      covered={s.masterOpen || s.adminOpen}
     />
   );
 }

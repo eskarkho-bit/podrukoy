@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
+  interpolateColor,
   useAnimatedStyle,
+  useSharedValue,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -11,6 +13,8 @@ import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
+import { CityPicker } from '../components/CityPicker';
+import { settlementLabel } from '../components/cities';
 import { LegalScreen } from './LegalScreen';
 
 type Props = {
@@ -47,8 +51,7 @@ export function ProfileScreen({
   // Редактирование имени прямо в карточке — без отдельного экрана
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
-  const [editingCity, setEditingCity] = useState(false);
-  const [cityDraft, setCityDraft] = useState(city);
+  const [pickingCity, setPickingCity] = useState(false);
   const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
   // Удаление аккаунта разворачивается прямо в списке: сначала предупреждение
   // и пароль, и только потом кнопка, которую уже нельзя отменить
@@ -66,16 +69,6 @@ export function ProfileScreen({
     const trimmed = draft.trim();
     if (trimmed) onChangeName(trimmed);
     setEditing(false);
-  };
-
-  const startEditCity = () => {
-    setCityDraft(city);
-    setEditingCity(true);
-  };
-
-  const saveCity = () => {
-    onChangeCity(cityDraft.trim());
-    setEditingCity(false);
   };
 
   const cancelDelete = () => {
@@ -223,33 +216,15 @@ export function ProfileScreen({
       </Animated.View>
 
       {/* Город — единственное, по чему заявка находит мастеров рядом.
-          Пустой означает, что её увидят только мастера без ограничения
-          по городу, поэтому пустоту показываем предупреждением. */}
+          Выбор из списка, а не ввод: разное написание одного села разводило
+          клиента и мастера по разным «городам». */}
       <Animated.View entering={FadeInDown.delay(160 + STAGGER * 4.5).duration(340)}>
-        {editingCity ? (
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Город</Text>
-            <TextInput
-              style={styles.cityInput}
-              value={cityDraft}
-              onChangeText={setCityDraft}
-              placeholder="Москва"
-              placeholderTextColor={t.textMuted}
-              autoFocus
-              autoCapitalize="words"
-              onSubmitEditing={saveCity}
-              onBlur={saveCity}
-              returnKeyType="done"
-            />
-          </View>
-        ) : (
-          <PressableScale style={styles.row} onPress={startEditCity}>
-            <Text style={styles.rowLabel}>Город</Text>
-            <Text style={[styles.rowValue, !city && styles.rowValueWarn]}>
-              {city || 'Не указан — мастера не найдут  ✎'}
-            </Text>
-          </PressableScale>
-        )}
+        <PressableScale style={styles.row} onPress={() => setPickingCity(true)}>
+          <Text style={styles.rowLabel}>Населённый пункт</Text>
+          <Text style={[styles.rowValue, !city && styles.rowValueWarn]}>
+            {city ? `${settlementLabel(city)}  ›` : 'Не указан — мастера не найдут  ›'}
+          </Text>
+        </PressableScale>
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(160 + STAGGER * 5).duration(340)}>
@@ -346,6 +321,17 @@ export function ProfileScreen({
     {/* Поверх экрана, а не внутри списка: absoluteFill внутри ScrollView
         считается от содержимого и уехал бы вместе с прокруткой */}
     {openDoc && <LegalScreen docId={openDoc} onClose={() => setOpenDoc(null)} />}
+
+    {pickingCity && (
+      <CityPicker
+        value={city}
+        onSelect={(key) => {
+          onChangeCity(key);
+          setPickingCity(false);
+        }}
+        onClose={() => setPickingCity(false)}
+      />
+    )}
     </View>
   );
 }
@@ -353,11 +339,18 @@ export function ProfileScreen({
 function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const on = useSharedValue(value ? 1 : 0);
+  const knob = useSharedValue(value ? 18 : 2);
+  useEffect(() => {
+    on.value = withTiming(value ? 1 : 0, { duration: 200 });
+    knob.value = withSpring(value ? 18 : 2, springs.micro);
+  }, [value]);
+
   const trackStyle = useAnimatedStyle(() => ({
-    backgroundColor: withTiming(value ? t.accent : t.toggleOff, { duration: 200 }),
+    backgroundColor: interpolateColor(on.value, [0, 1], [t.toggleOff, t.accent]),
   }));
   const knobStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: withSpring(value ? 18 : 2, springs.micro) }],
+    transform: [{ translateX: knob.value }],
   }));
 
   return (

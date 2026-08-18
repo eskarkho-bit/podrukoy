@@ -11,6 +11,7 @@ import Animated, {
 import { BlurView } from 'expo-blur';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
+import { SheetGrabber, useSheetDrag } from './sheetDrag';
 import { counted, ratingText, rub } from './format';
 import type { Offer, Order } from '../screens/OrdersScreen';
 
@@ -47,6 +48,7 @@ export function OrderSheet({
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [confirming, setConfirming] = useState(false);
+  const { gesture, cardStyle } = useSheetDrag(onClose);
 
   const offers = (order.offers ?? []).filter((o) => o.status === 'pending');
   // Пока мастер не выбран, заявка собирает предложения
@@ -81,9 +83,9 @@ export function OrderSheet({
         entering={SlideInDown.springify().damping(19).stiffness(150).mass(1)}
         exiting={SlideOutDown.duration(280)}
         layout={LinearTransition.springify().damping(20).stiffness(170)}
-        style={styles.card}
+        style={[styles.card, cardStyle]}
       >
-        <View style={styles.handle} />
+        <SheetGrabber gesture={gesture} />
 
         <Animated.View entering={FadeIn.delay(80).duration(260)} style={styles.headerRow}>
           <View style={styles.headerText}>
@@ -336,14 +338,6 @@ const makeStyles = (t: Palette) => StyleSheet.create({
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: t.toggleOff,
-    marginBottom: 16,
   },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
   headerText: { flex: 1 },

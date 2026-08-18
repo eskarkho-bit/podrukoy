@@ -18,7 +18,9 @@ import Animated, {
   LinearTransition,
   SlideInRight,
   SlideOutRight,
+  cancelAnimation,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withTiming,
@@ -102,6 +104,12 @@ function ThreadList({
 }) {
   const { mode } = useTheme();
   const styles = themed[mode];
+  // Стаггер — это представление списка при первом появлении экрана. Дальше
+  // треды приходят по одному из подписки, и задержка «по номеру в списке»
+  // означала бы, что новое сообщение показывается спустя полсекунды.
+  const firstMount = useRef(true);
+  const mountedWithStagger = firstMount.current;
+  firstMount.current = false;
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
@@ -120,7 +128,8 @@ function ThreadList({
           return (
             <Animated.View
               key={thread.id}
-              entering={FadeInDown.delay(120 + i * STAGGER).duration(340)}
+              entering={FadeInDown.delay(mountedWithStagger ? 120 + i * STAGGER : 0).duration(340)}
+              exiting={FadeOut.duration(180)}
               layout={LinearTransition.springify().damping(20).stiffness(170)}
             >
               <PressableScale style={styles.threadItem} onPress={() => onOpen(thread.id)}>
@@ -247,11 +256,16 @@ function TypingDots() {
   const { mode } = useTheme();
   const styles = themed[mode];
   const p = useSharedValue(0);
+  // Цикл бесконечный, поэтому обрываем его руками: собеседник перестал печатать —
+  // компонент исчез, а анимация без этого осталась бы висеть на UI-потоке
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
+    if (reduceMotion) return;
     p.value = withRepeat(
       withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.sin) }), -1, false,
     );
-  }, []);
+    return () => cancelAnimation(p);
+  }, [reduceMotion]);
 
   const dotStyle = (phase: number) =>
     useAnimatedStyle(() => {
