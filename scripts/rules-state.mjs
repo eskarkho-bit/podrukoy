@@ -49,18 +49,38 @@ if (mode === 'record') {
   process.exit(0);
 }
 
+// Известное препятствие — не то же самое, что забывчивость. Storage не
+// подключён в проекте, и его правила выкатить нельзя при всём желании;
+// сторож, который из-за этого горит красным постоянно, перестают замечать,
+// и вместе с ним перестают замечать настоящие расхождения.
+if (mode === 'skip') {
+  const file = process.argv[3];
+  const reason = process.argv.slice(4).join(' ');
+  if (!ALL.includes(file) || !reason) {
+    console.error('Использование: skip <файл> <причина>');
+    process.exit(2);
+  }
+  const state = load();
+  state[file] = { skipped: reason, at: new Date().toISOString() };
+  writeFileSync(STATE, `${JSON.stringify(state, null, 2)}\n`);
+  console.log(`${file} отложен: ${reason}`);
+  process.exit(0);
+}
+
 if (mode !== 'check') {
-  console.error('Укажите режим: check или record');
+  console.error('Укажите режим: check, record или skip');
   process.exit(2);
 }
 
 const state = load();
 const stale = [];
 const never = [];
+const skipped = [];
 
 for (const file of ALL) {
   const recorded = state[file];
-  if (!recorded) never.push(file);
+  if (recorded?.skipped) skipped.push(file);
+  else if (!recorded) never.push(file);
   else if (recorded.hash !== hashOf(file)) stale.push(file);
 }
 
@@ -83,5 +103,10 @@ if (never.length || stale.length) {
   process.exit(1);
 }
 
-const newest = ALL.map((f) => state[f].at).sort().at(-1);
+const deployed = ALL.filter((f) => !skipped.includes(f));
+const newest = deployed.map((f) => state[f].at).sort().at(-1);
 console.log(`Правила совпадают с выкаченными. Последняя выкатка: ${newest}.`);
+
+// Отложенное показываем всегда: молчать о том, что часть правил не в бою,
+// значит врать успешным ответом
+skipped.forEach((f) => console.log(`Отложено: ${f} — ${state[f].skipped}`));
