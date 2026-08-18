@@ -27,6 +27,7 @@ import { useAuth } from '../components/AuthState';
 import { useAppState } from '../components/AppState';
 import { counted } from '../components/format';
 import { firestoreErrorText } from '../components/firestoreError';
+import { settlementLabel } from '../components/cities';
 import { db } from '../firebaseConfig';
 
 // Модерация мастеров. Открыта только владельцам документа admins/{uid} —
@@ -38,7 +39,7 @@ import { db } from '../firebaseConfig';
 type Pending = {
   uid: string;
   name: string;
-  city: string;
+  cities: string[];
   skills: string[];
   phone: string;
   about: string;
@@ -97,7 +98,9 @@ export function AdminScreen({ open, onClose }: Props) {
           return {
             uid,
             name: String(profile?.get('name') ?? 'Без имени'),
-            city: String(profile?.get('city') ?? ''),
+            cities: Array.isArray(profile?.get('cities'))
+              ? profile.get('cities')
+              : (profile?.get('city') ? [String(profile.get('city'))] : []),
             skills: Array.isArray(profile?.get('skills')) ? profile.get('skills') : [],
             phone: String(v.phone ?? ''),
             about: String(v.about ?? ''),
@@ -216,7 +219,11 @@ function PendingCard({
         )}
         <View style={styles.cardWho}>
           <Text style={styles.name}>{item.name}</Text>
-          <Text style={styles.meta}>{item.city || 'город не указан'}</Text>
+          <Text style={styles.meta}>
+            {item.cities.length
+              ? item.cities.map(settlementLabel).join(', ')
+              : 'вся республика'}
+          </Text>
           <Text style={styles.meta}>{item.phone || 'телефон не указан'}</Text>
           <Text style={[styles.meta, item.cardLast4 ? styles.metaOk : styles.metaBad]}>
             {item.cardLast4

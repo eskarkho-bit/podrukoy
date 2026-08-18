@@ -3,6 +3,7 @@ import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
+import { counted } from './format';
 import {
   searchSettlements,
   settlementKey,
@@ -19,27 +20,36 @@ import {
 // не выбор, а наказание.
 
 type Props = {
-  /** Ключ выбранного пункта, чтобы отметить его в списке */
-  value: string;
-  onSelect: (key: string, name: string) => void;
   onClose: () => void;
   title?: string;
-};
+} & (
+  // Клиент живёт в одном месте и выбирает один пункт — список закрывается сразу
+  | { mode?: 'single'; value: string; onSelect: (key: string, name: string) => void }
+  // Мастер выезжает в несколько: отмечает их и подтверждает кнопкой
+  | { mode: 'multi'; values: string[]; onToggle: (key: string) => void }
+);
 
-export function CityPicker({ value, onSelect, onClose, title }: Props) {
+export function CityPicker(props: Props) {
+  const { onClose, title } = props;
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [query, setQuery] = useState('');
+  const multi = props.mode === 'multi';
 
   const found = useMemo(() => searchSettlements(query), [query]);
 
+  const isPicked = (key: string) =>
+    (props.mode === 'multi' ? props.values.includes(key) : props.value === key);
+
   const renderItem = ({ item }: { item: Settlement }) => {
     const key = settlementKey(item.name);
-    const picked = key === value;
+    const picked = isPicked(key);
     return (
       <PressableScale
         style={[styles.row, picked && styles.rowPicked]}
-        onPress={() => onSelect(key, item.name)}
+        onPress={() => (props.mode === 'multi'
+          ? props.onToggle(key)
+          : props.onSelect(key, item.name))}
       >
         <View style={styles.rowBody}>
           <Text style={[styles.rowName, picked && styles.rowNamePicked]}>{item.name}</Text>
@@ -67,6 +77,11 @@ export function CityPicker({ value, onSelect, onClose, title }: Props) {
 
       <View style={styles.head}>
         <Text style={styles.title}>{title ?? 'Населённый пункт'}</Text>
+        {multi && (
+          <Text style={styles.hint}>
+            Отметьте все, куда готовы выезжать. Заявки из них будут в вашей ленте.
+          </Text>
+        )}
         <TextInput
           style={styles.search}
           value={query}
@@ -97,6 +112,20 @@ export function CityPicker({ value, onSelect, onClose, title }: Props) {
           initialNumToRender={14}
         />
       )}
+
+      {/* При множественном выборе список сам не закрывается: человек отмечает
+          несколько пунктов и подтверждает, когда закончил */}
+      {multi && props.mode === 'multi' && (
+        <View style={styles.footer}>
+          <PressableScale style={styles.doneBtn} onPress={onClose}>
+            <Text style={styles.doneBtnText}>
+              {props.values.length
+                ? `Готово · ${counted(props.values.length, 'пункт', 'пункта', 'пунктов')}`
+                : 'Готово · вся республика'}
+            </Text>
+          </PressableScale>
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -115,7 +144,29 @@ const makeStyles = (t: Palette) => StyleSheet.create({
   backChipGhost: { width: 60 },
   backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
   head: { paddingHorizontal: 20, paddingBottom: 12 },
-  title: { fontSize: 19, fontWeight: '800', color: t.text, marginBottom: 12 },
+  title: { fontSize: 19, fontWeight: '800', color: t.text, marginBottom: 8 },
+  hint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: t.textMuted,
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 28,
+    borderTopWidth: 1,
+    borderTopColor: t.border,
+    backgroundColor: t.bg,
+  },
+  doneBtn: {
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: t.accent,
+  },
+  doneBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
   search: {
     borderWidth: 1,
     borderColor: t.inputBorder,

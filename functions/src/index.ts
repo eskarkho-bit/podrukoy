@@ -45,7 +45,7 @@ export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event
     actor: { type: 'user', uid: String(order.clientId ?? '') },
     subject: { type: 'order', id: event.params.orderId },
     correlationId: event.id,
-    details: { category: String(order.category ?? ''), hasCity: !!order.city },
+    details: { category: String(order.category ?? ''), city: String(order.city ?? '') },
   });
 
   const db = getFirestore();
@@ -65,10 +65,14 @@ export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event
       // Клиент не должен получать уведомление о собственной заявке, даже
       // если он же зарегистрирован мастером
       if (d.id === order.clientId) return false;
-      const masterCity = String(d.get('city') ?? '');
+      // Мастер отмечает несколько населённых пунктов; у анкет, заведённых до
+      // множественного выбора, остаётся прежнее поле city строкой
+      const cities: string[] = Array.isArray(d.get('cities'))
+        ? d.get('cities')
+        : (d.get('city') ? [String(d.get('city'))] : []);
       const skills: string[] = Array.isArray(d.get('skills')) ? d.get('skills') : [];
-      // Пустое поле в анкете значит «без ограничения» — так же, как в ленте
-      const cityOk = !masterCity || !city || masterCity === city;
+      // Пустой список значит «без ограничения» — так же, как в ленте
+      const cityOk = !cities.length || !city || cities.includes(city);
       const skillOk = !skills.length || !category || skills.includes(category);
       return cityOk && skillOk;
     })
@@ -253,7 +257,8 @@ export const onVerificationChanged = onDocumentWritten(
       await pushTo(
         admins.docs.map((d) => d.id),
         'Заявка мастера на проверку',
-        `${master.get('name') ?? 'Без имени'} · ${master.get('city') || 'город не указан'}`,
+        `${master.get('name') ?? 'Без имени'} · ${
+        (master.get('cities') ?? []).join(', ') || master.get('city') || 'вся республика'}`,
         { href: '/profile' },
       );
       return;

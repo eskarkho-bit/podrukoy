@@ -51,7 +51,7 @@ import { PressableScale } from '../components/PressableScale';
 import { useAuth } from '../components/AuthState';
 import { useAppState } from '../components/AppState';
 import { counted, ratingText, rub } from '../components/format';
-import { CATEGORIES, cityKey, type Category } from '../components/serviceOptions';
+import { CATEGORIES, type Category } from '../components/serviceOptions';
 import { deleteVerificationPhoto, uploadVerificationPhoto } from '../components/photoUpload';
 import { firestoreErrorText } from '../components/firestoreError';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
@@ -71,6 +71,10 @@ import { db } from '../firebaseConfig';
 // всю коллекцию на телефон — на сотне заявок это ещё терпимо, на десяти
 // тысячах уже нет.
 const FEED_LIMIT = 50;
+
+// Больше десяти подписок на ленту — это уже не выбор мест работы, а желание
+// видеть всё; для такого есть пустой список, который означает всю республику
+const MAX_FEED_CITIES = 10;
 
 // Режим мастера — отдельный «мир» поверх клиентского приложения.
 // Аккаунт один на человека: роль мастера — это анкета masters/{uid}.
@@ -149,7 +153,9 @@ type Props = {
 
 type MasterProfile = {
   name: string;
-  city: string;
+  // Куда мастер готов выезжать. Пустой массив — вся республика.
+  // У анкет, заведённых до множественного выбора, читается прежнее поле city.
+  cities: string[];
   skills: Category[];
   // Ставит только модератор. Без него заявок не видно — это и есть проверка.
   verified: boolean;
@@ -206,7 +212,10 @@ export function MasterScreen({ open, onClose }: Props) {
       const v = snap.data();
       setMaster(snap.exists() && v ? {
         name: String(v.name ?? ''),
-        city: String(v.city ?? ''),
+        cities: Array.isArray(v.cities)
+          ? (v.cities as string[])
+          // Анкеты до множественного выбора: один город строкой
+          : (v.city ? [String(v.city)] : []),
         skills: Array.isArray(v.skills) ? (v.skills as Category[]) : [],
         verified: v.verified === true,
         rating: typeof v.rating === 'number' ? v.rating : null,
@@ -229,11 +238,14 @@ export function MasterScreen({ open, onClose }: Props) {
   // Заявки собираются из трёх источников, потому что Firestore не умеет «ИЛИ»
   // по разным полям: открытая лента (отфильтрованная по городу и
   // специальностям), свои выигранные заявки и свои отправленные предложения.
-  const buckets = useRef<{ open: Job[]; mine: Job[]; offers: MyOffer[] }>({
-    open: [], mine: [], offers: [],
+  // open — карта «город → заявки»: подписок столько же, сколько выбранных
+  // населённых пунктов, и результат каждой лежит отдельно, чтобы обновление
+  // одной не затирало остальные
+  const buckets = useRef<{ open: Map<string, Job[]>; mine: Job[]; offers: MyOffer[] }>({
+    open: new Map(), mine: [], offers: [],
   });
 
-  const masterCity = master?.city ?? '';
+  const citiesKey = (master?.cities ?? []).join(',');
   const skillsKey = (master?.skills ?? []).join(',');
 
   useEffect(() => {
@@ -241,7 +253,7 @@ export function MasterScreen({ open, onClose }: Props) {
     // а консоль засыплет permission-denied
     if (!master?.verified || !myUid) {
       setJobs([]);
-      buckets.current = { open: [], mine: [], offers: [] };
+      buckets.current = { open: new Map(), mine: [], offers: [] };
       return;
     }
 
@@ -280,7 +292,9 @@ export function MasterScreen({ open, onClose }: Props) {
     // поэтому при обновлении списка их нужно сохранить
     const merge = () => {
       const all = new Map<string, Job>();
-      buckets.current.open.forEach((j) => all.set(j.id, j));
+      // Один и тот же заказ не может прийти из двух городов, но объединение
+      // по id всё равно спасёт, если список городов поменяется на лету
+      buckets.current.open.forEach((jobs) => jobs.forEach((j) => all.set(j.id, j)));
       // Свои заявки кладём поверх ленты: там точнее статус
       buckets.current.mine.forEach((j) => all.set(j.id, j));
 
@@ -320,36 +334,49 @@ export function MasterScreen({ open, onClose }: Props) {
           || b.id.localeCompare(a.id)));
     };
 
-    // Лента: только открытые заявки, только своего города и своих
-    // специальностей. Пустое поле в анкете означает «без ограничения» —
-    // иначе мастер, не заполнивший город, не увидел бы ничего.
-    const feedFilters = [where('status', '==', 'Поиск мастера')];
-    if (masterCity) feedFilters.push(where('city', '==', cityKey(masterCity)));
-    // «in» принимает не больше 10 значений, а специальностей всего восемь
-    if (master.skills.length) {
-      feedFilters.push(where('category', 'in', master.skills.slice(0, 10)));
-    }
+    // Лента: только открытые заявки, только выбранных населённых пунктов и
+    // своих специальностей. Пустой список пунктов означает «вся республика» —
+    // иначе мастер, не заполнивший анкету, не увидел бы ничего.
+    //
+    // Подписка на каждый пункт отдельно, а не один запрос со списком: в
+    // Firestore допускается лишь одно «ИЛИ»-условие на запрос, и оно уже
+    // занято специальностями. Складывать город и специальность в одно
+    // денормализованное поле было бы быстрее, но потребовало бы миграции
+    // и упёрлось бы в предел на число значений.
+    const cities = master.cities.length ? master.cities.slice(0, MAX_FEED_CITIES) : [null];
+    // Лимит общий на ленту, а не на каждый пункт: иначе десять городов дали
+    // бы пятьсот заявок на телефоне
+    const perCity = Math.max(10, Math.floor(FEED_LIMIT / cities.length));
 
-    const unsubOpen = onSnapshot(
-      query(
-        collection(db, 'orders'),
-        ...feedFilters,
-        orderBy('createdAt', 'desc'),
-        limit(FEED_LIMIT),
-      ),
-      (snap) => {
-        // Заявку, которую кто-то уже взял по старой схеме, в ленте не
-        // показываем: предложить по ней цену правила не дадут
-        buckets.current.open = snap.docs
-          .filter((d) => {
-            const owner = d.data().masterId ?? null;
-            return owner === null || owner === myUid;
-          })
-          .map(toJob);
-        merge();
-      },
-      (e) => console.warn('Лента заявок недоступна:', e),
-    );
+    const unsubsOpen = cities.map((city) => {
+      const filters = [where('status', '==', 'Поиск мастера')];
+      if (city) filters.push(where('city', '==', city));
+      // «in» принимает не больше десяти значений, а специальностей восемь
+      if (master.skills.length) {
+        filters.push(where('category', 'in', master.skills.slice(0, 10)));
+      }
+
+      return onSnapshot(
+        query(
+          collection(db, 'orders'),
+          ...filters,
+          orderBy('createdAt', 'desc'),
+          limit(perCity),
+        ),
+        (snap) => {
+          // Заявку, которую кто-то уже взял по старой схеме, в ленте не
+          // показываем: предложить по ней цену правила не дадут
+          buckets.current.open.set(city ?? '*', snap.docs
+            .filter((d) => {
+              const owner = d.data().masterId ?? null;
+              return owner === null || owner === myUid;
+            })
+            .map(toJob));
+          merge();
+        },
+        (e) => console.warn('Лента заявок недоступна:', e),
+      );
+    });
 
     const unsubMine = onSnapshot(
       query(collection(db, 'orders'), where('masterId', '==', myUid)),
@@ -375,8 +402,12 @@ export function MasterScreen({ open, onClose }: Props) {
       (e) => console.warn('Свои предложения недоступны:', e),
     );
 
-    return () => { unsubOpen(); unsubMine(); unsubOffers(); };
-  }, [master, myUid, masterCity, skillsKey]);
+    return () => {
+      unsubsOpen.forEach((u) => u());
+      unsubMine();
+      unsubOffers();
+    };
+  }, [master, myUid, citiesKey, skillsKey]);
 
   // «Выйти» в режиме мастера теперь означает выход из раздела: сам аккаунт
   // остаётся тем же, анкета никуда не девается
@@ -589,7 +620,7 @@ function MasterApplicationScreen({
   const rejected = application.status === 'rejected';
 
   const [name, setName] = useState(profile?.name || defaultName);
-  const [city, setCity] = useState(profile?.city ?? '');
+  const [cities, setCities] = useState<string[]>(profile?.cities ?? []);
   const [skills, setSkills] = useState<Category[]>(profile?.skills ?? []);
   const [phone, setPhone] = useState(application.phone);
   const [about, setAbout] = useState(application.about);
@@ -707,7 +738,7 @@ function MasterApplicationScreen({
       // пишем: правила его отсюда и не пропустят, ставит его модератор.
       await setDoc(doc(db, 'masters', myUid), {
         name: name.trim(),
-        city: city.trim(),
+        cities,
         skills,
         createdAt: serverTimestamp(),
       }, { merge: true });
@@ -769,7 +800,10 @@ function MasterApplicationScreen({
 
           <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.loginCard}>
             <SummaryRow label="Имя" value={name} />
-            <SummaryRow label="Где работает" value={city ? settlementLabel(city) : 'весь регион'} />
+            <SummaryRow
+              label="Где работает"
+              value={cities.length ? cities.map(settlementLabel).join(', ') : 'вся республика'}
+            />
             <SummaryRow label="Телефон" value={phone || '—'} />
             <SummaryRow
               label="Фото"
@@ -843,24 +877,28 @@ function MasterApplicationScreen({
 
           <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Где работаете</Text>
           {/* Выбор из списка, а не ввод: заявка находит мастера сравнением
-              строк, и «Грозный» с «грозный» были бы разными местами */}
+              строк, и «Грозный» с «грозный» были бы разными местами.
+              Пунктов можно отметить несколько — на каждый заводится своя
+              подписка на ленту. */}
           <PressableScale
             style={styles.pickerField}
             onPress={() => setPickingCity(true)}
             disabled={loading}
           >
-            <Text style={[styles.pickerValue, !city && styles.pickerPlaceholder]}>
-              {city ? settlementLabel(city) : 'Весь регион'}
+            <Text style={[styles.pickerValue, !cities.length && styles.pickerPlaceholder]}>
+              {cities.length
+                ? cities.map(settlementLabel).join(', ')
+                : 'Вся республика'}
             </Text>
             <Text style={styles.pickerChevron}>›</Text>
           </PressableScale>
-          {city ? (
-            <PressableScale style={styles.clearCity} onPress={() => setCity('')}>
-              <Text style={styles.clearCityText}>Показывать заявки всех населённых пунктов</Text>
+          {cities.length ? (
+            <PressableScale style={styles.clearCity} onPress={() => setCities([])}>
+              <Text style={styles.clearCityText}>Показывать заявки со всей республики</Text>
             </PressableScale>
           ) : (
             <Text style={styles.fieldHint}>
-              Не выбрано — в ленте будут заявки со всей республики
+              Ничего не отмечено — в ленте будут заявки со всей республики
             </Text>
           )}
 
@@ -1050,12 +1088,12 @@ function MasterApplicationScreen({
 
       {pickingCity && (
         <CityPicker
-          value={city}
+          mode="multi"
+          values={cities}
           title="Где вы работаете"
-          onSelect={(key) => {
-            setCity(key);
-            setPickingCity(false);
-          }}
+          onToggle={(key) => setCities((prev) => (prev.includes(key)
+            ? prev.filter((c) => c !== key)
+            : [...prev, key]))}
           onClose={() => setPickingCity(false)}
         />
       )}
@@ -1103,7 +1141,9 @@ function JobList({
   const activeCount = jobs.filter((j) => j.status === 'accepted').length;
 
   const filterText = [
-    profile.city ? settlementLabel(profile.city) : 'вся республика',
+    profile.cities.length
+      ? profile.cities.map(settlementLabel).join(', ')
+      : 'вся республика',
     profile.skills.length ? profile.skills.join(', ') : 'все специальности',
   ].join(' · ');
 
@@ -1159,7 +1199,7 @@ function JobList({
             <Text style={styles.emptyIcon}>📭</Text>
             <Text style={styles.emptyTitle}>Пока нет заявок</Text>
             <Text style={styles.emptySub}>
-              {profile.city || profile.skills.length
+              {profile.cities.length || profile.skills.length
                 ? 'По выбранным городу и специальностям заявок нет. Попробуйте расширить анкету.'
                 : 'Новые заказы рядом с вами появятся здесь'}
             </Text>
