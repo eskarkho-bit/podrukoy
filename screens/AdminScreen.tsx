@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -28,6 +28,7 @@ import { useAppState } from '../components/AppState';
 import { counted } from '../components/format';
 import { firestoreErrorText } from '../components/firestoreError';
 import { settlementLabel } from '../components/cities';
+import { loadAdminStats, MAIN_CITIES, type AdminStats } from '../components/adminStats';
 import { db } from '../firebaseConfig';
 
 // Модерация мастеров. Открыта только владельцам документа admins/{uid} —
@@ -46,6 +47,8 @@ type Pending = {
   photoUrl: string | null;
   cardLast4: string | null;
   cardBrand: string | null;
+  /** Когда подана — чтобы видеть, что залежалось */
+  appliedMs: number | null;
 };
 
 type Props = {
@@ -53,13 +56,38 @@ type Props = {
   onClose: () => void;
 };
 
+// Сутки — граница, после которой заявка считается залежавшейся: человек
+// ждёт допуска и не может работать
+const STALE_MS = 24 * 60 * 60 * 1000;
+
 export function AdminScreen({ open, onClose }: Props) {
-  const { mode } = useTheme();
+  const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const { user } = useAuth();
   const { isAdmin, showNotice } = useAppState();
   const [items, setItems] = useState<Pending[]>([]);
   const [busyUid, setBusyUid] = useState<string | null>(null);
+  // Сводка не подписка, а разовый запрос: агрегатные запросы Firestore
+  // одноразовые, живого счётчика из них не выйдет. Обновляем при открытии
+  // раздела и жестом «потянуть вниз».
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refreshStats = async () => {
+    setRefreshing(true);
+    try {
+      setStats(await loadAdminStats());
+    } catch (e) {
+      console.warn('Сводка недоступна:', e);
+      showNotice(firestoreErrorText(e, 'Не удалось посчитать сводку'));
+    }
+    setRefreshing(false);
+  };
+
+  useEffect(() => {
+    if (!open || !isAdmin) return;
+    refreshStats();
+  }, [open, isAdmin]);
 
   // Оверлей выезжает справа. Значения ведём из эффекта, а не изнутри стиля:
   // экран перерисовывается на каждом изменении очереди, и анимация в стиле
@@ -107,6 +135,7 @@ export function AdminScreen({ open, onClose }: Props) {
             photoUrl: typeof v.photoUrl === 'string' ? v.photoUrl : null,
             cardLast4: typeof v.cardLast4 === 'string' ? v.cardLast4 : null,
             cardBrand: typeof v.cardBrand === 'string' ? v.cardBrand : null,
+            appliedMs: v.appliedAt?.toMillis?.() ?? null,
           } as Pending;
         }));
         setItems(rows.filter((r): r is Pending => r !== null));
@@ -153,7 +182,13 @@ export function AdminScreen({ open, onClose }: Props) {
         <View style={styles.backChipGhost} />
       </View>
 
-      <ScrollView style={styles.fill} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.fill}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refreshStats} tintColor={t.accent} />
+        }
+      >
         <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
           Модерация
         </Animated.Text>
@@ -162,6 +197,15 @@ export function AdminScreen({ open, onClose }: Props) {
             ? counted(items.length, 'заявка ждёт', 'заявки ждут', 'заявок ждут') + ' решения'
             : 'Новые заявки мастеров появятся здесь'}
         </Animated.Text>
+
+        {stats && (
+          <StatsBlock
+            stats={stats}
+            stale={items.filter(
+              (i) => i.appliedMs != null && Date.now() - i.appliedMs > STALE_MS,
+            ).length}
+          />
+        )}
 
         {items.map((item, i) => (
           <Animated.View
@@ -187,6 +231,102 @@ export function AdminScreen({ open, onClose }: Props) {
       </ScrollView>
     </Animated.View>
   );
+}
+
+// Сводка: что происходит с мастерами и где в республике пусто.
+//
+// Заявок клиентов здесь нет намеренно — модератор их не читает. Считать их
+// он сможет, когда развернутся функции: они будут вести счётчики на сервере,
+// и модератор увидит числа, не получив доступа к адресам.
+function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const { coverage } = stats;
+  const covered = new Set(coverage.coveredKeys);
+
+  return (
+    <Animated.View entering={FadeInDown.delay(60).duration(360)} style={styles.stats}>
+      <View style={styles.statsRow}>
+        <Stat value={stats.verified} label="проверено" tone="ok" />
+        <Stat value={stats.pending} label="ждут решения" tone={stats.pending ? 'warn' : 'plain'} />
+        <Stat value={stats.rejected} label="отклонено" tone="plain" />
+        <Stat value={stats.masters} label="всего анкет" tone="plain" />
+      </View>
+
+      {stale > 0 && (
+        <Text style={styles.statsAlert}>
+          {counted(stale, 'заявка ждёт', 'заявки ждут', 'заявок ждут')} дольше суток
+        </Text>
+      )}
+
+      <Text style={styles.statsTitle}>Покрытие</Text>
+
+      {coverage.anyEverywhere ? (
+        <Text style={styles.statsLine}>
+          Есть мастера, готовые выезжать по всей республике
+        </Text>
+      ) : (
+        <Text style={styles.statsLine}>
+          Мастера есть в {coverage.coveredSettlements} из {coverage.totalSettlements}
+          {' '}населённых пунктов
+        </Text>
+      )}
+
+      <View style={styles.chipsWrap}>
+        {MAIN_CITIES.map((c) => {
+          const has = coverage.anyEverywhere || covered.has(c.key);
+          return (
+            <View key={c.key} style={[styles.cityChip, has && styles.cityChipOk]}>
+              <Text style={[styles.cityChipText, has && styles.cityChipTextOk]}>
+                {has ? '✓ ' : '— '}{c.name}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+
+      {/* Пустая специальность — это заявки, на которые некому откликнуться */}
+      {coverage.missingCategories.length > 0 && (
+        <Text style={styles.statsAlert}>
+          Нет мастеров: {coverage.missingCategories.join(', ')}
+        </Text>
+      )}
+    </Animated.View>
+  );
+}
+
+function Stat({
+  value, label, tone,
+}: {
+  value: number;
+  label: string;
+  tone: 'ok' | 'warn' | 'plain';
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  return (
+    <View style={styles.statCard}>
+      <Text style={[
+        styles.statValue,
+        tone === 'ok' && styles.statValueOk,
+        tone === 'warn' && styles.statValueWarn,
+      ]}>
+        {value}
+      </Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+const waitedLong = (appliedMs: number) => Date.now() - appliedMs > STALE_MS;
+
+/** Сколько заявка лежит без решения. Человек в это время работать не может. */
+function waitedText(appliedMs: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - appliedMs) / 60000));
+  if (minutes < 60) return counted(minutes, 'минуту', 'минуты', 'минут');
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return counted(hours, 'час', 'часа', 'часов');
+  return counted(Math.floor(hours / 24), 'день', 'дня', 'дней');
 }
 
 function PendingCard({
@@ -225,6 +365,11 @@ function PendingCard({
               : 'вся республика'}
           </Text>
           <Text style={styles.meta}>{item.phone || 'телефон не указан'}</Text>
+          {item.appliedMs != null && (
+            <Text style={[styles.meta, waitedLong(item.appliedMs) && styles.metaBad]}>
+              ждёт {waitedText(item.appliedMs)}
+            </Text>
+          )}
           <Text style={[styles.meta, item.cardLast4 ? styles.metaOk : styles.metaBad]}>
             {item.cardLast4
               ? `карта ${item.cardBrand ?? ''} •••• ${item.cardLast4}`
@@ -326,6 +471,47 @@ const makeStyles = (t: Palette) => StyleSheet.create({
   content: { padding: 16, paddingBottom: 60 },
   header: { fontSize: 20, fontWeight: '800', color: t.text },
   headerSub: { color: t.textMuted, fontWeight: '600', fontSize: 12, marginTop: 2, marginBottom: 18 },
+  stats: {
+    backgroundColor: t.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: t.border,
+    padding: 14,
+    marginBottom: 18,
+  },
+  statsRow: { flexDirection: 'row', gap: 8 },
+  statCard: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: t.soft,
+    borderRadius: 14,
+    paddingVertical: 12,
+  },
+  statValue: { fontSize: 20, fontWeight: '800', color: t.text },
+  statValueOk: { color: t.accent },
+  statValueWarn: { color: t.warn },
+  statLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: t.textMuted,
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  statsAlert: { fontSize: 12, fontWeight: '700', color: t.warn, marginTop: 12, lineHeight: 17 },
+  statsTitle: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginTop: 16 },
+  statsLine: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
+  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  cityChip: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: t.border,
+    backgroundColor: t.soft,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  cityChipOk: { borderColor: t.accentBorder, backgroundColor: t.accentSoft },
+  cityChipText: { fontSize: 11.5, fontWeight: '700', color: t.textMuted },
+  cityChipTextOk: { color: t.accent },
   card: {
     backgroundColor: t.card,
     borderRadius: 18,
