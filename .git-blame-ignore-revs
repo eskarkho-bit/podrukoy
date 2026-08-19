@@ -1,0 +1,8 @@
+# Коммиты, которые git blame должен пропускать: в них нет смысловых правок,
+# только форматирование. Иначе автором каждой строки станет prettier.
+#
+# Включить у себя один раз:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Формат: prettier по всей кодовой базе
+853bf2df5a5f5ff6de4da4bd0e7f63ad7144492b
