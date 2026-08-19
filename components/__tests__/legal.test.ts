@@ -30,10 +30,12 @@ describe('consentsCurrent', () => {
   // Ради этого механизм и существует: сменилась редакция — согласие
   // спрашивается заново, а не считается данным задним числом
   test('устаревшая редакция требует нового согласия', () => {
-    expect(consentsCurrent({
-      ...currentConsents(),
-      privacy: '2020-01-01',
-    })).toBe(false);
+    expect(
+      consentsCurrent({
+        ...currentConsents(),
+        privacy: '2020-01-01',
+      }),
+    ).toBe(false);
   });
 
   test('согласие на биометрию не заменяет обязательные документы', () => {
@@ -59,8 +61,7 @@ describe('документы', () => {
   // заметны. Когда юрист их заполнит, тест придётся поменять — это
   // напоминание, а не придирка.
   test('места для реквизитов ещё не заполнены', () => {
-    const filled = Object.values(LEGAL_DOCS)
-      .filter((doc) => !doc.body.includes('['));
+    const filled = Object.values(LEGAL_DOCS).filter((doc) => !doc.body.includes('['));
     expect(filled).toEqual([]);
   });
 });

@@ -29,8 +29,16 @@ function RootShell() {
   const { mode, colors } = useTheme();
   const { user, initializing } = useAuth();
   const {
-    masterOpen, setMasterOpen, isAdmin, adminOpen, setAdminOpen, notice, dismissNotice,
-    consents, acceptConsents, logout,
+    masterOpen,
+    setMasterOpen,
+    isAdmin,
+    adminOpen,
+    setAdminOpen,
+    notice,
+    dismissNotice,
+    consents,
+    acceptConsents,
+    logout,
   } = useAppState();
   // Профиль ещё грузится, пока consents === null: показывать в этот момент
   // требование принять документы значит мигать им у тех, кто их уже принял
@@ -60,7 +68,9 @@ function RootShell() {
     // приложение открыли нажатием на уведомление из закрытого состояния
     if (!coldStartHandled.current) {
       coldStartHandled.current = true;
-      Notifications.getLastNotificationResponseAsync().then(go).catch(() => {});
+      Notifications.getLastNotificationResponseAsync()
+        .then(go)
+        .catch(() => {});
     }
 
     const sub = Notifications.addNotificationResponseReceivedListener(go);
@@ -91,9 +101,7 @@ function RootShell() {
 
       {/* Модерация — такой же оверлей. Монтируется только у модераторов:
           у остальных правила всё равно не дадут прочитать очередь. */}
-      {user && isAdmin && (
-        <AdminScreen open={adminOpen} onClose={() => setAdminOpen(false)} />
-      )}
+      {user && isAdmin && <AdminScreen open={adminOpen} onClose={() => setAdminOpen(false)} />}
 
       {/* Поверх всего, кроме сообщения о сбое: без действующего согласия
           пользоваться сервисом нельзя вообще */}

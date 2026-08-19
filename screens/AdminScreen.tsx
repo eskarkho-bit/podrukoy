@@ -120,26 +120,30 @@ export function AdminScreen({ open, onClose }: Props) {
       async (snap) => {
         // Имя, город и специальности лежат в самой анкете, а не в заявке:
         // дублировать их незачем, а модератору они нужны
-        const rows = await Promise.all(snap.docs.map(async (d) => {
-          const uid = d.ref.parent.parent?.id;
-          if (!uid) return null;
-          const v = d.data();
-          const profile = await getDoc(doc(db, 'masters', uid)).catch(() => null);
-          return {
-            uid,
-            name: String(profile?.get('name') ?? 'Без имени'),
-            cities: Array.isArray(profile?.get('cities'))
-              ? profile.get('cities')
-              : (profile?.get('city') ? [String(profile.get('city'))] : []),
-            skills: Array.isArray(profile?.get('skills')) ? profile.get('skills') : [],
-            phone: String(v.phone ?? ''),
-            about: String(v.about ?? ''),
-            photoUrl: typeof v.photoUrl === 'string' ? v.photoUrl : null,
-            cardLast4: typeof v.cardLast4 === 'string' ? v.cardLast4 : null,
-            cardBrand: typeof v.cardBrand === 'string' ? v.cardBrand : null,
-            appliedMs: v.appliedAt?.toMillis?.() ?? null,
-          } as Pending;
-        }));
+        const rows = await Promise.all(
+          snap.docs.map(async (d) => {
+            const uid = d.ref.parent.parent?.id;
+            if (!uid) return null;
+            const v = d.data();
+            const profile = await getDoc(doc(db, 'masters', uid)).catch(() => null);
+            return {
+              uid,
+              name: String(profile?.get('name') ?? 'Без имени'),
+              cities: Array.isArray(profile?.get('cities'))
+                ? profile.get('cities')
+                : profile?.get('city')
+                  ? [String(profile.get('city'))]
+                  : [],
+              skills: Array.isArray(profile?.get('skills')) ? profile.get('skills') : [],
+              phone: String(v.phone ?? ''),
+              about: String(v.about ?? ''),
+              photoUrl: typeof v.photoUrl === 'string' ? v.photoUrl : null,
+              cardLast4: typeof v.cardLast4 === 'string' ? v.cardLast4 : null,
+              cardBrand: typeof v.cardBrand === 'string' ? v.cardBrand : null,
+              appliedMs: v.appliedAt?.toMillis?.() ?? null,
+            } as Pending;
+          }),
+        );
         setItems(rows.filter((r): r is Pending => r !== null));
       },
       (e) => console.warn('Очередь модерации недоступна:', e),
@@ -179,7 +183,7 @@ export function AdminScreen({ open, onClose }: Props) {
     >
       <View style={styles.topBar}>
         <PressableScale style={styles.backChip} onPress={onClose}>
-          <Text style={styles.backText}>‹  Профиль</Text>
+          <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
       </View>
@@ -203,9 +207,9 @@ export function AdminScreen({ open, onClose }: Props) {
         {stats && (
           <StatsBlock
             stats={stats}
-            stale={items.filter(
-              (i) => i.appliedMs != null && Date.now() - i.appliedMs > STALE_MS,
-            ).length}
+            stale={
+              items.filter((i) => i.appliedMs != null && Date.now() - i.appliedMs > STALE_MS).length
+            }
           />
         )}
 
@@ -264,13 +268,11 @@ function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
       <Text style={styles.statsTitle}>Покрытие</Text>
 
       {coverage.anyEverywhere ? (
-        <Text style={styles.statsLine}>
-          Есть мастера, готовые выезжать по всей республике
-        </Text>
+        <Text style={styles.statsLine}>Есть мастера, готовые выезжать по всей республике</Text>
       ) : (
         <Text style={styles.statsLine}>
-          Мастера есть в {coverage.coveredSettlements} из {coverage.totalSettlements}
-          {' '}населённых пунктов
+          Мастера есть в {coverage.coveredSettlements} из {coverage.totalSettlements} населённых
+          пунктов
         </Text>
       )}
 
@@ -280,7 +282,8 @@ function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
           return (
             <View key={c.key} style={[styles.cityChip, has && styles.cityChipOk]}>
               <Text style={[styles.cityChipText, has && styles.cityChipTextOk]}>
-                {has ? '✓ ' : '— '}{c.name}
+                {has ? '✓ ' : '— '}
+                {c.name}
               </Text>
             </View>
           );
@@ -289,16 +292,16 @@ function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
 
       {/* Пустая специальность — это заявки, на которые некому откликнуться */}
       {coverage.missingCategories.length > 0 && (
-        <Text style={styles.statsAlert}>
-          Нет мастеров: {coverage.missingCategories.join(', ')}
-        </Text>
+        <Text style={styles.statsAlert}>Нет мастеров: {coverage.missingCategories.join(', ')}</Text>
       )}
     </Animated.View>
   );
 }
 
 function Stat({
-  value, label, tone,
+  value,
+  label,
+  tone,
 }: {
   value: number;
   label: string;
@@ -308,11 +311,13 @@ function Stat({
   const styles = themed[mode];
   return (
     <View style={styles.statCard}>
-      <Text style={[
-        styles.statValue,
-        tone === 'ok' && styles.statValueOk,
-        tone === 'warn' && styles.statValueWarn,
-      ]}>
+      <Text
+        style={[
+          styles.statValue,
+          tone === 'ok' && styles.statValueOk,
+          tone === 'warn' && styles.statValueWarn,
+        ]}
+      >
         {value}
       </Text>
       <Text style={styles.statLabel}>{label}</Text>
@@ -332,7 +337,9 @@ function waitedText(appliedMs: number): string {
 }
 
 function PendingCard({
-  item, busy, onDecide,
+  item,
+  busy,
+  onDecide,
 }: {
   item: Pending;
   busy: boolean;
@@ -362,9 +369,7 @@ function PendingCard({
         <View style={styles.cardWho}>
           <Text style={styles.name}>{item.name}</Text>
           <Text style={styles.meta}>
-            {item.cities.length
-              ? item.cities.map(settlementLabel).join(', ')
-              : 'вся республика'}
+            {item.cities.length ? item.cities.map(settlementLabel).join(', ') : 'вся республика'}
           </Text>
           <Text style={styles.meta}>{item.phone || 'телефон не указан'}</Text>
           {item.appliedMs != null && (
@@ -380,9 +385,7 @@ function PendingCard({
         </View>
       </View>
 
-      {item.skills.length > 0 && (
-        <Text style={styles.skills}>{item.skills.join(' · ')}</Text>
-      )}
+      {item.skills.length > 0 && <Text style={styles.skills}>{item.skills.join(' · ')}</Text>}
 
       {item.about ? <Text style={styles.about}>{item.about}</Text> : null}
 
@@ -434,11 +437,7 @@ function PendingCard({
             disabled={busy}
           >
             <Text style={styles.btnApproveText}>
-              {busy
-                ? 'Сохраняем…'
-                : confirmNoCard
-                  ? 'Допустить без карты?'
-                  : '✓  Допустить'}
+              {busy ? 'Сохраняем…' : confirmNoCard ? 'Допустить без карты?' : '✓  Допустить'}
             </Text>
           </PressableScale>
           <PressableScale
@@ -446,9 +445,7 @@ function PendingCard({
             onPress={() => (confirmNoCard ? setConfirmNoCard(false) : setRejecting(true))}
             disabled={busy}
           >
-            <Text style={styles.btnGhostText}>
-              {confirmNoCard ? 'Отмена' : 'Отказать'}
-            </Text>
+            <Text style={styles.btnGhostText}>{confirmNoCard ? 'Отмена' : 'Отказать'}</Text>
           </PressableScale>
         </View>
       )}
@@ -456,110 +453,117 @@ function PendingCard({
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  root: { backgroundColor: t.bg },
-  fill: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingTop: 54,
-    paddingBottom: 6,
-  },
-  backChip: { paddingVertical: 8, paddingHorizontal: 10 },
-  backChipGhost: { width: 60 },
-  backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
-  content: { padding: 16, paddingBottom: 60 },
-  header: { fontSize: 20, fontWeight: '800', color: t.text },
-  headerSub: { color: t.textMuted, fontWeight: '600', fontSize: 12, marginTop: 2, marginBottom: 18 },
-  stats: {
-    backgroundColor: t.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 14,
-    marginBottom: 18,
-  },
-  statsRow: { flexDirection: 'row', gap: 8 },
-  statCard: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: t.soft,
-    borderRadius: 14,
-    paddingVertical: 12,
-  },
-  statValue: { fontSize: 20, fontWeight: '800', color: t.text },
-  statValueOk: { color: t.accent },
-  statValueWarn: { color: t.warn },
-  statLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: t.textMuted,
-    marginTop: 3,
-    textAlign: 'center',
-  },
-  statsAlert: { fontSize: 12, fontWeight: '700', color: t.warn, marginTop: 12, lineHeight: 17 },
-  statsTitle: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginTop: 16 },
-  statsLine: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
-  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
-  cityChip: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.soft,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  cityChipOk: { borderColor: t.accentBorder, backgroundColor: t.accentSoft },
-  cityChipText: { fontSize: 11.5, fontWeight: '700', color: t.textMuted },
-  cityChipTextOk: { color: t.accent },
-  card: {
-    backgroundColor: t.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 14,
-    marginBottom: 12,
-  },
-  cardHead: { flexDirection: 'row', gap: 12 },
-  photo: { width: 82, height: 82, borderRadius: 14, backgroundColor: t.chip },
-  photoEmpty: { alignItems: 'center', justifyContent: 'center' },
-  photoIcon: { fontSize: 32 },
-  cardWho: { flex: 1 },
-  name: { fontSize: 15, fontWeight: '800', color: t.text },
-  meta: { fontSize: 12, fontWeight: '600', color: t.textMuted, marginTop: 3 },
-  metaOk: { color: t.accent, fontWeight: '700' },
-  metaBad: { color: t.danger, fontWeight: '700' },
-  skills: { fontSize: 12, fontWeight: '700', color: t.textSoft, marginTop: 10 },
-  about: { fontSize: 12.5, fontWeight: '600', color: t.text, lineHeight: 17, marginTop: 8 },
-  row: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  btn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
-  btnDim: { opacity: 0.6 },
-  btnApprove: { backgroundColor: t.accent },
-  btnApproveWarn: { backgroundColor: t.warn },
-  btnApproveText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
-  btnReject: { backgroundColor: t.danger },
-  btnRejectText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13.5 },
-  btnGhost: { backgroundColor: t.card, borderWidth: 1, borderColor: t.border },
-  btnGhostText: { color: t.textMuted, fontWeight: '800', fontSize: 13.5 },
-  rejectBox: { marginTop: 12 },
-  reasonInput: {
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 12,
-    backgroundColor: t.inputBg,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 12.5,
-    fontWeight: '600',
-    color: t.text,
-    minHeight: 58,
-    textAlignVertical: 'top',
-  },
-  emptyWrap: { alignItems: 'center', paddingVertical: 50 },
-  emptyIcon: { fontSize: 36, marginBottom: 10 },
-  emptyTitle: { fontSize: 14, fontWeight: '800', color: t.textMuted },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    root: { backgroundColor: t.bg },
+    fill: { flex: 1 },
+    topBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingTop: 54,
+      paddingBottom: 6,
+    },
+    backChip: { paddingVertical: 8, paddingHorizontal: 10 },
+    backChipGhost: { width: 60 },
+    backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+    content: { padding: 16, paddingBottom: 60 },
+    header: { fontSize: 20, fontWeight: '800', color: t.text },
+    headerSub: {
+      color: t.textMuted,
+      fontWeight: '600',
+      fontSize: 12,
+      marginTop: 2,
+      marginBottom: 18,
+    },
+    stats: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginBottom: 18,
+    },
+    statsRow: { flexDirection: 'row', gap: 8 },
+    statCard: {
+      flex: 1,
+      alignItems: 'center',
+      backgroundColor: t.soft,
+      borderRadius: 14,
+      paddingVertical: 12,
+    },
+    statValue: { fontSize: 20, fontWeight: '800', color: t.text },
+    statValueOk: { color: t.accent },
+    statValueWarn: { color: t.warn },
+    statLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: t.textMuted,
+      marginTop: 3,
+      textAlign: 'center',
+    },
+    statsAlert: { fontSize: 12, fontWeight: '700', color: t.warn, marginTop: 12, lineHeight: 17 },
+    statsTitle: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginTop: 16 },
+    statsLine: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
+    chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+    cityChip: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.soft,
+      paddingHorizontal: 9,
+      paddingVertical: 6,
+    },
+    cityChipOk: { borderColor: t.accentBorder, backgroundColor: t.accentSoft },
+    cityChipText: { fontSize: 11.5, fontWeight: '700', color: t.textMuted },
+    cityChipTextOk: { color: t.accent },
+    card: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginBottom: 12,
+    },
+    cardHead: { flexDirection: 'row', gap: 12 },
+    photo: { width: 82, height: 82, borderRadius: 14, backgroundColor: t.chip },
+    photoEmpty: { alignItems: 'center', justifyContent: 'center' },
+    photoIcon: { fontSize: 32 },
+    cardWho: { flex: 1 },
+    name: { fontSize: 15, fontWeight: '800', color: t.text },
+    meta: { fontSize: 12, fontWeight: '600', color: t.textMuted, marginTop: 3 },
+    metaOk: { color: t.accent, fontWeight: '700' },
+    metaBad: { color: t.danger, fontWeight: '700' },
+    skills: { fontSize: 12, fontWeight: '700', color: t.textSoft, marginTop: 10 },
+    about: { fontSize: 12.5, fontWeight: '600', color: t.text, lineHeight: 17, marginTop: 8 },
+    row: { flexDirection: 'row', gap: 8, marginTop: 12 },
+    btn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
+    btnDim: { opacity: 0.6 },
+    btnApprove: { backgroundColor: t.accent },
+    btnApproveWarn: { backgroundColor: t.warn },
+    btnApproveText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
+    btnReject: { backgroundColor: t.danger },
+    btnRejectText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13.5 },
+    btnGhost: { backgroundColor: t.card, borderWidth: 1, borderColor: t.border },
+    btnGhostText: { color: t.textMuted, fontWeight: '800', fontSize: 13.5 },
+    rejectBox: { marginTop: 12 },
+    reasonInput: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: t.text,
+      minHeight: 58,
+      textAlignVertical: 'top',
+    },
+    emptyWrap: { alignItems: 'center', paddingVertical: 50 },
+    emptyIcon: { fontSize: 36, marginBottom: 10 },
+    emptyTitle: { fontSize: 14, fontWeight: '800', color: t.textMuted },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

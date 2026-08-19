@@ -122,7 +122,7 @@ type AppState = {
  * эффекта и пересоздавалось бы каждую отрисовку, перезапуская подписки.
  */
 const masterThreadName = (order?: { masterName?: string | null }) =>
-  (order?.masterName ? `Мастер ${order.masterName}` : 'Мастер');
+  order?.masterName ? `Мастер ${order.masterName}` : 'Мастер';
 
 const AppStateContext = createContext<AppState | null>(null);
 
@@ -133,9 +133,7 @@ export function useAppState() {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const {
-    user, logout: signOutUser, reauthenticate, deleteAccount: deleteAuthUser,
-  } = useAuth();
+  const { user, logout: signOutUser, reauthenticate, deleteAccount: deleteAuthUser } = useAuth();
   const uid = user?.uid ?? null;
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -212,34 +210,40 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       return;
     }
     const ref = doc(db, 'users', uid);
-    return onSnapshot(ref, (snap) => {
-      if (!snap.exists()) {
-        if (deleting.current) return;
-        // Город, адрес и согласие человек указал на экране регистрации —
-        // записываем их тем же действием, что создаёт профиль. Запасные
-        // значения нужны тем, кто регистрировался до появления этих полей.
-        const signup = takeSignupDraft();
-        const address = signup?.address || DEFAULT_ADDRESS;
-        setDoc(ref, {
-          name: user?.displayName ?? 'Гость',
-          email: user?.email ?? '',
-          addresses: [address],
-          activeAddress: address,
-          city: signup?.city ?? '',
-          themeMode: 'light',
-          consents: takePendingConsent() ?? {},
-          createdAt: serverTimestamp(),
-        }).catch((e) => console.warn('Не удалось создать профиль:', e));
-        return;
-      }
-      const d = snap.data();
-      setUserNameLocal(d.name ?? '');
-      setAddresses(Array.isArray(d.addresses) && d.addresses.length ? d.addresses : [DEFAULT_ADDRESS]);
-      setActiveAddressLocal(d.activeAddress ?? DEFAULT_ADDRESS);
-      setCityLocal(d.city ?? '');
-      setConsentsLocal((d.consents ?? {}) as Consents);
-      setThemeModeLocal(d.themeMode === 'dark' ? 'dark' : 'light');
-    }, (e) => console.warn('Профиль недоступен:', e));
+    return onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          if (deleting.current) return;
+          // Город, адрес и согласие человек указал на экране регистрации —
+          // записываем их тем же действием, что создаёт профиль. Запасные
+          // значения нужны тем, кто регистрировался до появления этих полей.
+          const signup = takeSignupDraft();
+          const address = signup?.address || DEFAULT_ADDRESS;
+          setDoc(ref, {
+            name: user?.displayName ?? 'Гость',
+            email: user?.email ?? '',
+            addresses: [address],
+            activeAddress: address,
+            city: signup?.city ?? '',
+            themeMode: 'light',
+            consents: takePendingConsent() ?? {},
+            createdAt: serverTimestamp(),
+          }).catch((e) => console.warn('Не удалось создать профиль:', e));
+          return;
+        }
+        const d = snap.data();
+        setUserNameLocal(d.name ?? '');
+        setAddresses(
+          Array.isArray(d.addresses) && d.addresses.length ? d.addresses : [DEFAULT_ADDRESS],
+        );
+        setActiveAddressLocal(d.activeAddress ?? DEFAULT_ADDRESS);
+        setCityLocal(d.city ?? '');
+        setConsentsLocal((d.consents ?? {}) as Consents);
+        setThemeModeLocal(d.themeMode === 'dark' ? 'dark' : 'light');
+      },
+      (e) => console.warn('Профиль недоступен:', e),
+    );
   }, [uid, user?.displayName, user?.email]);
 
   // ---------- права модератора ----------
@@ -270,10 +274,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     let alive = true;
     getPushToken().then((token) => {
       if (!alive || !token) return;
-      updateDoc(doc(db, 'users', uid), { pushTokens: arrayUnion(token) })
-        .catch((e) => console.warn('Не удалось сохранить push-токен:', e));
+      updateDoc(doc(db, 'users', uid), { pushTokens: arrayUnion(token) }).catch((e) =>
+        console.warn('Не удалось сохранить push-токен:', e),
+      );
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [uid]);
 
   // ---------- заказы ----------
@@ -285,30 +292,41 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     // Без orderBy: связка where + orderBy по разным полям потребовала бы
     // составного индекса, а без него запрос падает. Сортируем на месте.
     const q = query(collection(db, 'orders'), where('clientId', '==', uid));
-    return onSnapshot(q, (snap) => {
-      setOrders(snap.docs.map((d) => {
-        const v = d.data();
-        return {
-          id: d.id,
-          title: v.title,
-          date: v.date,
-          status: v.status,
-          comment: v.comment ?? undefined,
-          photoUri: v.photoUrl ?? null,
-          address: v.address ?? undefined,
-          masterId: v.masterId ?? null,
-          masterName: v.masterName ?? null,
-          agreedPrice: v.agreedPrice ?? null,
-          reviewed: !!v.reviewed,
-          price: v.price ?? null,
-          priceStatus: v.priceStatus ?? 'none',
-          // для сортировки: у только что созданной заявки serverTimestamp
-          // ещё null, поэтому такие показываем сверху
-          createdMs: v.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER,
-        };
-      }).sort((a, b) => b.createdMs - a.createdMs)
-        .map(({ createdMs, ...o }) => { void createdMs; return o; }));
-    }, (e) => console.warn('Заказы недоступны:', e));
+    return onSnapshot(
+      q,
+      (snap) => {
+        setOrders(
+          snap.docs
+            .map((d) => {
+              const v = d.data();
+              return {
+                id: d.id,
+                title: v.title,
+                date: v.date,
+                status: v.status,
+                comment: v.comment ?? undefined,
+                photoUri: v.photoUrl ?? null,
+                address: v.address ?? undefined,
+                masterId: v.masterId ?? null,
+                masterName: v.masterName ?? null,
+                agreedPrice: v.agreedPrice ?? null,
+                reviewed: !!v.reviewed,
+                price: v.price ?? null,
+                priceStatus: v.priceStatus ?? 'none',
+                // для сортировки: у только что созданной заявки serverTimestamp
+                // ещё null, поэтому такие показываем сверху
+                createdMs: v.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER,
+              };
+            })
+            .sort((a, b) => b.createdMs - a.createdMs)
+            .map(({ createdMs, ...o }) => {
+              void createdMs;
+              return o;
+            }),
+        );
+      },
+      (e) => console.warn('Заказы недоступны:', e),
+    );
   }, [uid]);
 
   // ---------- предложения мастеров ----------
@@ -360,26 +378,28 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const unsubs = ids.map((orderId) => onSnapshot(
-      query(collection(db, 'orders', orderId, 'offers'), orderBy('price', 'asc')),
-      (snap) => {
-        const list: Offer[] = snap.docs.map((d) => {
-          const v = d.data();
-          ensureMasterCard(v.masterId);
-          return {
-            masterId: v.masterId,
-            masterName: v.masterName ?? 'Мастер',
-            price: v.price,
-            comment: v.comment ?? '',
-            status: v.status === 'accepted' ? 'accepted' : 'pending',
-            rating: null,
-            reviewsCount: 0,
-          };
-        });
-        setOffersByOrder((prev) => ({ ...prev, [orderId]: list }));
-      },
-      (e) => console.warn('Предложения недоступны:', e),
-    ));
+    const unsubs = ids.map((orderId) =>
+      onSnapshot(
+        query(collection(db, 'orders', orderId, 'offers'), orderBy('price', 'asc')),
+        (snap) => {
+          const list: Offer[] = snap.docs.map((d) => {
+            const v = d.data();
+            ensureMasterCard(v.masterId);
+            return {
+              masterId: v.masterId,
+              masterName: v.masterName ?? 'Мастер',
+              price: v.price,
+              comment: v.comment ?? '',
+              status: v.status === 'accepted' ? 'accepted' : 'pending',
+              rating: null,
+              reviewsCount: 0,
+            };
+          });
+          setOffersByOrder((prev) => ({ ...prev, [orderId]: list }));
+        },
+        (e) => console.warn('Предложения недоступны:', e),
+      ),
+    );
 
     return () => unsubs.forEach((u) => u());
   }, [uid, openOrderIdsKey]);
@@ -406,35 +426,37 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const unsubs = ids.map((orderId) => onSnapshot(
-      query(collection(db, 'orders', orderId, 'messages'), orderBy('createdAt', 'asc')),
-      (snap) => {
-        const messages: ChatMessage[] = snap.docs.map((m) => {
-          const v = m.data();
-          return {
-            id: m.id,
-            // «свой» — тот, кто отправил; для клиента это он сам
-            from: v.senderId === uid ? 'user' : 'master',
-            text: v.text,
-            time: v.time,
-          };
-        });
-        const order = ordersRef.current.find((o) => o.id === orderId);
-        setOrderThreads((prev) => {
-          const next: Thread = {
-            id: orderId,
-            name: masterThreadName(order),
-            icon: '🧑‍🔧',
-            unread: false,
-            messages,
-          };
-          const rest = prev.filter((t) => t.id !== orderId);
-          // чаты без сообщений не показываем — пустой список выглядел бы мусором
-          return messages.length ? [next, ...rest] : rest;
-        });
-      },
-      (e) => console.warn('Переписка по заявке недоступна:', e),
-    ));
+    const unsubs = ids.map((orderId) =>
+      onSnapshot(
+        query(collection(db, 'orders', orderId, 'messages'), orderBy('createdAt', 'asc')),
+        (snap) => {
+          const messages: ChatMessage[] = snap.docs.map((m) => {
+            const v = m.data();
+            return {
+              id: m.id,
+              // «свой» — тот, кто отправил; для клиента это он сам
+              from: v.senderId === uid ? 'user' : 'master',
+              text: v.text,
+              time: v.time,
+            };
+          });
+          const order = ordersRef.current.find((o) => o.id === orderId);
+          setOrderThreads((prev) => {
+            const next: Thread = {
+              id: orderId,
+              name: masterThreadName(order),
+              icon: '🧑‍🔧',
+              unread: false,
+              messages,
+            };
+            const rest = prev.filter((t) => t.id !== orderId);
+            // чаты без сообщений не показываем — пустой список выглядел бы мусором
+            return messages.length ? [next, ...rest] : rest;
+          });
+        },
+        (e) => console.warn('Переписка по заявке недоступна:', e),
+      ),
+    );
 
     return () => unsubs.forEach((u) => u());
   }, [uid, orderIdsKey]);
@@ -471,29 +493,36 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       (snap) => {
         const ids = new Set(snap.docs.map((d) => d.id));
 
-        setSupportThreads((prev) => snap.docs.map((d) => {
-          const v = d.data();
-          const old = prev.find((t) => t.id === d.id);
-          return {
-            id: d.id,
-            name: v.name,
-            icon: v.icon,
-            unread: !!v.unread,
-            messages: old?.messages ?? [],
-          };
-        }));
+        setSupportThreads((prev) =>
+          snap.docs.map((d) => {
+            const v = d.data();
+            const old = prev.find((t) => t.id === d.id);
+            return {
+              id: d.id,
+              name: v.name,
+              icon: v.icon,
+              unread: !!v.unread,
+              messages: old?.messages ?? [],
+            };
+          }),
+        );
 
         // подписываемся на сообщения новых тредов
         snap.docs.forEach((d) => {
           if (msgUnsubs.has(d.id)) return;
           const unsub = onSnapshot(
-            query(collection(db, 'users', uid, 'threads', d.id, 'messages'), orderBy('createdAt', 'asc')),
+            query(
+              collection(db, 'users', uid, 'threads', d.id, 'messages'),
+              orderBy('createdAt', 'asc'),
+            ),
             (msgSnap) => {
               const messages: ChatMessage[] = msgSnap.docs.map((m) => {
                 const v = m.data();
                 return { id: m.id, from: v.from, text: v.text, time: v.time };
               });
-              setSupportThreads((prev) => prev.map((t) => (t.id === d.id ? { ...t, messages } : t)));
+              setSupportThreads((prev) =>
+                prev.map((t) => (t.id === d.id ? { ...t, messages } : t)),
+              );
             },
             (e) => console.warn('Сообщения недоступны:', e),
           );
@@ -525,9 +554,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (!uid) return;
     const threadRef = doc(db, 'users', uid, 'threads', threadId);
     try {
-      await setDoc(threadRef, { name, icon, unread: true, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(
+        threadRef,
+        { name, icon, unread: true, updatedAt: serverTimestamp() },
+        { merge: true },
+      );
       await addDoc(collection(threadRef, 'messages'), {
-        from: 'master', text, time: now(), createdAt: serverTimestamp(),
+        from: 'master',
+        text,
+        time: now(),
+        createdAt: serverTimestamp(),
       });
       // Поддержку изображает само приложение, поэтому и уведомление о её
       // ответе локальное. Всё остальное — заявки, предложения, сообщения
@@ -682,15 +718,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const confirmOrderDone = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order || order.status !== 'Ждёт подтверждения') return;
-    updateDoc(doc(db, 'orders', orderId), { status: 'Завершена' })
-      .catch(failed('Не удалось подтвердить выполнение. Проверьте связь'));
+    updateDoc(doc(db, 'orders', orderId), { status: 'Завершена' }).catch(
+      failed('Не удалось подтвердить выполнение. Проверьте связь'),
+    );
   };
 
   const cancelOrder = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order || !CANCELLABLE.includes(order.status)) return;
-    updateDoc(doc(db, 'orders', orderId), { status: 'Отменена' })
-      .catch(failed('Не удалось отменить заявку. Проверьте связь'));
+    updateDoc(doc(db, 'orders', orderId), { status: 'Отменена' }).catch(
+      failed('Не удалось отменить заявку. Проверьте связь'),
+    );
   };
 
   // Новый адрес: добавляем в список (без дублей) и сразу делаем активным
@@ -763,7 +801,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (threadId !== SUPPORT_THREAD_ID) {
       try {
         await addDoc(collection(db, 'orders', threadId, 'messages'), {
-          senderId: uid, text, time: now(), createdAt: serverTimestamp(),
+          senderId: uid,
+          text,
+          time: now(),
+          createdAt: serverTimestamp(),
         });
       } catch (e) {
         failed('Сообщение не отправлено. Проверьте связь')(e);
@@ -775,7 +816,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try {
       await setDoc(threadRef, { updatedAt: serverTimestamp() }, { merge: true });
       await addDoc(collection(threadRef, 'messages'), {
-        from: 'user', text, time: now(), createdAt: serverTimestamp(),
+        from: 'user',
+        text,
+        time: now(),
+        createdAt: serverTimestamp(),
       });
     } catch (e) {
       failed('Сообщение не отправлено. Проверьте связь')(e);
@@ -798,11 +842,21 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (uid && threadId === SUPPORT_THREAD_ID && !supportThreads.find((t) => t.id === threadId)) {
       const threadRef = doc(db, 'users', uid, 'threads', threadId);
       try {
-        await setDoc(threadRef, {
-          name: 'Поддержка', icon: '🛟', unread: false, updatedAt: serverTimestamp(),
-        }, { merge: true });
+        await setDoc(
+          threadRef,
+          {
+            name: 'Поддержка',
+            icon: '🛟',
+            unread: false,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
         await addDoc(collection(threadRef, 'messages'), {
-          from: 'master', text: 'Здравствуйте! Чем можем помочь?', time: now(), createdAt: serverTimestamp(),
+          from: 'master',
+          text: 'Здравствуйте! Чем можем помочь?',
+          time: now(),
+          createdAt: serverTimestamp(),
         });
       } catch (e) {
         console.warn('Не удалось открыть переписку:', e);
@@ -862,9 +916,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     // поэтому двойная работа безвредна: что успел клиент, функция пропустит.
     const quietly = (p: Promise<unknown>) => p.catch(() => {});
 
-    await Promise.all(orders
-      .filter((o) => CANCELLABLE.includes(o.status))
-      .map((o) => quietly(updateDoc(doc(db, 'orders', o.id), { status: 'Отменена' }))));
+    await Promise.all(
+      orders
+        .filter((o) => CANCELLABLE.includes(o.status))
+        .map((o) => quietly(updateDoc(doc(db, 'orders', o.id), { status: 'Отменена' }))),
+    );
 
     try {
       const threadsSnap = await getDocs(collection(db, 'users', uid, 'threads'));
@@ -892,9 +948,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // не открывали в этой сессии
   const threads: Thread[] = [...orderThreads, ...supportThreads].map((t) => {
     const last = t.messages[t.messages.length - 1];
-    const unread = t.id === SUPPORT_THREAD_ID
-      ? t.unread && !readThreads.has(t.id)
-      : !!last && last.from === 'master' && !readThreads.has(t.id);
+    const unread =
+      t.id === SUPPORT_THREAD_ID
+        ? t.unread && !readThreads.has(t.id)
+        : !!last && last.from === 'master' && !readThreads.has(t.id);
     return unread === t.unread ? t : { ...t, unread };
   });
 

@@ -69,7 +69,9 @@ export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event
       // множественного выбора, остаётся прежнее поле city строкой
       const cities: string[] = Array.isArray(d.get('cities'))
         ? d.get('cities')
-        : (d.get('city') ? [String(d.get('city'))] : []);
+        : d.get('city')
+          ? [String(d.get('city'))]
+          : [];
       const skills: string[] = Array.isArray(d.get('skills')) ? d.get('skills') : [];
       // Пустой список значит «без ограничения» — так же, как в ленте
       const cityOk = !cities.length || !city || cities.includes(city);
@@ -80,12 +82,7 @@ export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event
 
   if (!uids.length) return;
 
-  await pushTo(
-    uids,
-    'Новая заявка рядом',
-    String(order.title ?? 'Заявка'),
-    { href: '/profile' },
-  );
+  await pushTo(uids, 'Новая заявка рядом', String(order.title ?? 'Заявка'), { href: '/profile' });
 });
 
 // ---------- предложение мастера → клиенту ----------
@@ -155,8 +152,8 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
   const ACTION_BY_STATUS: Record<string, AuditAction> = {
     'В работе': 'order.master_selected',
     'Ждёт подтверждения': 'order.finished',
-    'Завершена': 'order.confirmed',
-    'Отменена': 'order.cancelled',
+    Завершена: 'order.confirmed',
+    Отменена: 'order.cancelled',
     'Поиск мастера': 'order.reopened',
   };
   const action = ACTION_BY_STATUS[after.status as string];
@@ -177,12 +174,9 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
 
   // Клиент выбрал исполнителя
   if (after.status === 'В работе' && masterId) {
-    await pushTo(
-      [masterId],
-      'Вас выбрали!',
-      `${title} · ${rub(Number(after.agreedPrice ?? 0))}`,
-      { href: '/profile' },
-    );
+    await pushTo([masterId], 'Вас выбрали!', `${title} · ${rub(Number(after.agreedPrice ?? 0))}`, {
+      href: '/profile',
+    });
     return;
   }
 
@@ -233,9 +227,10 @@ export const onVerificationChanged = onDocumentWritten(
       const reviewer = after.reviewedBy;
       await audit({
         action,
-        actor: typeof reviewer === 'string' && reviewer
-          ? { type: 'admin', uid: reviewer }
-          : { type: 'user', uid: masterId },
+        actor:
+          typeof reviewer === 'string' && reviewer
+            ? { type: 'admin', uid: reviewer }
+            : { type: 'user', uid: masterId },
         subject: { type: 'master', id: masterId },
         correlationId: event.id,
         details: {
@@ -258,7 +253,8 @@ export const onVerificationChanged = onDocumentWritten(
         admins.docs.map((d) => d.id),
         'Заявка мастера на проверку',
         `${master.get('name') ?? 'Без имени'} · ${
-        (master.get('cities') ?? []).join(', ') || master.get('city') || 'вся республика'}`,
+          (master.get('cities') ?? []).join(', ') || master.get('city') || 'вся республика'
+        }`,
         { href: '/profile' },
       );
       return;
@@ -320,10 +316,13 @@ export const onReviewWritten = onDocumentWritten(
     }
 
     const sum = stars.reduce((acc, n) => acc + n, 0);
-    await db.doc(`masters/${masterId}`).set({
-      // Округляем до десятых: показываем всё равно «4,8»
-      rating: Math.round((sum / stars.length) * 10) / 10,
-      reviewsCount: stars.length,
-    }, { merge: true });
+    await db.doc(`masters/${masterId}`).set(
+      {
+        // Округляем до десятых: показываем всё равно «4,8»
+        rating: Math.round((sum / stars.length) * 10) / 10,
+        reviewsCount: stars.length,
+      },
+      { merge: true },
+    );
   },
 );

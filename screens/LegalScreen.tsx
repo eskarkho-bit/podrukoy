@@ -18,13 +18,10 @@ export function LegalScreen({ docId, onClose }: Props) {
   const doc = LEGAL_DOCS[docId];
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(220)}
-      style={[StyleSheet.absoluteFill, styles.root]}
-    >
+    <Animated.View entering={FadeIn.duration(220)} style={[StyleSheet.absoluteFill, styles.root]}>
       <View style={styles.topBar}>
         <PressableScale style={styles.backChip} onPress={onClose}>
-          <Text style={styles.backText}>‹  Назад</Text>
+          <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
       </View>
@@ -44,24 +41,31 @@ export function LegalScreen({ docId, onClose }: Props) {
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  root: { backgroundColor: t.bg },
-  fill: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingTop: 54,
-    paddingBottom: 6,
-  },
-  backChip: { paddingVertical: 8, paddingHorizontal: 10 },
-  backChipGhost: { width: 60 },
-  backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
-  content: { padding: 20, paddingBottom: 70 },
-  title: { fontSize: 19, fontWeight: '800', color: t.text },
-  version: { fontSize: 11.5, fontWeight: '700', color: t.textMuted, marginTop: 4, marginBottom: 18 },
-  body: { fontSize: 13, fontWeight: '500', color: t.text, lineHeight: 20 },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    root: { backgroundColor: t.bg },
+    fill: { flex: 1 },
+    topBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingTop: 54,
+      paddingBottom: 6,
+    },
+    backChip: { paddingVertical: 8, paddingHorizontal: 10 },
+    backChipGhost: { width: 60 },
+    backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+    content: { padding: 20, paddingBottom: 70 },
+    title: { fontSize: 19, fontWeight: '800', color: t.text },
+    version: {
+      fontSize: 11.5,
+      fontWeight: '700',
+      color: t.textMuted,
+      marginTop: 4,
+      marginBottom: 18,
+    },
+    body: { fontSize: 13, fontWeight: '500', color: t.text, lineHeight: 20 },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

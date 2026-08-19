@@ -30,8 +30,9 @@ describe('firestoreErrorText', () => {
   });
 
   test('отказ Storage читается так же', () => {
-    expect(firestoreErrorText(err('storage/unauthorized'), fallback))
-      .toBe(firestoreErrorText(err('permission-denied'), fallback));
+    expect(firestoreErrorText(err('storage/unauthorized'), fallback)).toBe(
+      firestoreErrorText(err('permission-denied'), fallback),
+    );
   });
 
   test('нет связи — говорим про связь', () => {

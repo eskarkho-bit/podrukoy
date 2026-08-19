@@ -25,8 +25,20 @@ describe('categoryFor', () => {
   });
 
   test('любая выданная специальность есть в списке, известном правилам', () => {
-    const objects = ['socket', 'sink', 'stove', 'light', 'shower', 'pipe',
-      'window', 'lawn', 'trees', 'gate', 'tools', 'чужое'];
+    const objects = [
+      'socket',
+      'sink',
+      'stove',
+      'light',
+      'shower',
+      'pipe',
+      'window',
+      'lawn',
+      'trees',
+      'gate',
+      'tools',
+      'чужое',
+    ];
     objects.forEach((id) => {
       expect(CATEGORIES).toContain(categoryFor(id));
     });

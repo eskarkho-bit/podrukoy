@@ -31,26 +31,27 @@ export function NoticeBanner({ text, onDismiss }: { text: string; onDismiss: () 
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  wrap: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 56 : 36,
-    left: 16,
-    right: 16,
-  },
-  banner: {
-    backgroundColor: t.danger,
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    shadowColor: t.shadow,
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 10,
-  },
-  text: { color: '#FFFFFF', fontWeight: '800', fontSize: 13, lineHeight: 18 },
-  hint: { color: 'rgba(255,255,255,0.75)', fontWeight: '700', fontSize: 10.5, marginTop: 4 },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    wrap: {
+      position: 'absolute',
+      top: Platform.OS === 'ios' ? 56 : 36,
+      left: 16,
+      right: 16,
+    },
+    banner: {
+      backgroundColor: t.danger,
+      borderRadius: 18,
+      paddingHorizontal: 16,
+      paddingVertical: 13,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.2,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 10,
+    },
+    text: { color: '#FFFFFF', fontWeight: '800', fontSize: 13, lineHeight: 18 },
+    hint: { color: 'rgba(255,255,255,0.75)', fontWeight: '700', fontSize: 10.5, marginTop: 4 },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

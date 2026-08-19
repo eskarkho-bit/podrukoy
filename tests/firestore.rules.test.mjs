@@ -15,7 +15,15 @@ import {
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import {
-  addDoc, collection, deleteDoc, doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch,
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 
 // Префикс demo- гарантирует, что обращения никогда не уйдут в настоящий проект
@@ -59,15 +67,18 @@ const offer = (patch = {}) => ({
 });
 
 // Заявка, созданная до появления offers: предложение лежит в ней самой
-const legacyOrder = (patch = {}) => order({
-  masterId: 'master1',
-  masterName: 'Иван',
-  status: 'Есть предложения',
-  price: 3500,
-  priceStatus: 'offered',
-  priceHistory: [{ amount: 3500, by: 'master', action: 'offered', at: '2026-08-01T10:00:00.000Z' }],
-  ...patch,
-});
+const legacyOrder = (patch = {}) =>
+  order({
+    masterId: 'master1',
+    masterName: 'Иван',
+    status: 'Есть предложения',
+    price: 3500,
+    priceStatus: 'offered',
+    priceHistory: [
+      { amount: 3500, by: 'master', action: 'offered', at: '2026-08-01T10:00:00.000Z' },
+    ],
+    ...patch,
+  });
 
 before(async () => {
   env = await initializeTestEnvironment({
@@ -93,16 +104,26 @@ beforeEach(async () => {
 
     // Проверенные мастера: без verified лента заявок закрыта
     await setDoc(doc(db, 'masters/master1'), {
-      name: 'Иван', city: 'москва', skills: ['электрика'],
-      verified: true, rating: 4.8, reviewsCount: 5,
+      name: 'Иван',
+      city: 'москва',
+      skills: ['электрика'],
+      verified: true,
+      rating: 4.8,
+      reviewsCount: 5,
     });
     await setDoc(doc(db, 'masters/master2'), {
-      name: 'Пётр', city: 'москва', skills: ['электрика'], verified: true,
+      name: 'Пётр',
+      city: 'москва',
+      skills: ['электрика'],
+      verified: true,
     });
     // Анкета заведена, проверку не прошла
     await setDoc(doc(db, 'masters/newbie'), { name: 'Новичок', city: 'москва', skills: [] });
     await setDoc(doc(db, 'masters/newbie/verification/application'), {
-      phone: '79991234567', about: 'Электрик', photoUrl: null, status: 'draft',
+      phone: '79991234567',
+      about: 'Электрик',
+      photoUrl: null,
+      status: 'draft',
     });
     // Заявка, готовая к отправке: есть и фото, и карта
     await setDoc(doc(db, 'masters/ready/verification/application'), {
@@ -129,12 +150,24 @@ beforeEach(async () => {
     await setDoc(doc(db, 'orders/open'), order());
     await setDoc(doc(db, 'orders/open/offers/master1'), offer());
 
-    await setDoc(doc(db, 'orders/working'), order({
-      masterId: 'master1', masterName: 'Иван', status: 'В работе', agreedPrice: 3500,
-    }));
-    await setDoc(doc(db, 'orders/finished'), order({
-      masterId: 'master1', masterName: 'Иван', status: 'Завершена', agreedPrice: 3500,
-    }));
+    await setDoc(
+      doc(db, 'orders/working'),
+      order({
+        masterId: 'master1',
+        masterName: 'Иван',
+        status: 'В работе',
+        agreedPrice: 3500,
+      }),
+    );
+    await setDoc(
+      doc(db, 'orders/finished'),
+      order({
+        masterId: 'master1',
+        masterName: 'Иван',
+        status: 'Завершена',
+        agreedPrice: 3500,
+      }),
+    );
     await setDoc(doc(db, 'orders/legacy'), legacyOrder());
   });
 });
@@ -149,9 +182,16 @@ describe('Создание заявки', () => {
   });
 
   test('нельзя создать заявку сразу с мастером и ценой', async () => {
-    await assertFails(setDoc(doc(as('client1'), 'orders/new3'), order({
-      masterId: 'master1', status: 'В работе', agreedPrice: 100,
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('client1'), 'orders/new3'),
+        order({
+          masterId: 'master1',
+          status: 'В работе',
+          agreedPrice: 100,
+        }),
+      ),
+    );
   });
 
   test('нельзя создать заявку с выдуманной специальностью', async () => {
@@ -176,30 +216,38 @@ describe('Создание заявки', () => {
 
 describe('Фото заявки', () => {
   test('клиент прикладывает фото к свежей заявке', async () => {
-    await assertSucceeds(updateDoc(doc(as('client1'), 'orders/open'), {
-      photoUrl: 'https://example.com/photo.jpg',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/open'), {
+        photoUrl: 'https://example.com/photo.jpg',
+      }),
+    );
   });
 
   test('второй раз фото не подменить', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await updateDoc(doc(ctx.firestore(), 'orders/open'), { photoUrl: 'https://a/1.jpg' });
     });
-    await assertFails(updateDoc(doc(as('client1'), 'orders/open'), {
-      photoUrl: 'https://example.com/other.jpg',
-    }));
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/open'), {
+        photoUrl: 'https://example.com/other.jpg',
+      }),
+    );
   });
 
   test('после выбора мастера фото не подменить', async () => {
-    await assertFails(updateDoc(doc(as('client1'), 'orders/working'), {
-      photoUrl: 'https://example.com/other.jpg',
-    }));
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), {
+        photoUrl: 'https://example.com/other.jpg',
+      }),
+    );
   });
 
   test('мастер чужое фото не приложит', async () => {
-    await assertFails(updateDoc(doc(as('master1'), 'orders/open'), {
-      photoUrl: 'https://example.com/other.jpg',
-    }));
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/open'), {
+        photoUrl: 'https://example.com/other.jpg',
+      }),
+    );
   });
 });
 
@@ -227,47 +275,86 @@ describe('Кто видит заявку', () => {
 
 describe('Предложения мастеров', () => {
   test('мастер присылает своё предложение', async () => {
-    await assertSucceeds(setDoc(doc(as('master2'), 'orders/open/offers/master2'), offer({
-      masterId: 'master2', masterName: 'Пётр', price: 3000,
-    })));
+    await assertSucceeds(
+      setDoc(
+        doc(as('master2'), 'orders/open/offers/master2'),
+        offer({
+          masterId: 'master2',
+          masterName: 'Пётр',
+          price: 3000,
+        }),
+      ),
+    );
   });
 
   test('нельзя писать в чужое предложение', async () => {
-    await assertFails(setDoc(doc(as('master2'), 'orders/open/offers/master1'), offer({
-      price: 100,
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('master2'), 'orders/open/offers/master1'),
+        offer({
+          price: 100,
+        }),
+      ),
+    );
   });
 
   test('нельзя подписать своё предложение чужим uid', async () => {
-    await assertFails(setDoc(doc(as('master2'), 'orders/open/offers/master2'), offer({
-      masterId: 'master1',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('master2'), 'orders/open/offers/master2'),
+        offer({
+          masterId: 'master1',
+        }),
+      ),
+    );
   });
 
   test('не мастер предложить цену не может', async () => {
-    await assertFails(setDoc(doc(as('stranger'), 'orders/open/offers/stranger'), offer({
-      masterId: 'stranger',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('stranger'), 'orders/open/offers/stranger'),
+        offer({
+          masterId: 'stranger',
+        }),
+      ),
+    );
   });
 
   test('цена должна быть положительным числом', async () => {
     for (const price of [0, -100, '3500']) {
-      await assertFails(setDoc(doc(as('master2'), 'orders/open/offers/master2'), offer({
-        masterId: 'master2', price,
-      })));
+      await assertFails(
+        setDoc(
+          doc(as('master2'), 'orders/open/offers/master2'),
+          offer({
+            masterId: 'master2',
+            price,
+          }),
+        ),
+      );
     }
   });
 
   test('предложение нельзя прислать сразу принятым', async () => {
-    await assertFails(setDoc(doc(as('master2'), 'orders/open/offers/master2'), offer({
-      masterId: 'master2', status: 'accepted',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('master2'), 'orders/open/offers/master2'),
+        offer({
+          masterId: 'master2',
+          status: 'accepted',
+        }),
+      ),
+    );
   });
 
   test('к заявке с уже выбранным мастером предложение не прикрепить', async () => {
-    await assertFails(setDoc(doc(as('master2'), 'orders/working/offers/master2'), offer({
-      masterId: 'master2',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('master2'), 'orders/working/offers/master2'),
+        offer({
+          masterId: 'master2',
+        }),
+      ),
+    );
   });
 
   test('чужие предложения мастеру не видны — цены конкурентов закрыты', async () => {
@@ -319,9 +406,13 @@ describe('Выбор мастера клиентом', () => {
   });
 
   test('мастер не может назначить себя сам', async () => {
-    await assertFails(updateDoc(doc(as('master1'), 'orders/open'), {
-      masterId: 'master1', agreedPrice: 3500, status: 'В работе',
-    }));
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/open'), {
+        masterId: 'master1',
+        agreedPrice: 3500,
+        status: 'В работе',
+      }),
+    );
   });
 
   test('посторонний клиент выбрать мастера не может', async () => {
@@ -329,9 +420,13 @@ describe('Выбор мастера клиентом', () => {
   });
 
   test('на заявке с мастером выбор повторить нельзя', async () => {
-    await assertFails(updateDoc(doc(as('client1'), 'orders/working'), {
-      masterId: 'master2', agreedPrice: 3500, status: 'В работе',
-    }));
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), {
+        masterId: 'master2',
+        agreedPrice: 3500,
+        status: 'В работе',
+      }),
+    );
   });
 });
 
@@ -359,9 +454,11 @@ describe('Что клиент менять не вправе', () => {
 
 describe('Завершение работы', () => {
   test('мастер отмечает работу выполненной', async () => {
-    await assertSucceeds(updateDoc(doc(as('master1'), 'orders/working'), {
-      status: 'Ждёт подтверждения',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('master1'), 'orders/working'), {
+        status: 'Ждёт подтверждения',
+      }),
+    );
   });
 
   test('мастер не может подтвердить работу за клиента', async () => {
@@ -394,21 +491,29 @@ describe('Отзывы и рейтинг', () => {
   });
 
   test('клиент оценивает завершённую работу', async () => {
-    await assertSucceeds(
-      setDoc(doc(as('client1'), 'masters/master1/reviews/finished'), review()),
-    );
+    await assertSucceeds(setDoc(doc(as('client1'), 'masters/master1/reviews/finished'), review()));
   });
 
   test('отзыв к незавершённой заявке не принимается', async () => {
-    await assertFails(setDoc(doc(as('client1'), 'masters/master1/reviews/working'), review({
-      orderId: 'working',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('client1'), 'masters/master1/reviews/working'),
+        review({
+          orderId: 'working',
+        }),
+      ),
+    );
   });
 
   test('нельзя оценить чужую работу', async () => {
-    await assertFails(setDoc(doc(as('client2'), 'masters/master1/reviews/finished'), review({
-      clientId: 'client2',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('client2'), 'masters/master1/reviews/finished'),
+        review({
+          clientId: 'client2',
+        }),
+      ),
+    );
   });
 
   test('нельзя оценить мастера, который эту заявку не делал', async () => {
@@ -424,9 +529,7 @@ describe('Отзывы и рейтинг', () => {
   });
 
   test('отзыв нельзя переписать или удалить задним числом', async () => {
-    await assertSucceeds(
-      setDoc(doc(as('client1'), 'masters/master1/reviews/finished'), review()),
-    );
+    await assertSucceeds(setDoc(doc(as('client1'), 'masters/master1/reviews/finished'), review()));
     await assertFails(
       updateDoc(doc(as('client1'), 'masters/master1/reviews/finished'), { stars: 1 }),
     );
@@ -436,15 +539,22 @@ describe('Отзывы и рейтинг', () => {
   test('мастер не может подделать себе рейтинг', async () => {
     await assertFails(updateDoc(doc(as('master1'), 'masters/master1'), { rating: 5 }));
     await assertFails(updateDoc(doc(as('master1'), 'masters/master1'), { reviewsCount: 999 }));
-    await assertFails(setDoc(doc(as('newbie'), 'masters/newbie'), {
-      name: 'Новичок', skills: [], rating: 5,
-    }));
+    await assertFails(
+      setDoc(doc(as('newbie'), 'masters/newbie'), {
+        name: 'Новичок',
+        skills: [],
+        rating: 5,
+      }),
+    );
   });
 
   test('обычные поля анкеты мастер меняет свободно', async () => {
-    await assertSucceeds(updateDoc(doc(as('master1'), 'masters/master1'), {
-      city: 'казань', skills: ['сантехника'],
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('master1'), 'masters/master1'), {
+        city: 'казань',
+        skills: ['сантехника'],
+      }),
+    );
   });
 
   test('отметку «отзыв оставлен» ставит только клиент и только раз', async () => {
@@ -455,98 +565,127 @@ describe('Отзывы и рейтинг', () => {
 
 describe('Переписка по заявке', () => {
   const message = (senderId, text = 'Здравствуйте') => ({
-    senderId, text, time: '14:32', createdAt: new Date(),
+    senderId,
+    text,
+    time: '14:32',
+    createdAt: new Date(),
   });
 
   test('клиент и выбранный мастер переписываются', async () => {
-    await assertSucceeds(addDoc(
-      collection(as('client1'), 'orders/working/messages'), message('client1'),
-    ));
-    await assertSucceeds(addDoc(
-      collection(as('master1'), 'orders/working/messages'), message('master1'),
-    ));
+    await assertSucceeds(
+      addDoc(collection(as('client1'), 'orders/working/messages'), message('client1')),
+    );
+    await assertSucceeds(
+      addDoc(collection(as('master1'), 'orders/working/messages'), message('master1')),
+    );
   });
 
   test('мастер с непринятым предложением в чат не попадает', async () => {
-    await assertFails(addDoc(
-      collection(as('master1'), 'orders/open/messages'), message('master1'),
-    ));
+    await assertFails(
+      addDoc(collection(as('master1'), 'orders/open/messages'), message('master1')),
+    );
   });
 
   test('посторонний не пишет и не читает', async () => {
-    await assertFails(addDoc(
-      collection(as('master2'), 'orders/working/messages'), message('master2'),
-    ));
+    await assertFails(
+      addDoc(collection(as('master2'), 'orders/working/messages'), message('master2')),
+    );
     await assertFails(getDoc(doc(as('master2'), 'orders/working/messages/any')));
   });
 
   test('нельзя отправить сообщение от чужого имени', async () => {
-    await assertFails(addDoc(
-      collection(as('master1'), 'orders/working/messages'), message('client1'),
-    ));
+    await assertFails(
+      addDoc(collection(as('master1'), 'orders/working/messages'), message('client1')),
+    );
   });
 
   test('пустое и гигантское сообщение не проходят', async () => {
-    await assertFails(addDoc(
-      collection(as('client1'), 'orders/working/messages'), message('client1', ''),
-    ));
-    await assertFails(addDoc(
-      collection(as('client1'), 'orders/working/messages'), message('client1', 'а'.repeat(2001)),
-    ));
+    await assertFails(
+      addDoc(collection(as('client1'), 'orders/working/messages'), message('client1', '')),
+    );
+    await assertFails(
+      addDoc(
+        collection(as('client1'), 'orders/working/messages'),
+        message('client1', 'а'.repeat(2001)),
+      ),
+    );
   });
 });
 
 describe('Заявки, созданные до появления offers', () => {
   test('клиент принимает цену, названную по старой схеме', async () => {
-    await assertSucceeds(updateDoc(doc(as('client1'), 'orders/legacy'), {
-      priceStatus: 'accepted',
-      agreedPrice: 3500,
-      status: 'В работе',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/legacy'), {
+        priceStatus: 'accepted',
+        agreedPrice: 3500,
+        status: 'В работе',
+      }),
+    );
   });
 
   test('принять сумму, которой не называли, всё так же нельзя', async () => {
-    await assertFails(updateDoc(doc(as('client1'), 'orders/legacy'), {
-      priceStatus: 'accepted',
-      agreedPrice: 100,
-      status: 'В работе',
-    }));
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/legacy'), {
+        priceStatus: 'accepted',
+        agreedPrice: 100,
+        status: 'В работе',
+      }),
+    );
   });
 
   test('клиент отклоняет цену, заявка остаётся живой', async () => {
-    await assertSucceeds(updateDoc(doc(as('client1'), 'orders/legacy'), {
-      priceStatus: 'declined',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/legacy'), {
+        priceStatus: 'declined',
+      }),
+    );
   });
 
   test('свой мастер пересматривает цену', async () => {
-    await assertSucceeds(updateDoc(doc(as('master1'), 'orders/legacy'), {
-      price: 3000,
-      priceStatus: 'offered',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('master1'), 'orders/legacy'), {
+        price: 3000,
+        priceStatus: 'offered',
+      }),
+    );
   });
 
   test('чужой мастер в старую заявку не лезет', async () => {
-    await assertFails(updateDoc(doc(as('master2'), 'orders/legacy'), {
-      price: 3000,
-      priceStatus: 'offered',
-    }));
+    await assertFails(
+      updateDoc(doc(as('master2'), 'orders/legacy'), {
+        price: 3000,
+        priceStatus: 'offered',
+      }),
+    );
   });
 });
 
 describe('Проверка мастера', () => {
   test('непроверенный мастер не видит заявок и не может предложить цену', async () => {
     await assertFails(getDoc(doc(as('newbie'), 'orders/open')));
-    await assertFails(setDoc(doc(as('newbie'), 'orders/open/offers/newbie'), offer({
-      masterId: 'newbie', masterName: 'Новичок',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('newbie'), 'orders/open/offers/newbie'),
+        offer({
+          masterId: 'newbie',
+          masterName: 'Новичок',
+        }),
+      ),
+    );
   });
 
   test('проверенный мастер видит и предлагает', async () => {
     await assertSucceeds(getDoc(doc(as('master2'), 'orders/open')));
-    await assertSucceeds(setDoc(doc(as('master2'), 'orders/open/offers/master2'), offer({
-      masterId: 'master2', masterName: 'Пётр', price: 3000,
-    })));
+    await assertSucceeds(
+      setDoc(
+        doc(as('master2'), 'orders/open/offers/master2'),
+        offer({
+          masterId: 'master2',
+          masterName: 'Пётр',
+          price: 3000,
+        }),
+      ),
+    );
   });
 
   test('мастер не может объявить себя проверенным', async () => {
@@ -566,50 +705,79 @@ describe('Проверка мастера', () => {
 
 describe('Заявка на проверку', () => {
   test('мастер заводит черновик', async () => {
-    await assertSucceeds(setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
-      phone: '79995554433', about: 'Могу всё', photoUrl: null, status: 'draft',
-    }));
+    await assertSucceeds(
+      setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
+        phone: '79995554433',
+        about: 'Могу всё',
+        photoUrl: null,
+        status: 'draft',
+      }),
+    );
   });
 
   test('нельзя создать заявку сразу на проверке', async () => {
-    await assertFails(setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
-      phone: '79995554433', about: '', photoUrl: 'https://example.com/f.jpg', status: 'pending',
-    }));
+    await assertFails(
+      setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
+        phone: '79995554433',
+        about: '',
+        photoUrl: 'https://example.com/f.jpg',
+        status: 'pending',
+      }),
+    );
   });
 
   test('нельзя подсунуть себе привязку карты', async () => {
-    await assertFails(setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
-      phone: '79995554433', status: 'draft', cardBindingId: 'pm_fake', cardLast4: '0000',
-    }));
-    await assertFails(updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-      cardBindingId: 'pm_fake',
-    }));
+    await assertFails(
+      setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
+        phone: '79995554433',
+        status: 'draft',
+        cardBindingId: 'pm_fake',
+        cardLast4: '0000',
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        cardBindingId: 'pm_fake',
+      }),
+    );
   });
 
   // Счётчик попыток привязки — защита от спама платежами у провайдера.
   // Если бы мастер мог его обнулять, защиты бы не было.
   test('нельзя переписать счётчик попыток привязки', async () => {
-    await assertFails(updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-      bindingAttempts: 0,
-    }));
-    await assertFails(updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-      lastBindingAt: null,
-    }));
-    await assertFails(setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
-      phone: '79995554433', status: 'draft', bindingAttempts: 0,
-    }));
+    await assertFails(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        bindingAttempts: 0,
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        lastBindingAt: null,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
+        phone: '79995554433',
+        status: 'draft',
+        bindingAttempts: 0,
+      }),
+    );
   });
 
   test('без фотографии на проверку не отправить', async () => {
-    await assertFails(updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-      status: 'pending',
-    }));
+    await assertFails(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        status: 'pending',
+      }),
+    );
   });
 
   test('с фотографией — отправляется', async () => {
-    await assertSucceeds(updateDoc(doc(as('ready'), 'masters/ready/verification/application'), {
-      status: 'pending',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('ready'), 'masters/ready/verification/application'), {
+        status: 'pending',
+      }),
+    );
   });
 
   // Карта обязательна, но требовать её здесь нельзя: пока не настроен
@@ -625,21 +793,27 @@ describe('Заявка на проверку', () => {
         status: 'draft',
       });
     });
-    await assertSucceeds(updateDoc(doc(as('nocard'), 'masters/nocard/verification/application'), {
-      status: 'pending',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('nocard'), 'masters/nocard/verification/application'), {
+        status: 'pending',
+      }),
+    );
   });
 
   test('свой вердикт мастер вынести не может', async () => {
-    await assertFails(updateDoc(doc(as('waiting'), 'masters/waiting/verification/application'), {
-      status: 'approved',
-    }));
+    await assertFails(
+      updateDoc(doc(as('waiting'), 'masters/waiting/verification/application'), {
+        status: 'approved',
+      }),
+    );
   });
 
   test('пока заявка на проверке, править её нельзя', async () => {
-    await assertFails(updateDoc(doc(as('waiting'), 'masters/waiting/verification/application'), {
-      phone: '70000000000',
-    }));
+    await assertFails(
+      updateDoc(doc(as('waiting'), 'masters/waiting/verification/application'), {
+        phone: '70000000000',
+      }),
+    );
   });
 
   test('чужую заявку не прочитать', async () => {
@@ -650,30 +824,38 @@ describe('Заявка на проверку', () => {
 
 describe('Согласие на фотографию лица', () => {
   test('без согласия фотографию не записать', async () => {
-    await assertFails(updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-      photoUrl: 'https://example.com/face.jpg',
-    }));
+    await assertFails(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        photoUrl: 'https://example.com/face.jpg',
+      }),
+    );
   });
 
   test('с согласием — записывается', async () => {
-    await assertSucceeds(updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-      photoUrl: 'https://example.com/face.jpg',
-      biometricConsent: '2026-08-06',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        photoUrl: 'https://example.com/face.jpg',
+        biometricConsent: '2026-08-06',
+      }),
+    );
   });
 
   test('согласие нельзя убрать, оставив фотографию', async () => {
-    await assertFails(updateDoc(doc(as('ready'), 'masters/ready/verification/application'), {
-      biometricConsent: null,
-    }));
+    await assertFails(
+      updateDoc(doc(as('ready'), 'masters/ready/verification/application'), {
+        biometricConsent: null,
+      }),
+    );
   });
 
   test('отзыв согласия вместе с удалением фотографии проходит', async () => {
-    await assertSucceeds(updateDoc(doc(as('ready'), 'masters/ready/verification/application'), {
-      photoUrl: null,
-      biometricConsent: null,
-      status: 'draft',
-    }));
+    await assertSucceeds(
+      updateDoc(doc(as('ready'), 'masters/ready/verification/application'), {
+        photoUrl: null,
+        biometricConsent: null,
+        status: 'draft',
+      }),
+    );
   });
 
   test('мастер может снять с себя допуск, но не выдать', async () => {
@@ -711,10 +893,12 @@ describe('Решение модератора', () => {
 
   test('модератор не переписывает саму анкету', async () => {
     await assertFails(updateDoc(doc(as('admin1'), 'masters/waiting'), { name: 'Другое имя' }));
-    await assertFails(updateDoc(
-      doc(as('admin1'), 'masters/waiting/verification/application'),
-      { status: 'approved', phone: '70000000000' },
-    ));
+    await assertFails(
+      updateDoc(doc(as('admin1'), 'masters/waiting/verification/application'), {
+        status: 'approved',
+        phone: '70000000000',
+      }),
+    );
   });
 
   test('модератор не трогает рейтинг', async () => {
@@ -747,24 +931,36 @@ describe('Заявка на удаление аккаунта', () => {
 
   test('нельзя подсунуть готовый этап или отметку о завершении', async () => {
     await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), request({ stage: 'done' })));
-    await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), request({
-      completedAt: serverTimestamp(),
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('client1'), 'deletions/client1'),
+        request({
+          completedAt: serverTimestamp(),
+        }),
+      ),
+    );
   });
 
   // Заявка, созданная сразу «выполненной», не попала бы в выборку сверки —
   // и удаление тихо не состоялось бы
   test('нельзя создать заявку сразу завершённой', async () => {
-    await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), request({
-      status: 'done',
-    })));
+    await assertFails(
+      setDoc(
+        doc(as('client1'), 'deletions/client1'),
+        request({
+          status: 'done',
+        }),
+      ),
+    );
   });
 
   test('время просьбы нельзя подделать', async () => {
-    await assertFails(setDoc(doc(as('client1'), 'deletions/client1'), {
-      requestedAt: new Date('2020-01-01'),
-      status: 'pending',
-    }));
+    await assertFails(
+      setDoc(doc(as('client1'), 'deletions/client1'), {
+        requestedAt: new Date('2020-01-01'),
+        status: 'pending',
+      }),
+    );
   });
 
   // Прогресс ведёт только функция: если бы его правил клиент, он мог бы
@@ -814,9 +1010,12 @@ describe('Журнал действий', () => {
   // Смысл журнала в том, что запись нельзя ни подделать, ни стереть.
   // Модератор здесь не исключение: он — тот, чьи решения журнал и фиксирует.
   test('писать в журнал не может никто, включая модератора', async () => {
-    await assertFails(setDoc(doc(as('admin1'), 'audit/fake'), {
-      action: 'master.approved', actorType: 'system',
-    }));
+    await assertFails(
+      setDoc(doc(as('admin1'), 'audit/fake'), {
+        action: 'master.approved',
+        actorType: 'system',
+      }),
+    );
     await assertFails(setDoc(doc(as('client1'), 'audit/fake'), { action: 'order.created' }));
     await assertFails(updateDoc(doc(as('admin1'), 'audit/e1'), { action: 'order.cancelled' }));
     await assertFails(deleteDoc(doc(as('admin1'), 'audit/e1')));

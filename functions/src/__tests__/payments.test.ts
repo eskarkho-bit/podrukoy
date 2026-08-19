@@ -127,11 +127,11 @@ describe('платёж не удался', () => {
     const provider = fakeProvider((path) => ({
       json: path.startsWith('/payments/')
         ? {
-          id: 'pay_1',
-          status: 'succeeded',
-          metadata: { uid: UID, purpose: 'master-verification' },
-          payment_method: {},
-        }
+            id: 'pay_1',
+            status: 'succeeded',
+            metadata: { uid: UID, purpose: 'master-verification' },
+            payment_method: {},
+          }
         : { id: 'refund_1' },
     }));
 
@@ -146,9 +146,11 @@ describe('платёж не удался', () => {
   // Возврат не прошёл — это чужие деньги, зависшие у провайдера. Отметка
   // нужна, чтобы сверка вернулась к ним в следующий прогон.
   test('неудавшийся возврат помечается для повтора', async () => {
-    fakeProvider((path) => (path.startsWith('/payments/')
-      ? { json: succeededPayment(UID) }
-      : { ok: false, status: 500, json: { code: 'internal' } }));
+    fakeProvider((path) =>
+      path.startsWith('/payments/')
+        ? { json: succeededPayment(UID) }
+        : { ok: false, status: 500, json: { code: 'internal' } },
+    );
 
     await settleBinding('pay_1', 'test');
 

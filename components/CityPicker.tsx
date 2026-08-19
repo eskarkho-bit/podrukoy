@@ -4,11 +4,7 @@ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
 import { counted } from './format';
-import {
-  searchSettlements,
-  settlementKey,
-  type Settlement,
-} from './cities';
+import { searchSettlements, settlementKey, type Settlement } from './cities';
 
 // Выбор населённого пункта.
 //
@@ -22,12 +18,13 @@ import {
 type Props = {
   onClose: () => void;
   title?: string;
-} & (
+} &
   // Клиент живёт в одном месте и выбирает один пункт — список закрывается сразу
-  | { mode?: 'single'; value: string; onSelect: (key: string, name: string) => void }
-  // Мастер выезжает в несколько: отмечает их и подтверждает кнопкой
-  | { mode: 'multi'; values: string[]; onToggle: (key: string) => void }
-);
+  (
+    | { mode?: 'single'; value: string; onSelect: (key: string, name: string) => void }
+    // Мастер выезжает в несколько: отмечает их и подтверждает кнопкой
+    | { mode: 'multi'; values: string[]; onToggle: (key: string) => void }
+  );
 
 export function CityPicker(props: Props) {
   const { onClose, title } = props;
@@ -39,7 +36,7 @@ export function CityPicker(props: Props) {
   const found = useMemo(() => searchSettlements(query), [query]);
 
   const isPicked = (key: string) =>
-    (props.mode === 'multi' ? props.values.includes(key) : props.value === key);
+    props.mode === 'multi' ? props.values.includes(key) : props.value === key;
 
   const renderItem = ({ item }: { item: Settlement }) => {
     const key = settlementKey(item.name);
@@ -47,9 +44,9 @@ export function CityPicker(props: Props) {
     return (
       <PressableScale
         style={[styles.row, picked && styles.rowPicked]}
-        onPress={() => (props.mode === 'multi'
-          ? props.onToggle(key)
-          : props.onSelect(key, item.name))}
+        onPress={() =>
+          props.mode === 'multi' ? props.onToggle(key) : props.onSelect(key, item.name)
+        }
       >
         <View style={styles.rowBody}>
           <Text style={[styles.rowName, picked && styles.rowNamePicked]}>{item.name}</Text>
@@ -70,7 +67,7 @@ export function CityPicker(props: Props) {
     >
       <View style={styles.topBar}>
         <PressableScale style={styles.backChip} onPress={onClose}>
-          <Text style={styles.backText}>‹  Назад</Text>
+          <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
       </View>
@@ -97,8 +94,8 @@ export function CityPicker(props: Props) {
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>Ничего не нашлось</Text>
           <Text style={styles.emptyText}>
-            Проверьте написание. Если вашего населённого пункта нет в списке,
-            напишите в поддержку — добавим.
+            Проверьте написание. Если вашего населённого пункта нет в списке, напишите в поддержку —
+            добавим.
           </Text>
         </View>
       ) : (
@@ -130,83 +127,84 @@ export function CityPicker(props: Props) {
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  root: { backgroundColor: t.bg },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingTop: 54,
-    paddingBottom: 6,
-  },
-  backChip: { paddingVertical: 8, paddingHorizontal: 10 },
-  backChipGhost: { width: 60 },
-  backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
-  head: { paddingHorizontal: 20, paddingBottom: 12 },
-  title: { fontSize: 19, fontWeight: '800', color: t.text, marginBottom: 8 },
-  hint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: t.textMuted,
-    lineHeight: 17,
-    marginBottom: 12,
-  },
-  footer: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 28,
-    borderTopWidth: 1,
-    borderTopColor: t.border,
-    backgroundColor: t.bg,
-  },
-  doneBtn: {
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: t.accent,
-  },
-  doneBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
-  search: {
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 14,
-    backgroundColor: t.inputBg,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    fontWeight: '600',
-    color: t.text,
-  },
-  list: { paddingHorizontal: 20, paddingBottom: 40 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.card,
-    marginBottom: 8,
-  },
-  rowPicked: { borderColor: t.accentBorder, backgroundColor: t.accentSoft },
-  rowBody: { flex: 1 },
-  rowName: { fontSize: 14, fontWeight: '700', color: t.text },
-  rowNamePicked: { color: t.accent, fontWeight: '800' },
-  rowMeta: { fontSize: 11.5, fontWeight: '600', color: t.textMuted, marginTop: 2 },
-  rowTick: { fontSize: 15, fontWeight: '800', color: t.accent },
-  emptyWrap: { paddingHorizontal: 20, paddingTop: 40, alignItems: 'center' },
-  emptyTitle: { fontSize: 14, fontWeight: '800', color: t.text },
-  emptyText: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    color: t.textMuted,
-    lineHeight: 18,
-    textAlign: 'center',
-    marginTop: 6,
-  },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    root: { backgroundColor: t.bg },
+    topBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingTop: 54,
+      paddingBottom: 6,
+    },
+    backChip: { paddingVertical: 8, paddingHorizontal: 10 },
+    backChipGhost: { width: 60 },
+    backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+    head: { paddingHorizontal: 20, paddingBottom: 12 },
+    title: { fontSize: 19, fontWeight: '800', color: t.text, marginBottom: 8 },
+    hint: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: t.textMuted,
+      lineHeight: 17,
+      marginBottom: 12,
+    },
+    footer: {
+      paddingHorizontal: 20,
+      paddingTop: 10,
+      paddingBottom: 28,
+      borderTopWidth: 1,
+      borderTopColor: t.border,
+      backgroundColor: t.bg,
+    },
+    doneBtn: {
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      backgroundColor: t.accent,
+    },
+    doneBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
+    search: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 14,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 14,
+      fontWeight: '600',
+      color: t.text,
+    },
+    list: { paddingHorizontal: 20, paddingBottom: 40 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+      marginBottom: 8,
+    },
+    rowPicked: { borderColor: t.accentBorder, backgroundColor: t.accentSoft },
+    rowBody: { flex: 1 },
+    rowName: { fontSize: 14, fontWeight: '700', color: t.text },
+    rowNamePicked: { color: t.accent, fontWeight: '800' },
+    rowMeta: { fontSize: 11.5, fontWeight: '600', color: t.textMuted, marginTop: 2 },
+    rowTick: { fontSize: 15, fontWeight: '800', color: t.accent },
+    emptyWrap: { paddingHorizontal: 20, paddingTop: 40, alignItems: 'center' },
+    emptyTitle: { fontSize: 14, fontWeight: '800', color: t.text },
+    emptyText: {
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: t.textMuted,
+      lineHeight: 18,
+      textAlign: 'center',
+      marginTop: 6,
+    },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

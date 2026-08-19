@@ -87,7 +87,10 @@ export function BottomTabs({ active, onSelect, hasUnreadMessages, hidden }: Prop
 }
 
 function TabButton({
-  tab, selected, showDot, onPress,
+  tab,
+  selected,
+  showDot,
+  onPress,
 }: {
   tab: { id: TabId; label: string; icon: string };
   selected: boolean;
@@ -124,47 +127,48 @@ function TabButton({
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  wrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: Platform.OS === 'ios' ? 28 : 16,
-  },
-  bar: {
-    flexDirection: 'row',
-    backgroundColor: t.card,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: t.border,
-    paddingVertical: 6,
-    paddingHorizontal: 6,
-    shadowColor: t.shadow,
-    shadowOpacity: 0.14,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  pill: {
-    position: 'absolute',
-    top: 6,
-    bottom: 6,
-    left: 6,
-    borderRadius: 16,
-    backgroundColor: t.accentSoft,
-  },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 16 },
-  icon: { fontSize: 19 },
-  dot: {
-    position: 'absolute',
-    top: -2,
-    right: -6,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: t.warn,
-  },
-  label: { marginTop: 3, fontSize: 10.5, fontWeight: '700' },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    wrap: {
+      position: 'absolute',
+      left: 16,
+      right: 16,
+      bottom: Platform.OS === 'ios' ? 28 : 16,
+    },
+    bar: {
+      flexDirection: 'row',
+      backgroundColor: t.card,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: t.border,
+      paddingVertical: 6,
+      paddingHorizontal: 6,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.14,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 10,
+    },
+    pill: {
+      position: 'absolute',
+      top: 6,
+      bottom: 6,
+      left: 6,
+      borderRadius: 16,
+      backgroundColor: t.accentSoft,
+    },
+    tab: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 16 },
+    icon: { fontSize: 19 },
+    dot: {
+      position: 'absolute',
+      top: -2,
+      right: -6,
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+      backgroundColor: t.warn,
+    },
+    label: { marginTop: 3, fontSize: 10.5, fontWeight: '700' },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

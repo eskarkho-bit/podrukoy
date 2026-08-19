@@ -227,7 +227,9 @@ export function consentsCurrent(consents: Consents | null | undefined): boolean 
 /** Согласия для записи в профиль — по действующим на сейчас редакциям. */
 export function currentConsents(): Consents {
   const out: Consents = {};
-  REQUIRED_DOCS.forEach((id) => { out[id] = LEGAL_DOCS[id].version; });
+  REQUIRED_DOCS.forEach((id) => {
+    out[id] = LEGAL_DOCS[id].version;
+  });
   return out;
 }
 

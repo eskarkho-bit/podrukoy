@@ -42,7 +42,8 @@ export function useAuth() {
 // Firebase отдаёт коды вида auth/invalid-credential — переводим в человеческие
 // формулировки, не подсказывая злоумышленнику, что именно не совпало
 export function authErrorText(e: unknown): string {
-  const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
+  const code =
+    typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
   switch (code) {
     case 'auth/invalid-email':
       return 'Похоже, в email опечатка';
@@ -76,10 +77,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [initializing, setInitializing] = useState(true);
 
-  useEffect(() => onAuthStateChanged(auth, (u) => {
-    setUser(u);
-    setInitializing(false);
-  }), []);
+  useEffect(
+    () =>
+      onAuthStateChanged(auth, (u) => {
+        setUser(u);
+        setInitializing(false);
+      }),
+    [],
+  );
 
   const signIn = async (email: string, password: string) => {
     await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
@@ -124,8 +129,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        user, initializing, signIn, register, resetPassword, logout,
-        reauthenticate, deleteAccount,
+        user,
+        initializing,
+        signIn,
+        register,
+        resetPassword,
+        logout,
+        reauthenticate,
+        deleteAccount,
       }}
     >
       {children}

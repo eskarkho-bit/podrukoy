@@ -20,7 +20,8 @@ import { audit, SYSTEM } from './audit';
 /** Снимает все неотвеченные предложения мастера. */
 async function dropPendingOffers(masterId: string): Promise<number> {
   const db = getFirestore();
-  const offers = await db.collectionGroup('offers')
+  const offers = await db
+    .collectionGroup('offers')
     .where('masterId', '==', masterId)
     .where('status', '==', 'pending')
     .get();
@@ -43,20 +44,24 @@ export const onMasterDeleted = onDocumentDeleted(
     // Заявки, где он был исполнителем. «Ждёт подтверждения» не трогаем:
     // работа сделана, клиенту остаётся её подтвердить, и отбирать у него
     // эту возможность нельзя.
-    const orders = await db.collection('orders')
+    const orders = await db
+      .collection('orders')
       .where('masterId', '==', masterId)
       .where('status', '==', 'В работе')
       .get();
 
     for (const d of orders.docs) {
-      await d.ref.set({
-        status: 'Поиск мастера',
-        masterId: null,
-        masterName: null,
-        agreedPrice: null,
-        agreedAt: null,
-        reopenedAt: new Date(),
-      }, { merge: true });
+      await d.ref.set(
+        {
+          status: 'Поиск мастера',
+          masterId: null,
+          masterName: null,
+          agreedPrice: null,
+          agreedAt: null,
+          reopenedAt: new Date(),
+        },
+        { merge: true },
+      );
 
       const clientId = d.get('clientId');
       if (clientId) {

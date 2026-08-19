@@ -22,9 +22,5 @@ module.exports = {
 
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
 
-  collectCoverageFrom: [
-    'components/**/*.{ts,tsx}',
-    'screens/**/*.{ts,tsx}',
-    '!**/node_modules/**',
-  ],
+  collectCoverageFrom: ['components/**/*.{ts,tsx}', 'screens/**/*.{ts,tsx}', '!**/node_modules/**'],
 };

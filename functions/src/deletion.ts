@@ -17,10 +17,16 @@ import { audit, SYSTEM } from './audit';
 // историей расчётов, — но имя, адрес, комментарий и фотография из них уходят.
 
 export type DeletionStage =
-  | 'orders' | 'threads' | 'verification' | 'master' | 'profile' | 'auth' | 'done';
+  'orders' | 'threads' | 'verification' | 'master' | 'profile' | 'auth' | 'done';
 
 const ORDER: DeletionStage[] = [
-  'orders', 'threads', 'verification', 'master', 'profile', 'auth', 'done',
+  'orders',
+  'threads',
+  'verification',
+  'master',
+  'profile',
+  'auth',
+  'done',
 ];
 
 const ANONYMOUS = 'Удалённый аккаунт';
@@ -60,15 +66,18 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
     let anonymized = 0;
     for (const d of orders.docs) {
       const open = ['Поиск мастера', 'Есть предложения', 'В работе'].includes(d.get('status'));
-      await d.ref.set({
-        // Мастер не должен ехать к исчезнувшему клиенту
-        ...(open ? { status: 'Отменена' } : {}),
-        clientName: ANONYMOUS,
-        address: '',
-        comment: '',
-        photoUrl: null,
-        anonymizedAt: FieldValue.serverTimestamp(),
-      }, { merge: true });
+      await d.ref.set(
+        {
+          // Мастер не должен ехать к исчезнувшему клиенту
+          ...(open ? { status: 'Отменена' } : {}),
+          clientName: ANONYMOUS,
+          address: '',
+          comment: '',
+          photoUrl: null,
+          anonymizedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
       await deletePrefix(`orders/${d.id}/`);
       anonymized += 1;
     }
@@ -125,10 +134,13 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
   }
 
   // status закрывает документ для сверки: она ищет ровно 'pending'
-  await ref.set({
-    status: 'done',
-    completedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
+  await ref.set(
+    {
+      status: 'done',
+      completedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
 
   await audit({
     action: 'account.deleted',

@@ -76,9 +76,12 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   // из-под руки пользователя в этот момент нечестно, поэтому жест выключен
   const { gesture, cardStyle } = useSheetDrag(onClose, step !== 'done');
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   const goForward = (next: Step) => {
     setDir('forward');
@@ -107,9 +110,10 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
 
   const addPhoto = async (source: 'camera' | 'library') => {
     try {
-      const result = source === 'camera'
-        ? await ImagePicker.launchCameraAsync({ quality: 0.7 })
-        : await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
+      const result =
+        source === 'camera'
+          ? await ImagePicker.launchCameraAsync({ quality: 0.7 })
+          : await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
       if (!result.canceled && result.assets[0]) {
         setPhotoUri(result.assets[0].uri);
       }
@@ -143,9 +147,11 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
     (dir === 'forward' ? FadeInRight : FadeInLeft).delay(60 + i * 55).duration(300);
 
   const stepTitle =
-    step === 'type' ? 'Что случилось?'
-    : step === 'sub' ? serviceType?.label ?? ''
-    : 'Опишите задачу';
+    step === 'type'
+      ? 'Что случилось?'
+      : step === 'sub'
+        ? (serviceType?.label ?? '')
+        : 'Опишите задачу';
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.wrap]}>
@@ -251,7 +257,10 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                     {photoUri ? (
                       <View style={styles.photoWrap}>
                         <Image source={{ uri: photoUri }} style={styles.photo} />
-                        <PressableScale style={styles.photoRemove} onPress={() => setPhotoUri(null)}>
+                        <PressableScale
+                          style={styles.photoRemove}
+                          onPress={() => setPhotoUri(null)}
+                        >
                           <Text style={styles.photoRemoveText}>✕</Text>
                         </PressableScale>
                       </View>
@@ -295,123 +304,130 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  wrap: { justifyContent: 'flex-end' },
-  dim: { backgroundColor: t.dim },
-  card: {
-    margin: 12,
-    borderRadius: 28,
-    backgroundColor: t.card,
-    padding: 20,
-    paddingBottom: 26,
-    shadowColor: t.shadow,
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
-  },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  headerText: { flex: 1 },
-  iconCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: t.chip,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  icon: { fontSize: 22 },
-  backBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: t.chip,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backBtnText: { fontSize: 24, color: t.accent, fontWeight: '700', marginTop: -2 },
-  title: { fontSize: 17, fontWeight: '800', color: t.text },
-  subtitle: { fontSize: 12, color: t.textMuted, fontWeight: '600', marginTop: 2 },
-  stepTitle: { fontSize: 13, fontWeight: '800', color: t.textSoft, marginBottom: 10 },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    backgroundColor: t.card,
-    borderWidth: 1,
-    borderColor: t.border,
-    marginBottom: 9,
-  },
-  optionIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: t.chip,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-  },
-  optionIcon: { fontSize: 15 },
-  optionText: { flex: 1, fontWeight: '700', fontSize: 14.5, color: t.text },
-  optionTextNoIcon: { paddingVertical: 2 },
-  chevron: { fontSize: 18, color: t.textMuted, fontWeight: '600' },
-  photoRow: { flexDirection: 'row', gap: 9, marginBottom: 9 },
-  photoBtn: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: 16,
-    paddingVertical: 14,
-    backgroundColor: t.soft,
-    borderWidth: 1,
-    borderColor: t.border,
-    borderStyle: 'dashed',
-  },
-  photoBtnIcon: { fontSize: 20, marginBottom: 4 },
-  photoBtnText: { fontWeight: '700', fontSize: 11.5, color: t.accent },
-  photoWrap: { marginBottom: 9 },
-  photo: { width: '100%', height: 150, borderRadius: 16, backgroundColor: t.chip },
-  photoRemove: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: t.overlay,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoRemoveText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
-  commentInput: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.inputBg,
-    padding: 13,
-    minHeight: 76,
-    textAlignVertical: 'top',
-    fontSize: 13.5,
-    color: t.text,
-    fontWeight: '600',
-    marginBottom: 9,
-  },
-  submit: { backgroundColor: t.accent, borderColor: t.accent, justifyContent: 'center' },
-  submitText: { fontWeight: '700', fontSize: 14.5, color: t.onAccent, textAlign: 'center', flex: 1 },
-  doneWrap: { alignItems: 'center', paddingVertical: 18 },
-  checkCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: t.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  check: { fontSize: 26, color: t.accent, fontWeight: '800' },
-  doneTitle: { fontSize: 16, fontWeight: '800', color: t.text },
-  doneSub: { fontSize: 12.5, color: t.textMuted, fontWeight: '600', marginTop: 3 },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    wrap: { justifyContent: 'flex-end' },
+    dim: { backgroundColor: t.dim },
+    card: {
+      margin: 12,
+      borderRadius: 28,
+      backgroundColor: t.card,
+      padding: 20,
+      paddingBottom: 26,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.16,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 8,
+    },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+    headerText: { flex: 1 },
+    iconCircle: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      backgroundColor: t.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    icon: { fontSize: 22 },
+    backBtn: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      backgroundColor: t.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    backBtnText: { fontSize: 24, color: t.accent, fontWeight: '700', marginTop: -2 },
+    title: { fontSize: 17, fontWeight: '800', color: t.text },
+    subtitle: { fontSize: 12, color: t.textMuted, fontWeight: '600', marginTop: 2 },
+    stepTitle: { fontSize: 13, fontWeight: '800', color: t.textSoft, marginBottom: 10 },
+    option: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 16,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.border,
+      marginBottom: 9,
+    },
+    optionIconWrap: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: t.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 11,
+    },
+    optionIcon: { fontSize: 15 },
+    optionText: { flex: 1, fontWeight: '700', fontSize: 14.5, color: t.text },
+    optionTextNoIcon: { paddingVertical: 2 },
+    chevron: { fontSize: 18, color: t.textMuted, fontWeight: '600' },
+    photoRow: { flexDirection: 'row', gap: 9, marginBottom: 9 },
+    photoBtn: {
+      flex: 1,
+      alignItems: 'center',
+      borderRadius: 16,
+      paddingVertical: 14,
+      backgroundColor: t.soft,
+      borderWidth: 1,
+      borderColor: t.border,
+      borderStyle: 'dashed',
+    },
+    photoBtnIcon: { fontSize: 20, marginBottom: 4 },
+    photoBtnText: { fontWeight: '700', fontSize: 11.5, color: t.accent },
+    photoWrap: { marginBottom: 9 },
+    photo: { width: '100%', height: 150, borderRadius: 16, backgroundColor: t.chip },
+    photoRemove: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: t.overlay,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    photoRemoveText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+    commentInput: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.inputBg,
+      padding: 13,
+      minHeight: 76,
+      textAlignVertical: 'top',
+      fontSize: 13.5,
+      color: t.text,
+      fontWeight: '600',
+      marginBottom: 9,
+    },
+    submit: { backgroundColor: t.accent, borderColor: t.accent, justifyContent: 'center' },
+    submitText: {
+      fontWeight: '700',
+      fontSize: 14.5,
+      color: t.onAccent,
+      textAlign: 'center',
+      flex: 1,
+    },
+    doneWrap: { alignItems: 'center', paddingVertical: 18 },
+    checkCircle: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: t.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+    check: { fontSize: 26, color: t.accent, fontWeight: '800' },
+    doneTitle: { fontSize: 16, fontWeight: '800', color: t.text },
+    doneSub: { fontSize: 12.5, color: t.textMuted, fontWeight: '600', marginTop: 3 },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

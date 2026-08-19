@@ -5,9 +5,7 @@
 // Сообщение об ошибке обязано вести к причине, иначе оно хуже, чем ничего.
 
 export function firestoreErrorCode(e: unknown): string {
-  return typeof e === 'object' && e && 'code' in e
-    ? String((e as { code: string }).code)
-    : '';
+  return typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
 }
 
 export function firestoreErrorText(e: unknown, fallback: string): string {
@@ -15,8 +13,10 @@ export function firestoreErrorText(e: unknown, fallback: string): string {
     case 'permission-denied':
     case 'storage/unauthorized':
       // Самая частая причина — правила в проекте старше кода
-      return 'Недостаточно прав. Похоже, правила доступа Firebase не обновлены '
-        + '— нужен firebase deploy';
+      return (
+        'Недостаточно прав. Похоже, правила доступа Firebase не обновлены ' +
+        '— нужен firebase deploy'
+      );
     case 'unauthenticated':
       return 'Сессия истекла — войдите заново';
     case 'unavailable':

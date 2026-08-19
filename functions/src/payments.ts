@@ -1,10 +1,6 @@
 import { logger } from 'firebase-functions';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
-import {
-  DocumentReference,
-  FieldValue,
-  getFirestore,
-} from 'firebase-admin/firestore';
+import { DocumentReference, FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { audit, SYSTEM } from './audit';
 
 // Привязка карты мастера.
@@ -42,10 +38,10 @@ export type BindingState = 'pending' | 'succeeded' | 'canceled' | 'failed';
 
 /** Чем закончилась попытка применить исход платежа. */
 export type SettleResult =
-  | 'settled'        // карта привязана
-  | 'canceled'       // человек отказался или банк отклонил
-  | 'still-pending'  // платёж ещё не завершён, придём позже
-  | 'ignored'        // не наш платёж
+  | 'settled' // карта привязана
+  | 'canceled' // человек отказался или банк отклонил
+  | 'still-pending' // платёж ещё не завершён, придём позже
+  | 'ignored' // не наш платёж
   | 'not-configured';
 
 type Credentials = { auth: string };
@@ -59,7 +55,10 @@ function credentials(): Credentials | null {
 
 /** Ошибка провайдера с кодом ответа — по нему решаем, повторять ли. */
 class ProviderError extends Error {
-  constructor(readonly status: number, readonly code: string | null) {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+  ) {
     super(`yookassa ${status}`);
   }
 }
@@ -130,10 +129,13 @@ async function refundHold(
       body: { payment_id: paymentId, amount: { value: HOLD_AMOUNT, currency: 'RUB' } },
     });
     if (ref) {
-      await ref.set({
-        refundedPaymentId: paymentId,
-        refundPending: false,
-      }, { merge: true });
+      await ref.set(
+        {
+          refundedPaymentId: paymentId,
+          refundPending: false,
+        },
+        { merge: true },
+      );
     }
     await audit({
       action: 'binding.refunded',
@@ -146,10 +148,15 @@ async function refundHold(
     // Заявка могла исчезнуть вместе с аккаунтом — тогда пометить некуда,
     // и остаётся только журнал
     if (ref) {
-      await ref.set({
-        refundPending: true,
-        refundPendingPaymentId: paymentId,
-      }, { merge: true }).catch(() => {});
+      await ref
+        .set(
+          {
+            refundPending: true,
+            refundPendingPaymentId: paymentId,
+          },
+          { merge: true },
+        )
+        .catch(() => {});
     }
     await audit({
       action: 'binding.refund_failed',
@@ -197,10 +204,13 @@ export async function settleBinding(
 
   if (payment.status === 'canceled') {
     if (target) {
-      await target.set({
-        bindingState: 'canceled',
-        bindingSettledAt: FieldValue.serverTimestamp(),
-      }, { merge: true });
+      await target.set(
+        {
+          bindingState: 'canceled',
+          bindingSettledAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
     }
     await audit({
       action: 'binding.canceled',
@@ -224,11 +234,14 @@ export async function settleBinding(
     // Оплата прошла, но способ оплаты не сохранён — привязки не получилось.
     // Рубль всё равно возвращаем.
     if (target) {
-      await target.set({
-        bindingState: 'failed',
-        bindingError: 'no-payment-method',
-        bindingSettledAt: FieldValue.serverTimestamp(),
-      }, { merge: true });
+      await target.set(
+        {
+          bindingState: 'failed',
+          bindingError: 'no-payment-method',
+          bindingSettledAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
     }
     await audit({
       action: 'binding.failed',
@@ -245,15 +258,18 @@ export async function settleBinding(
     // Пишем через Admin SDK: правила запрещают мастеру трогать эти поля,
     // и в этом весь смысл — привязку подтверждает банк, а не приложение.
     // Запись идемпотентна сама по себе: те же значения, тот же документ.
-    await target.set({
-      cardBindingId: bindingId,
-      cardLast4: card?.last4 ?? null,
-      cardBrand: card?.card_type ?? null,
-      cardBoundAt: FieldValue.serverTimestamp(),
-      bindingState: 'succeeded' satisfies BindingState,
-      bindingError: null,
-      bindingSettledAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    await target.set(
+      {
+        cardBindingId: bindingId,
+        cardLast4: card?.last4 ?? null,
+        cardBrand: card?.card_type ?? null,
+        cardBoundAt: FieldValue.serverTimestamp(),
+        bindingState: 'succeeded' satisfies BindingState,
+        bindingError: null,
+        bindingSettledAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
 
     await audit({
       action: 'binding.settled',
@@ -314,12 +330,15 @@ export const createCardBinding = onCall(async (request) => {
   }
 
   const attempt = attempts + 1;
-  await ref.set({
-    bindingAttempts: FieldValue.increment(1),
-    lastBindingAt: FieldValue.serverTimestamp(),
-    bindingState: 'pending' satisfies BindingState,
-    bindingError: null,
-  }, { merge: true });
+  await ref.set(
+    {
+      bindingAttempts: FieldValue.increment(1),
+      lastBindingAt: FieldValue.serverTimestamp(),
+      bindingState: 'pending' satisfies BindingState,
+      bindingError: null,
+    },
+    { merge: true },
+  );
 
   let payment: Record<string, any>;
   try {
@@ -340,10 +359,13 @@ export const createCardBinding = onCall(async (request) => {
   } catch (e) {
     // Платёж не создан — состояние не должно остаться «ждём», иначе сверка
     // будет ходить за платежом, которого нет
-    await ref.set({
-      bindingState: 'failed' satisfies BindingState,
-      bindingError: 'provider-unavailable',
-    }, { merge: true });
+    await ref.set(
+      {
+        bindingState: 'failed' satisfies BindingState,
+        bindingError: 'provider-unavailable',
+      },
+      { merge: true },
+    );
     await audit({
       action: 'binding.failed',
       actor: { type: 'user', uid },
@@ -358,10 +380,13 @@ export const createCardBinding = onCall(async (request) => {
   const paymentId = payment.id;
 
   if (!confirmationUrl || typeof paymentId !== 'string') {
-    await ref.set({
-      bindingState: 'failed' satisfies BindingState,
-      bindingError: 'no-confirmation-url',
-    }, { merge: true });
+    await ref.set(
+      {
+        bindingState: 'failed' satisfies BindingState,
+        bindingError: 'no-confirmation-url',
+      },
+      { merge: true },
+    );
     throw new HttpsError('internal', 'Провайдер не вернул адрес оплаты');
   }
 

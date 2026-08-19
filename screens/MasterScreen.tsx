@@ -91,8 +91,7 @@ const MAX_FEED_CITIES = 10;
 //   done      — работа сдана
 //   cancelled — клиент отменил заявку, которая уже была моей
 //   declined  — старая схема: клиент отклонил цену, можно назвать другую
-type JobStatus =
-  | 'new' | 'offered' | 'accepted' | 'declined' | 'done' | 'cancelled' | 'closed';
+type JobStatus = 'new' | 'offered' | 'accepted' | 'declined' | 'done' | 'cancelled' | 'closed';
 
 type JobMessage = { id: string; from: 'me' | 'client'; text: string; time: string };
 
@@ -124,19 +123,26 @@ const STATUS_LABEL: Record<JobStatus, string> = {
   closed: 'Заявка закрыта',
 };
 
-const statusColorFor = (status: JobStatus, t: Palette): string => ({
-  new: t.warn,
-  offered: t.blue,
-  accepted: t.accent,
-  declined: t.danger,
-  done: t.textMuted,
-  cancelled: t.textMuted,
-  closed: t.textMuted,
-}[status]);
+const statusColorFor = (status: JobStatus, t: Palette): string =>
+  ({
+    new: t.warn,
+    offered: t.blue,
+    accepted: t.accent,
+    declined: t.danger,
+    done: t.textMuted,
+    cancelled: t.textMuted,
+    closed: t.textMuted,
+  })[status];
 
 // Сверху то, где от мастера ждут действия
 const STATUS_RANK: Record<JobStatus, number> = {
-  new: 0, declined: 1, accepted: 2, offered: 3, done: 4, cancelled: 5, closed: 6,
+  new: 0,
+  declined: 1,
+  accepted: 2,
+  offered: 3,
+  done: 4,
+  cancelled: 5,
+  closed: 6,
 };
 
 function now() {
@@ -213,20 +219,30 @@ export function MasterScreen({ open, onClose }: Props) {
     if (!open || !myUid) return;
     // Подписка, а не разовое чтение: рейтинг пересчитывает Cloud Function
     // после чужого отзыва, и мастер должен увидеть это без перезахода
-    return onSnapshot(doc(db, 'masters', myUid), (snap) => {
-      const v = snap.data();
-      setMaster(snap.exists() && v ? {
-        name: String(v.name ?? ''),
-        cities: Array.isArray(v.cities)
-          ? (v.cities as string[])
-          // Анкеты до множественного выбора: один город строкой
-          : (v.city ? [String(v.city)] : []),
-        skills: Array.isArray(v.skills) ? (v.skills as Category[]) : [],
-        verified: v.verified === true,
-        rating: typeof v.rating === 'number' ? v.rating : null,
-        reviewsCount: typeof v.reviewsCount === 'number' ? v.reviewsCount : 0,
-      } : null);
-    }, (e) => console.warn('Анкета мастера недоступна:', e));
+    return onSnapshot(
+      doc(db, 'masters', myUid),
+      (snap) => {
+        const v = snap.data();
+        setMaster(
+          snap.exists() && v
+            ? {
+                name: String(v.name ?? ''),
+                cities: Array.isArray(v.cities)
+                  ? (v.cities as string[])
+                  : // Анкеты до множественного выбора: один город строкой
+                    v.city
+                    ? [String(v.city)]
+                    : [],
+                skills: Array.isArray(v.skills) ? (v.skills as Category[]) : [],
+                verified: v.verified === true,
+                rating: typeof v.rating === 'number' ? v.rating : null,
+                reviewsCount: typeof v.reviewsCount === 'number' ? v.reviewsCount : 0,
+              }
+            : null,
+        );
+      },
+      (e) => console.warn('Анкета мастера недоступна:', e),
+    );
   }, [open, myUid]);
 
   // Заявка на проверку. Лежит отдельно от анкеты: телефон, селфи и данные
@@ -247,7 +263,9 @@ export function MasterScreen({ open, onClose }: Props) {
   // населённых пунктов, и результат каждой лежит отдельно, чтобы обновление
   // одной не затирало остальные
   const buckets = useRef<{ open: Map<string, Job[]>; mine: Job[]; offers: MyOffer[] }>({
-    open: new Map(), mine: [], offers: [],
+    open: new Map(),
+    mine: [],
+    offers: [],
   });
 
   const citiesKey = (master?.cities ?? []).join(',');
@@ -267,17 +285,18 @@ export function MasterScreen({ open, onClose }: Props) {
       const legacy = v.priceStatus === 'offered' || v.priceStatus === 'declined';
       // «В работе» видно только выбранному мастеру — остальным заявка уже
       // недоступна, поэтому отдельной проверки masterId здесь не нужно
-      const status: JobStatus = v.status === 'Отменена'
-        ? 'cancelled'
-        : (v.status === 'Завершена' || v.status === 'Ждёт подтверждения')
-          ? 'done'
-          : v.status === 'В работе'
-            ? 'accepted'
-            : v.priceStatus === 'offered'
-              ? 'offered'
-              : v.priceStatus === 'declined'
-                ? 'declined'
-                : 'new';
+      const status: JobStatus =
+        v.status === 'Отменена'
+          ? 'cancelled'
+          : v.status === 'Завершена' || v.status === 'Ждёт подтверждения'
+            ? 'done'
+            : v.status === 'В работе'
+              ? 'accepted'
+              : v.priceStatus === 'offered'
+                ? 'offered'
+                : v.priceStatus === 'declined'
+                  ? 'declined'
+                  : 'new';
       return {
         id: d.id,
         title: v.title ?? 'Заявка',
@@ -330,13 +349,16 @@ export function MasterScreen({ open, onClose }: Props) {
         });
       });
 
-      setJobs((prev) => [...all.values()]
-        .map((j) => {
-          const old = prev.find((p) => p.id === j.id);
-          return old ? { ...j, unread: old.unread, messages: old.messages } : j;
-        })
-        .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]
-          || b.id.localeCompare(a.id)));
+      setJobs((prev) =>
+        [...all.values()]
+          .map((j) => {
+            const old = prev.find((p) => p.id === j.id);
+            return old ? { ...j, unread: old.unread, messages: old.messages } : j;
+          })
+          .sort(
+            (a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.id.localeCompare(a.id),
+          ),
+      );
     };
 
     // Лента: только открытые заявки, только выбранных населённых пунктов и
@@ -362,21 +384,19 @@ export function MasterScreen({ open, onClose }: Props) {
       }
 
       return onSnapshot(
-        query(
-          collection(db, 'orders'),
-          ...filters,
-          orderBy('createdAt', 'desc'),
-          limit(perCity),
-        ),
+        query(collection(db, 'orders'), ...filters, orderBy('createdAt', 'desc'), limit(perCity)),
         (snap) => {
           // Заявку, которую кто-то уже взял по старой схеме, в ленте не
           // показываем: предложить по ней цену правила не дадут
-          buckets.current.open.set(city ?? '*', snap.docs
-            .filter((d) => {
-              const owner = d.data().masterId ?? null;
-              return owner === null || owner === myUid;
-            })
-            .map(toJob));
+          buckets.current.open.set(
+            city ?? '*',
+            snap.docs
+              .filter((d) => {
+                const owner = d.data().masterId ?? null;
+                return owner === null || owner === myUid;
+              })
+              .map(toJob),
+          );
           merge();
         },
         (e) => console.warn('Лента заявок недоступна:', e),
@@ -385,7 +405,10 @@ export function MasterScreen({ open, onClose }: Props) {
 
     const unsubMine = onSnapshot(
       query(collection(db, 'orders'), where('masterId', '==', myUid)),
-      (snap) => { buckets.current.mine = snap.docs.map(toJob); merge(); },
+      (snap) => {
+        buckets.current.mine = snap.docs.map(toJob);
+        merge();
+      },
       (e) => console.warn('Свои заявки недоступны:', e),
     );
 
@@ -429,7 +452,10 @@ export function MasterScreen({ open, onClose }: Props) {
   const pushMessage = (jobId: string, text: string) => {
     if (!myUid) return;
     addDoc(collection(db, 'orders', jobId, 'messages'), {
-      senderId: myUid, text, time: now(), createdAt: serverTimestamp(),
+      senderId: myUid,
+      text,
+      time: now(),
+      createdAt: serverTimestamp(),
     }).catch((e) => {
       console.warn('Сообщение не отправлено:', e);
       showNotice(firestoreErrorText(e, 'Сообщение не отправлено. Проверьте связь'));
@@ -517,18 +543,20 @@ export function MasterScreen({ open, onClose }: Props) {
       return;
     }
 
-    pushMessage(jobId, previous == null
-      ? `Готов взяться. Моя цена — ${rub(price)}.`
-      : `Пересмотрел цену: теперь ${rub(price)}.`);
+    pushMessage(
+      jobId,
+      previous == null
+        ? `Готов взяться. Моя цена — ${rub(price)}.`
+        : `Пересмотрел цену: теперь ${rub(price)}.`,
+    );
   };
 
   // Мастер отмечает работу выполненной — подтверждать её будет клиент
   const finishJob = (jobId: string) => {
-    updateDoc(doc(db, 'orders', jobId), { status: 'Ждёт подтверждения' })
-      .catch((e) => {
-        console.warn('Не удалось завершить заявку:', e);
-        showNotice(firestoreErrorText(e, 'Не удалось отметить работу выполненной. Проверьте связь'));
-      });
+    updateDoc(doc(db, 'orders', jobId), { status: 'Ждёт подтверждения' }).catch((e) => {
+      console.warn('Не удалось завершить заявку:', e);
+      showNotice(firestoreErrorText(e, 'Не удалось отметить работу выполненной. Проверьте связь'));
+    });
 
     pushMessage(jobId, 'Работа выполнена. Спасибо, что выбрали меня!');
   };
@@ -608,7 +636,12 @@ export function MasterScreen({ open, onClose }: Props) {
 // правка анкеты уже проверенным мастером. Разводить их по компонентам
 // незачем — поля те же, отличается набор и подпись кнопки.
 function MasterApplicationScreen({
-  uid: myUid, profile, application, defaultName, onClose, onDone,
+  uid: myUid,
+  profile,
+  application,
+  defaultName,
+  onClose,
+  onDone,
 }: {
   uid: string | null;
   profile: MasterProfile | null;
@@ -638,8 +671,9 @@ function MasterApplicationScreen({
   // Платёж создан, банк ещё не ответил. Исход подтвердит сервер — вебхуком
   // либо сверкой; до этого повторная попытка только создаст второй платёж.
   const cardAwaiting = !cardBound && application.bindingState === 'pending';
-  const cardFailed = !cardBound
-    && (application.bindingState === 'failed' || application.bindingState === 'canceled');
+  const cardFailed =
+    !cardBound &&
+    (application.bindingState === 'failed' || application.bindingState === 'canceled');
   // Согласие на фотографию — отдельное и обязательно до съёмки: снимать
   // лицо, а потом спрашивать разрешение, поздно
   const [faceConsent, setFaceConsent] = useState(!!application.biometricConsent);
@@ -741,12 +775,16 @@ function MasterApplicationScreen({
     try {
       // Документ masters/{uid} — это роль мастера. Флаг verified сюда не
       // пишем: правила его отсюда и не пропустят, ставит его модератор.
-      await setDoc(doc(db, 'masters', myUid), {
-        name: name.trim(),
-        cities,
-        skills,
-        createdAt: serverTimestamp(),
-      }, { merge: true });
+      await setDoc(
+        doc(db, 'masters', myUid),
+        {
+          name: name.trim(),
+          cities,
+          skills,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
 
       if (!verified) {
         // Фото уезжает в Storage под путь, закрытый для всех, кроме
@@ -759,13 +797,17 @@ function MasterApplicationScreen({
         const ref = doc(db, 'masters', myUid, 'verification', 'application');
         // Сначала черновик: правила не дают создать заявку сразу «на
         // проверке», иначе её можно было бы подать пустой
-        await setDoc(ref, {
-          phone: phone.replace(/\D/g, ''),
-          about: about.trim(),
-          photoUrl: photoUrl ?? null,
-          biometricConsent: faceConsent ? LEGAL_DOCS.biometrics.version : null,
-          status: 'draft',
-        }, { merge: true });
+        await setDoc(
+          ref,
+          {
+            phone: phone.replace(/\D/g, ''),
+            about: about.trim(),
+            photoUrl: photoUrl ?? null,
+            biometricConsent: faceConsent ? LEGAL_DOCS.biometrics.version : null,
+            status: 'draft',
+          },
+          { merge: true },
+        );
 
         if (sendForReview) {
           await updateDoc(ref, { status: 'pending', appliedAt: serverTimestamp() });
@@ -786,7 +828,7 @@ function MasterApplicationScreen({
       <View style={styles.fill}>
         <View style={styles.topBar}>
           <PressableScale style={styles.backChip} onPress={onClose}>
-            <Text style={styles.backText}>‹  Профиль</Text>
+            <Text style={styles.backText}>‹ Профиль</Text>
           </PressableScale>
           <View style={styles.backChipGhost} />
         </View>
@@ -799,8 +841,8 @@ function MasterApplicationScreen({
             Заявка на проверке
           </Animated.Text>
           <Animated.Text entering={FadeInDown.delay(100).duration(380)} style={styles.loginSub}>
-            Мы смотрим анкету вручную — обычно это занимает не больше суток.
-            Как только проверим, заявки клиентов появятся здесь сами.
+            Мы смотрим анкету вручную — обычно это занимает не больше суток. Как только проверим,
+            заявки клиентов появятся здесь сами.
           </Animated.Text>
 
           <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.loginCard}>
@@ -810,10 +852,7 @@ function MasterApplicationScreen({
               value={cities.length ? cities.map(settlementLabel).join(', ') : 'вся республика'}
             />
             <SummaryRow label="Телефон" value={phone || '—'} />
-            <SummaryRow
-              label="Фото"
-              value={application.photoUrl ? 'загружено' : 'нет'}
-            />
+            <SummaryRow label="Фото" value={application.photoUrl ? 'загружено' : 'нет'} />
             <SummaryRow
               label="Карта"
               value={application.cardLast4 ? `•••• ${application.cardLast4}` : 'нет'}
@@ -839,7 +878,7 @@ function MasterApplicationScreen({
     >
       <View style={styles.topBar}>
         <PressableScale style={styles.backChip} onPress={onClose}>
-          <Text style={styles.backText}>‹  Назад</Text>
+          <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
       </View>
@@ -855,8 +894,8 @@ function MasterApplicationScreen({
         <Animated.Text entering={FadeInDown.delay(100).duration(380)} style={styles.loginSub}>
           {verified
             ? 'Город и специальности решают, какие заявки вы видите в ленте.'
-            : 'Мы проверяем каждого мастера вручную: к клиентам домой едет живой '
-              + 'человек, и они должны знать, кто это. Отдельный аккаунт не нужен.'}
+            : 'Мы проверяем каждого мастера вручную: к клиентам домой едет живой ' +
+              'человек, и они должны знать, кто это. Отдельный аккаунт не нужен.'}
         </Animated.Text>
 
         {rejected && (
@@ -891,9 +930,7 @@ function MasterApplicationScreen({
             disabled={loading}
           >
             <Text style={[styles.pickerValue, !cities.length && styles.pickerPlaceholder]}>
-              {cities.length
-                ? cities.map(settlementLabel).join(', ')
-                : 'Вся республика'}
+              {cities.length ? cities.map(settlementLabel).join(', ') : 'Вся республика'}
             </Text>
             <Text style={styles.pickerChevron}>›</Text>
           </PressableScale>
@@ -923,9 +960,7 @@ function MasterApplicationScreen({
               );
             })}
           </View>
-          <Text style={styles.fieldHint}>
-            Ничего не выбрано — в ленте будут заявки всех видов
-          </Text>
+          <Text style={styles.fieldHint}>Ничего не выбрано — в ленте будут заявки всех видов</Text>
 
           {/* Всё, что ниже, нужно только для проверки: у проверенного мастера
               эти данные уже приняты и больше не спрашиваются */}
@@ -1026,8 +1061,8 @@ function MasterApplicationScreen({
                 <View style={styles.cardPending}>
                   <Text style={styles.cardPendingText}>Проверяем оплату у банка…</Text>
                   <Text style={styles.fieldHint}>
-                    Обычно занимает меньше минуты. Если банк ответит не сразу,
-                    мы завершим привязку сами — платить второй раз не нужно.
+                    Обычно занимает меньше минуты. Если банк ответит не сразу, мы завершим привязку
+                    сами — платить второй раз не нужно.
                   </Text>
                 </View>
               ) : (
@@ -1037,7 +1072,11 @@ function MasterApplicationScreen({
                   disabled={binding || loading}
                 >
                   <Text style={styles.faceBtnText}>
-                    {binding ? 'Открываем банк…' : cardFailed ? 'Попробовать снова' : 'Привязать карту'}
+                    {binding
+                      ? 'Открываем банк…'
+                      : cardFailed
+                        ? 'Попробовать снова'
+                        : 'Привязать карту'}
                   </Text>
                 </PressableScale>
               )}
@@ -1051,8 +1090,8 @@ function MasterApplicationScreen({
               )}
 
               <Text style={styles.fieldHint}>
-                Номер карты вводится на странице банка — приложение его не видит
-                и не хранит. Нужна для подтверждения личности и будущих выплат.
+                Номер карты вводится на странице банка — приложение его не видит и не хранит. Нужна
+                для подтверждения личности и будущих выплат.
               </Text>
               {!cardBound && !cardAwaiting && (
                 <Text style={styles.cardWarn}>
@@ -1078,11 +1117,7 @@ function MasterApplicationScreen({
 
           {/* Черновик даёт бросить заполнение и вернуться позже */}
           {!verified && (
-            <PressableScale
-              style={styles.draftBtn}
-              onPress={() => save(false)}
-              disabled={loading}
-            >
+            <PressableScale style={styles.draftBtn} onPress={() => save(false)} disabled={loading}>
               <Text style={styles.draftBtnText}>Сохранить черновик</Text>
             </PressableScale>
           )}
@@ -1096,9 +1131,11 @@ function MasterApplicationScreen({
           mode="multi"
           values={cities}
           title="Где вы работаете"
-          onToggle={(key) => setCities((prev) => (prev.includes(key)
-            ? prev.filter((c) => c !== key)
-            : [...prev, key]))}
+          onToggle={(key) =>
+            setCities((prev) =>
+              prev.includes(key) ? prev.filter((c) => c !== key) : [...prev, key],
+            )
+          }
           onClose={() => setPickingCity(false)}
         />
       )}
@@ -1117,11 +1154,17 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-
 // ---------- Лента заявок ----------
 
 function JobList({
-  email, profile, jobs, typingJobId, onOpenJob, onClose, onLogout, onEditProfile,
+  email,
+  profile,
+  jobs,
+  typingJobId,
+  onOpenJob,
+  onClose,
+  onLogout,
+  onEditProfile,
 }: {
   email: string;
   profile: MasterProfile;
@@ -1146,9 +1189,7 @@ function JobList({
   const activeCount = jobs.filter((j) => j.status === 'accepted').length;
 
   const filterText = [
-    profile.cities.length
-      ? profile.cities.map(settlementLabel).join(', ')
-      : 'вся республика',
+    profile.cities.length ? profile.cities.map(settlementLabel).join(', ') : 'вся республика',
     profile.skills.length ? profile.skills.join(', ') : 'все специальности',
   ].join(' · ');
 
@@ -1156,7 +1197,7 @@ function JobList({
     <View style={styles.fill}>
       <View style={styles.topBar}>
         <PressableScale style={styles.backChip} onPress={onClose}>
-          <Text style={styles.backText}>‹  Профиль</Text>
+          <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
         <PressableScale style={styles.backChip} onPress={onLogout}>
           <Text style={styles.logoutText}>Выйти из раздела</Text>
@@ -1190,7 +1231,9 @@ function JobList({
             выглядит поломкой, а не настройкой */}
         <Animated.View entering={FadeInDown.delay(100).duration(360)}>
           <PressableScale style={styles.filterRow} onPress={onEditProfile}>
-            <Text style={styles.filterText} numberOfLines={1}>{filterText}</Text>
+            <Text style={styles.filterText} numberOfLines={1}>
+              {filterText}
+            </Text>
             <Text style={styles.filterEdit}>изменить</Text>
           </PressableScale>
         </Animated.View>
@@ -1233,7 +1276,9 @@ function JobList({
                         {last.text}
                       </Text>
                     ) : (
-                      <Text style={styles.jobPreview} numberOfLines={1}>{job.desc}</Text>
+                      <Text style={styles.jobPreview} numberOfLines={1}>
+                        {job.desc}
+                      </Text>
                     )}
                   </View>
                   <View style={styles.jobRight}>
@@ -1241,7 +1286,9 @@ function JobList({
                       {STATUS_LABEL[job.status]}
                     </Text>
                     {(job.price ?? job.myOffer) != null && (
-                      <Text style={styles.jobPrice}>{rub((job.price ?? job.myOffer) as number)}</Text>
+                      <Text style={styles.jobPrice}>
+                        {rub((job.price ?? job.myOffer) as number)}
+                      </Text>
                     )}
                     {job.unread && <View style={styles.unreadDot} />}
                   </View>
@@ -1258,7 +1305,14 @@ function JobList({
 // ---------- Заявка: детали, цена, чат с клиентом ----------
 
 function JobDetail({
-  job, typing, onBack, onSendOffer, onWithdrawOffer, onOfferLegacy, onFinish, onSend,
+  job,
+  typing,
+  onBack,
+  onSendOffer,
+  onWithdrawOffer,
+  onOfferLegacy,
+  onFinish,
+  onSend,
 }: {
   job: Job;
   typing: boolean;
@@ -1307,7 +1361,7 @@ function JobDetail({
     >
       <View style={styles.topBar}>
         <PressableScale style={styles.backChip} onPress={onBack}>
-          <Text style={styles.backText}>‹  Заявки</Text>
+          <Text style={styles.backText}>‹ Заявки</Text>
         </PressableScale>
         <View style={styles.detailTitleWrap}>
           <Text style={styles.detailName}>{job.client}</Text>
@@ -1393,7 +1447,7 @@ function JobDetail({
             {/* Цена принята — осталось сделать работу и отметить её выполненной */}
             {job.status === 'accepted' && (
               <PressableScale style={styles.finishBtn} onPress={onFinish}>
-                <Text style={styles.finishBtnText}>✓  Работа выполнена</Text>
+                <Text style={styles.finishBtnText}>✓ Работа выполнена</Text>
               </PressableScale>
             )}
 
@@ -1461,9 +1515,7 @@ function JobDetail({
         </View>
       ) : (
         <View style={styles.chatLockedRow}>
-          <Text style={styles.chatLockedText}>
-            Чат откроется, когда клиент выберет вас
-          </Text>
+          <Text style={styles.chatLockedText}>Чат откроется, когда клиент выберет вас</Text>
         </View>
       )}
     </KeyboardAvoidingView>
@@ -1481,7 +1533,9 @@ function TypingDots() {
   useEffect(() => {
     if (reduceMotion) return;
     p.value = withRepeat(
-      withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.sin) }), -1, false,
+      withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      false,
     );
     return () => cancelAnimation(p);
   }, [reduceMotion, p]);
@@ -1511,411 +1565,434 @@ function TypingDots() {
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  root: { backgroundColor: t.bg },
-  fill: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 12,
-  },
-  backChip: {
-    backgroundColor: t.card,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: t.border,
-  },
-  backChipGhost: { width: 84 },
-  backText: { fontWeight: '700', fontSize: 12.5, color: t.accent },
-  logoutText: { fontWeight: '700', fontSize: 12.5, color: t.danger },
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    root: { backgroundColor: t.bg },
+    fill: { flex: 1 },
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingTop: 60,
+      paddingBottom: 12,
+    },
+    backChip: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    backChipGhost: { width: 84 },
+    backText: { fontWeight: '700', fontSize: 12.5, color: t.accent },
+    logoutText: { fontWeight: '700', fontSize: 12.5, color: t.danger },
 
-  // Вход
-  loginContent: { padding: 24, paddingTop: 24, alignItems: 'center' },
-  loginBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: t.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  loginBadgeIcon: { fontSize: 32 },
-  loginTitle: { fontSize: 20, fontWeight: '800', color: t.text },
-  loginSub: {
-    color: t.textSoft,
-    fontWeight: '600',
-    fontSize: 12.5,
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 20,
-    paddingHorizontal: 12,
-    lineHeight: 18,
-  },
-  loginCard: {
-    alignSelf: 'stretch',
-    backgroundColor: t.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 18,
-  },
-  fieldLabel: { fontWeight: '700', fontSize: 12, color: t.textSoft, marginBottom: 6 },
-  fieldLabelGap: { marginTop: 14 },
-  fieldInput: {
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    fontWeight: '600',
-    color: t.text,
-    backgroundColor: t.inputBg,
-  },
-  fieldError: { color: t.danger, fontWeight: '700', fontSize: 12, marginTop: 10 },
-  fieldHint: { color: t.textMuted, fontWeight: '600', fontSize: 11, marginTop: 6 },
-  pickerField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 12,
-    backgroundColor: t.inputBg,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  pickerValue: { flex: 1, fontSize: 14, fontWeight: '700', color: t.text },
-  pickerPlaceholder: { color: t.textMuted, fontWeight: '600' },
-  pickerChevron: { fontSize: 18, fontWeight: '700', color: t.textMuted },
-  clearCity: { paddingVertical: 8, marginTop: 2 },
-  clearCityText: { color: t.accent, fontWeight: '700', fontSize: 11.5 },
-  fieldInputArea: { minHeight: 74, textAlignVertical: 'top', paddingTop: 10 },
-  rejectCard: {
-    backgroundColor: t.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.danger,
-    padding: 14,
-    marginBottom: 14,
-  },
-  rejectTitle: { fontWeight: '800', fontSize: 13.5, color: t.danger },
-  rejectText: {
-    fontWeight: '600', fontSize: 12.5, color: t.text, lineHeight: 17, marginTop: 6,
-  },
-  rejectHint: { fontWeight: '600', fontSize: 11.5, color: t.textMuted, marginTop: 8 },
-  faceRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
-  facePhoto: { width: 78, height: 78, borderRadius: 16, backgroundColor: t.chip },
-  facePhotoEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: t.border,
-  },
-  facePhotoIcon: { fontSize: 30 },
-  faceBody: { flex: 1 },
-  faceBtn: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: t.accentBorder,
-    backgroundColor: t.accentSoft,
-    paddingVertical: 11,
-    alignItems: 'center',
-  },
-  faceBtnText: { color: t.accent, fontWeight: '800', fontSize: 13 },
-  cardBound: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: t.accentBorder,
-    backgroundColor: t.accentFaint,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-  },
-  cardBoundText: { color: t.text, fontWeight: '800', fontSize: 13 },
-  cardBoundOk: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
-  cardWarn: { color: t.warn, fontWeight: '700', fontSize: 11.5, marginTop: 6 },
-  cardPending: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.soft,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-  },
-  cardPendingText: { color: t.blue, fontWeight: '800', fontSize: 13 },
-  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginBottom: 12 },
-  checkbox: {
-    width: 21,
-    height: 21,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: t.inputBorder,
-    backgroundColor: t.inputBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
-  checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
-  consentText: { flex: 1, fontSize: 11.5, fontWeight: '600', color: t.textMuted, lineHeight: 17 },
-  consentLink: { color: t.accent, fontWeight: '800' },
-  revokeBtn: { paddingVertical: 8, marginTop: 4 },
-  revokeText: { color: t.danger, fontWeight: '700', fontSize: 11.5 },
-  draftBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
-  draftBtnText: { color: t.textMuted, fontWeight: '700', fontSize: 12.5 },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 9,
-    borderBottomWidth: 1,
-    borderBottomColor: t.border,
-  },
-  summaryLabel: { fontWeight: '700', fontSize: 12.5, color: t.textMuted },
-  summaryValue: { fontWeight: '800', fontSize: 12.5, color: t.text },
-  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  skillChip: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: t.border,
-    backgroundColor: t.card,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-  },
-  skillChipOn: { backgroundColor: t.accentSoft, borderColor: t.accentBorder },
-  skillChipText: { fontSize: 12, fontWeight: '700', color: t.textSoft },
-  skillChipTextOn: { color: t.accent },
-  loginBtn: {
-    marginTop: 18,
-    backgroundColor: t.accent,
-    borderRadius: 14,
-    paddingVertical: 13,
-    alignItems: 'center',
-  },
-  loginBtnDim: { backgroundColor: t.disabled },
-  loginBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
-  loginHint: { color: t.textMuted, fontWeight: '600', fontSize: 11.5 },
-  loginSwitchRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 },
-  loginSwitchText: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
+    // Вход
+    loginContent: { padding: 24, paddingTop: 24, alignItems: 'center' },
+    loginBadge: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: t.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+    },
+    loginBadgeIcon: { fontSize: 32 },
+    loginTitle: { fontSize: 20, fontWeight: '800', color: t.text },
+    loginSub: {
+      color: t.textSoft,
+      fontWeight: '600',
+      fontSize: 12.5,
+      textAlign: 'center',
+      marginTop: 6,
+      marginBottom: 20,
+      paddingHorizontal: 12,
+      lineHeight: 18,
+    },
+    loginCard: {
+      alignSelf: 'stretch',
+      backgroundColor: t.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 18,
+    },
+    fieldLabel: { fontWeight: '700', fontSize: 12, color: t.textSoft, marginBottom: 6 },
+    fieldLabelGap: { marginTop: 14 },
+    fieldInput: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      fontSize: 14,
+      fontWeight: '600',
+      color: t.text,
+      backgroundColor: t.inputBg,
+    },
+    fieldError: { color: t.danger, fontWeight: '700', fontSize: 12, marginTop: 10 },
+    fieldHint: { color: t.textMuted, fontWeight: '600', fontSize: 11, marginTop: 6 },
+    pickerField: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 14,
+      paddingVertical: 13,
+    },
+    pickerValue: { flex: 1, fontSize: 14, fontWeight: '700', color: t.text },
+    pickerPlaceholder: { color: t.textMuted, fontWeight: '600' },
+    pickerChevron: { fontSize: 18, fontWeight: '700', color: t.textMuted },
+    clearCity: { paddingVertical: 8, marginTop: 2 },
+    clearCityText: { color: t.accent, fontWeight: '700', fontSize: 11.5 },
+    fieldInputArea: { minHeight: 74, textAlignVertical: 'top', paddingTop: 10 },
+    rejectCard: {
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.danger,
+      padding: 14,
+      marginBottom: 14,
+    },
+    rejectTitle: { fontWeight: '800', fontSize: 13.5, color: t.danger },
+    rejectText: {
+      fontWeight: '600',
+      fontSize: 12.5,
+      color: t.text,
+      lineHeight: 17,
+      marginTop: 6,
+    },
+    rejectHint: { fontWeight: '600', fontSize: 11.5, color: t.textMuted, marginTop: 8 },
+    faceRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+    facePhoto: { width: 78, height: 78, borderRadius: 16, backgroundColor: t.chip },
+    facePhotoEmpty: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    facePhotoIcon: { fontSize: 30 },
+    faceBody: { flex: 1 },
+    faceBtn: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      backgroundColor: t.accentSoft,
+      paddingVertical: 11,
+      alignItems: 'center',
+    },
+    faceBtnText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+    cardBound: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      backgroundColor: t.accentFaint,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+    },
+    cardBoundText: { color: t.text, fontWeight: '800', fontSize: 13 },
+    cardBoundOk: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
+    cardWarn: { color: t.warn, fontWeight: '700', fontSize: 11.5, marginTop: 6 },
+    cardPending: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.soft,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+    },
+    cardPendingText: { color: t.blue, fontWeight: '800', fontSize: 13 },
+    consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginBottom: 12 },
+    checkbox: {
+      width: 21,
+      height: 21,
+      borderRadius: 6,
+      borderWidth: 1.5,
+      borderColor: t.inputBorder,
+      backgroundColor: t.inputBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
+    checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
+    consentText: { flex: 1, fontSize: 11.5, fontWeight: '600', color: t.textMuted, lineHeight: 17 },
+    consentLink: { color: t.accent, fontWeight: '800' },
+    revokeBtn: { paddingVertical: 8, marginTop: 4 },
+    revokeText: { color: t.danger, fontWeight: '700', fontSize: 11.5 },
+    draftBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+    draftBtnText: { color: t.textMuted, fontWeight: '700', fontSize: 12.5 },
+    summaryRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 9,
+      borderBottomWidth: 1,
+      borderBottomColor: t.border,
+    },
+    summaryLabel: { fontWeight: '700', fontSize: 12.5, color: t.textMuted },
+    summaryValue: { fontWeight: '800', fontSize: 12.5, color: t.text },
+    chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+    skillChip: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+      paddingHorizontal: 11,
+      paddingVertical: 8,
+    },
+    skillChipOn: { backgroundColor: t.accentSoft, borderColor: t.accentBorder },
+    skillChipText: { fontSize: 12, fontWeight: '700', color: t.textSoft },
+    skillChipTextOn: { color: t.accent },
+    loginBtn: {
+      marginTop: 18,
+      backgroundColor: t.accent,
+      borderRadius: 14,
+      paddingVertical: 13,
+      alignItems: 'center',
+    },
+    loginBtnDim: { backgroundColor: t.disabled },
+    loginBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
+    loginHint: { color: t.textMuted, fontWeight: '600', fontSize: 11.5 },
+    loginSwitchRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 },
+    loginSwitchText: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
 
-  // Лента заявок
-  listContent: { padding: 16, paddingTop: 8, paddingBottom: 40 },
-  header: { fontSize: 20, fontWeight: '800', color: t.text },
-  headerSub: { color: t.textMuted, fontWeight: '600', fontSize: 12, marginTop: 2, marginBottom: 14 },
-  statsRow: { flexDirection: 'row', gap: 9, marginBottom: 20 },
-  statCard: {
-    flex: 1,
-    backgroundColor: t.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.border,
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  statValue: { fontSize: 20, fontWeight: '800', color: t.text },
-  statValueNew: { color: t.warn },
-  statValueActive: { color: t.accent },
-  statLabel: { fontSize: 11, fontWeight: '700', color: t.textMuted, marginTop: 2 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10, color: t.text },
-  filterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: t.soft,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: t.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 18,
-  },
-  filterText: { flex: 1, fontSize: 12, fontWeight: '700', color: t.textSoft },
-  filterEdit: { fontSize: 12, fontWeight: '800', color: t.accent },
-  jobItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: t.card,
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 9,
-    borderWidth: 1,
-    borderColor: t.border,
-  },
-  jobBody: { flex: 1, marginRight: 8 },
-  jobTitle: { fontWeight: '700', fontSize: 13.5, color: t.text },
-  jobMeta: { color: t.textMuted, fontSize: 11, fontWeight: '600', marginTop: 2 },
-  jobPreview: { color: t.textSoft, fontSize: 12, marginTop: 3 },
-  jobTyping: { color: t.accent, fontSize: 12, marginTop: 3, fontWeight: '700', fontStyle: 'italic' },
-  jobRight: { alignItems: 'flex-end', gap: 3 },
-  jobStatus: { fontWeight: '700', fontSize: 11.5 },
-  jobPrice: { color: t.text, fontWeight: '800', fontSize: 12 },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: t.warn },
-  emptyWrap: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    backgroundColor: t.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.border,
-  },
-  emptyIcon: { fontSize: 30, marginBottom: 8 },
-  emptyTitle: { fontWeight: '800', fontSize: 14, color: t.text },
-  emptySub: {
-    color: t.textMuted,
-    fontWeight: '600',
-    fontSize: 11.5,
-    marginTop: 4,
-    textAlign: 'center',
-    paddingHorizontal: 30,
-  },
+    // Лента заявок
+    listContent: { padding: 16, paddingTop: 8, paddingBottom: 40 },
+    header: { fontSize: 20, fontWeight: '800', color: t.text },
+    headerSub: {
+      color: t.textMuted,
+      fontWeight: '600',
+      fontSize: 12,
+      marginTop: 2,
+      marginBottom: 14,
+    },
+    statsRow: { flexDirection: 'row', gap: 9, marginBottom: 20 },
+    statCard: {
+      flex: 1,
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      alignItems: 'center',
+      paddingVertical: 14,
+    },
+    statValue: { fontSize: 20, fontWeight: '800', color: t.text },
+    statValueNew: { color: t.warn },
+    statValueActive: { color: t.accent },
+    statLabel: { fontSize: 11, fontWeight: '700', color: t.textMuted, marginTop: 2 },
+    sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10, color: t.text },
+    filterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: t.soft,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 18,
+    },
+    filterText: { flex: 1, fontSize: 12, fontWeight: '700', color: t.textSoft },
+    filterEdit: { fontSize: 12, fontWeight: '800', color: t.accent },
+    jobItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: t.card,
+      borderRadius: 16,
+      padding: 12,
+      marginBottom: 9,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    jobBody: { flex: 1, marginRight: 8 },
+    jobTitle: { fontWeight: '700', fontSize: 13.5, color: t.text },
+    jobMeta: { color: t.textMuted, fontSize: 11, fontWeight: '600', marginTop: 2 },
+    jobPreview: { color: t.textSoft, fontSize: 12, marginTop: 3 },
+    jobTyping: {
+      color: t.accent,
+      fontSize: 12,
+      marginTop: 3,
+      fontWeight: '700',
+      fontStyle: 'italic',
+    },
+    jobRight: { alignItems: 'flex-end', gap: 3 },
+    jobStatus: { fontWeight: '700', fontSize: 11.5 },
+    jobPrice: { color: t.text, fontWeight: '800', fontSize: 12 },
+    unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: t.warn },
+    emptyWrap: {
+      alignItems: 'center',
+      paddingVertical: 40,
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    emptyIcon: { fontSize: 30, marginBottom: 8 },
+    emptyTitle: { fontWeight: '800', fontSize: 14, color: t.text },
+    emptySub: {
+      color: t.textMuted,
+      fontWeight: '600',
+      fontSize: 11.5,
+      marginTop: 4,
+      textAlign: 'center',
+      paddingHorizontal: 30,
+    },
 
-  // Детали заявки
-  detailRoot: { backgroundColor: t.bg },
-  detailTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  detailName: { fontWeight: '800', fontSize: 14.5, color: t.text },
-  detailContent: { padding: 16, paddingTop: 4, paddingBottom: 24 },
-  detailCard: {
-    backgroundColor: t.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 16,
-    marginBottom: 10,
-  },
-  detailJobTitle: { fontWeight: '800', fontSize: 15, color: t.text },
-  detailMeta: { color: t.textMuted, fontWeight: '600', fontSize: 11.5, marginTop: 3 },
-  detailDesc: { color: t.textSoft, fontSize: 13, lineHeight: 19, marginTop: 10 },
-  priceCard: {
-    backgroundColor: t.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 16,
-    marginBottom: 16,
-  },
-  priceCardAccepted: { borderColor: t.accentBorder, backgroundColor: t.accentFaint },
-  priceLabel: { fontWeight: '700', fontSize: 12, color: t.textSoft, marginBottom: 8 },
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  priceInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    fontSize: 15,
-    fontWeight: '800',
-    color: t.text,
-    backgroundColor: t.inputBg,
-  },
-  priceCurrency: { fontWeight: '800', fontSize: 15, color: t.textSoft },
-  priceBtn: {
-    backgroundColor: t.accent,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-  },
-  priceBtnDim: { backgroundColor: t.disabled },
-  priceBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
-  priceStatusText: { fontWeight: '700', fontSize: 13, lineHeight: 19 },
-  finishBtn: {
-    marginTop: 12,
-    backgroundColor: t.accent,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  finishBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
-  offerCommentInput: {
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 12,
-    backgroundColor: t.inputBg,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginTop: 10,
-    fontSize: 12.5,
-    fontWeight: '600',
-    color: t.text,
-    minHeight: 58,
-    textAlignVertical: 'top',
-  },
-  withdrawBtn: { alignItems: 'center', paddingVertical: 11, marginTop: 6 },
-  withdrawBtnText: { color: t.danger, fontWeight: '800', fontSize: 12.5 },
-  chatLockedRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: t.border,
-    backgroundColor: t.card,
-  },
-  chatLockedText: {
-    textAlign: 'center',
-    color: t.textMuted,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  chatTitle: { fontSize: 13, fontWeight: '800', color: t.textSoft, marginBottom: 10 },
-  bubbleWrap: { marginBottom: 12, alignItems: 'flex-start', maxWidth: '78%' },
-  bubbleWrapMe: { alignSelf: 'flex-end', alignItems: 'flex-end' },
-  bubble: {
-    backgroundColor: t.card,
-    borderRadius: 18,
-    borderBottomLeftRadius: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: t.border,
-  },
-  bubbleMe: {
-    backgroundColor: t.accent,
-    borderColor: t.accent,
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 6,
-  },
-  bubbleText: { fontSize: 13.5, color: t.text, lineHeight: 19 },
-  bubbleTextMe: { color: t.onAccent },
-  bubbleTime: { color: t.textMuted, fontSize: 10, fontWeight: '600', marginTop: 4, marginHorizontal: 4 },
-  typingRow: { flexDirection: 'row', gap: 4, paddingVertical: 3 },
-  typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: t.textMuted },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
-    paddingTop: 8,
-    gap: 8,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: t.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: t.border,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 13.5,
-    color: t.text,
-    maxHeight: 100,
-  },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: t.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnDisabled: { backgroundColor: t.disabled },
-  sendIcon: { color: t.onAccent, fontSize: 17, fontWeight: '800' },
-});
+    // Детали заявки
+    detailRoot: { backgroundColor: t.bg },
+    detailTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    detailName: { fontWeight: '800', fontSize: 14.5, color: t.text },
+    detailContent: { padding: 16, paddingTop: 4, paddingBottom: 24 },
+    detailCard: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 16,
+      marginBottom: 10,
+    },
+    detailJobTitle: { fontWeight: '800', fontSize: 15, color: t.text },
+    detailMeta: { color: t.textMuted, fontWeight: '600', fontSize: 11.5, marginTop: 3 },
+    detailDesc: { color: t.textSoft, fontSize: 13, lineHeight: 19, marginTop: 10 },
+    priceCard: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 16,
+      marginBottom: 16,
+    },
+    priceCardAccepted: { borderColor: t.accentBorder, backgroundColor: t.accentFaint },
+    priceLabel: { fontWeight: '700', fontSize: 12, color: t.textSoft, marginBottom: 8 },
+    priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    priceInput: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      fontSize: 15,
+      fontWeight: '800',
+      color: t.text,
+      backgroundColor: t.inputBg,
+    },
+    priceCurrency: { fontWeight: '800', fontSize: 15, color: t.textSoft },
+    priceBtn: {
+      backgroundColor: t.accent,
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 11,
+    },
+    priceBtnDim: { backgroundColor: t.disabled },
+    priceBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
+    priceStatusText: { fontWeight: '700', fontSize: 13, lineHeight: 19 },
+    finishBtn: {
+      marginTop: 12,
+      backgroundColor: t.accent,
+      borderRadius: 12,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    finishBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
+    offerCommentInput: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginTop: 10,
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: t.text,
+      minHeight: 58,
+      textAlignVertical: 'top',
+    },
+    withdrawBtn: { alignItems: 'center', paddingVertical: 11, marginTop: 6 },
+    withdrawBtnText: { color: t.danger, fontWeight: '800', fontSize: 12.5 },
+    chatLockedRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      borderTopWidth: 1,
+      borderTopColor: t.border,
+      backgroundColor: t.card,
+    },
+    chatLockedText: {
+      textAlign: 'center',
+      color: t.textMuted,
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    chatTitle: { fontSize: 13, fontWeight: '800', color: t.textSoft, marginBottom: 10 },
+    bubbleWrap: { marginBottom: 12, alignItems: 'flex-start', maxWidth: '78%' },
+    bubbleWrapMe: { alignSelf: 'flex-end', alignItems: 'flex-end' },
+    bubble: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderBottomLeftRadius: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    bubbleMe: {
+      backgroundColor: t.accent,
+      borderColor: t.accent,
+      borderBottomLeftRadius: 18,
+      borderBottomRightRadius: 6,
+    },
+    bubbleText: { fontSize: 13.5, color: t.text, lineHeight: 19 },
+    bubbleTextMe: { color: t.onAccent },
+    bubbleTime: {
+      color: t.textMuted,
+      fontSize: 10,
+      fontWeight: '600',
+      marginTop: 4,
+      marginHorizontal: 4,
+    },
+    typingRow: { flexDirection: 'row', gap: 4, paddingVertical: 3 },
+    typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: t.textMuted },
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      paddingHorizontal: 16,
+      paddingBottom: Platform.OS === 'ios' ? 28 : 16,
+      paddingTop: 8,
+      gap: 8,
+    },
+    input: {
+      flex: 1,
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      fontSize: 13.5,
+      color: t.text,
+      maxHeight: 100,
+    },
+    sendBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: t.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sendBtnDisabled: { backgroundColor: t.disabled },
+    sendIcon: { color: t.onAccent, fontSize: 17, fontWeight: '800' },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

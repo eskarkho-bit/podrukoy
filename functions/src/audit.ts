@@ -87,8 +87,8 @@ const RETENTION_DAYS = 400;
 const MAX_VALUE_LENGTH = 200;
 
 const LOOKS_LIKE_PII = [
-  /[\w.+-]+@[\w-]+\.[\w.]+/,          // email
-  /(?:\+?\d[ ()-]?){10,}/,            // телефон
+  /[\w.+-]+@[\w-]+\.[\w.]+/, // email
+  /(?:\+?\d[ ()-]?){10,}/, // телефон
 ];
 
 /**
@@ -128,17 +128,19 @@ export async function audit(entry: {
 }): Promise<void> {
   try {
     const expires = new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
-    await getFirestore().collection('audit').add({
-      action: entry.action,
-      actorType: entry.actor.type,
-      actorUid: entry.actor.uid,
-      subjectType: entry.subject.type,
-      subjectId: entry.subject.id,
-      correlationId: entry.correlationId,
-      details: sanitize(entry.details ?? {}),
-      at: FieldValue.serverTimestamp(),
-      expiresAt: expires,
-    });
+    await getFirestore()
+      .collection('audit')
+      .add({
+        action: entry.action,
+        actorType: entry.actor.type,
+        actorUid: entry.actor.uid,
+        subjectType: entry.subject.type,
+        subjectId: entry.subject.id,
+        correlationId: entry.correlationId,
+        details: sanitize(entry.details ?? {}),
+        at: FieldValue.serverTimestamp(),
+        expiresAt: expires,
+      });
   } catch (e) {
     logger.error('Не удалось записать в журнал', { action: entry.action, e });
   }

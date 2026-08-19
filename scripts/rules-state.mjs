@@ -21,8 +21,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 const ALL = ['firestore.rules', 'firestore.indexes.json', 'storage.rules'];
 const STATE = '.rules-deployed.json';
 
-const hashOf = (file) =>
-  createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16);
+const hashOf = (file) => createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16);
 
 const load = () => (existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {});
 
@@ -104,7 +103,10 @@ if (never.length || stale.length) {
 }
 
 const deployed = ALL.filter((f) => !skipped.includes(f));
-const newest = deployed.map((f) => state[f].at).sort().at(-1);
+const newest = deployed
+  .map((f) => state[f].at)
+  .sort()
+  .at(-1);
 console.log(`Правила совпадают с выкаченными. Последняя выкатка: ${newest}.`);
 
 // Отложенное показываем всегда: молчать о том, что часть правил не в бою,

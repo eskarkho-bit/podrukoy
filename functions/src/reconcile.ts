@@ -59,21 +59,28 @@ async function acquireLock(runId: string): Promise<boolean> {
     const snap = await tx.get(ref);
     const since: number = snap.get('runningSince')?.toMillis?.() ?? 0;
     if (since && Date.now() - since < LOCK_TTL_MS) return false;
-    tx.set(ref, {
-      runningSince: FieldValue.serverTimestamp(),
-      runId,
-    }, { merge: true });
+    tx.set(
+      ref,
+      {
+        runningSince: FieldValue.serverTimestamp(),
+        runId,
+      },
+      { merge: true },
+    );
     return true;
   });
 }
 
 async function releaseLock(runId: string, counters: Counters): Promise<void> {
-  await getFirestore().doc(LOCK).set({
-    runningSince: null,
-    lastRunId: runId,
-    lastFinishedAt: FieldValue.serverTimestamp(),
-    lastCounters: counters,
-  }, { merge: true });
+  await getFirestore().doc(LOCK).set(
+    {
+      runningSince: null,
+      lastRunId: runId,
+      lastFinishedAt: FieldValue.serverTimestamp(),
+      lastCounters: counters,
+    },
+    { merge: true },
+  );
 }
 
 /** uid из пути masters/{uid}/verification/application */
@@ -85,7 +92,8 @@ async function reconcileBindings(runId: string, counters: Counters): Promise<voi
   const db = getFirestore();
   const cutoff = new Date(Date.now() - BINDING_GRACE_MS);
 
-  const pending = await db.collectionGroup('verification')
+  const pending = await db
+    .collectionGroup('verification')
     .where('bindingState', '==', 'pending')
     .where('lastBindingAt', '<', cutoff)
     .limit(BATCH)
@@ -99,10 +107,13 @@ async function reconcileBindings(runId: string, counters: Counters): Promise<voi
     if (!uid || typeof paymentId !== 'string') {
       // Состояние «ждём» без идентификатора платежа — тупик: перечитывать
       // нечего. Закрываем, чтобы не перебирать документ каждые 15 минут.
-      await d.ref.set({
-        bindingState: 'failed',
-        bindingError: 'no-payment-id',
-      }, { merge: true });
+      await d.ref.set(
+        {
+          bindingState: 'failed',
+          bindingError: 'no-payment-id',
+        },
+        { merge: true },
+      );
       counters.bindingsExpired += 1;
       continue;
     }
@@ -116,20 +127,26 @@ async function reconcileBindings(runId: string, counters: Counters): Promise<voi
         // Ключи провайдера убрали — перебирать нечего до их возврата
         return;
       } else if (result === 'ignored') {
-        await d.ref.set({
-          bindingState: 'failed',
-          bindingError: 'foreign-payment',
-        }, { merge: true });
+        await d.ref.set(
+          {
+            bindingState: 'failed',
+            bindingError: 'foreign-payment',
+          },
+          { merge: true },
+        );
         counters.bindingsExpired += 1;
       } else {
         // Всё ещё в ожидании. Через сутки признаём, что человек до банка
         // не дошёл: деньги при этом не списаны, платёж не захвачен.
         if (Date.now() - startedAt > BINDING_MAX_AGE_MS) {
-          await d.ref.set({
-            bindingState: 'failed',
-            bindingError: 'abandoned',
-            bindingSettledAt: FieldValue.serverTimestamp(),
-          }, { merge: true });
+          await d.ref.set(
+            {
+              bindingState: 'failed',
+              bindingError: 'abandoned',
+              bindingSettledAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
           await audit({
             action: 'binding.failed',
             actor: SYSTEM,
@@ -152,7 +169,8 @@ async function reconcileBindings(runId: string, counters: Counters): Promise<voi
 
 /** Возвраты, не прошедшие с первого раза. Здесь речь о чужих деньгах. */
 async function retryRefunds(runId: string, counters: Counters): Promise<void> {
-  const stuck = await getFirestore().collectionGroup('verification')
+  const stuck = await getFirestore()
+    .collectionGroup('verification')
     .where('refundPending', '==', true)
     .limit(BATCH)
     .get();
@@ -178,7 +196,8 @@ async function retryRefunds(runId: string, counters: Counters): Promise<void> {
 async function sweepDeletions(runId: string, counters: Counters): Promise<void> {
   const cutoff = new Date(Date.now() - DELETION_STUCK_MS);
 
-  const stuck = await getFirestore().collection('deletions')
+  const stuck = await getFirestore()
+    .collection('deletions')
     .where('status', '==', 'pending')
     .where('requestedAt', '<', cutoff)
     .limit(BATCH)
@@ -195,65 +214,68 @@ async function sweepDeletions(runId: string, counters: Counters): Promise<void> 
   }
 }
 
-export const reconcile = onSchedule({
-  schedule: 'every 15 minutes',
-  timeZone: 'Etc/UTC',
-  timeoutSeconds: 540,
-  // Повторять прогон незачем: следующий придёт через пятнадцать минут и
-  // подберёт то же самое
-  retryCount: 0,
-}, async (event) => {
-  const runId = `reconcile-${event.jobName ?? 'run'}-${Date.now()}`;
+export const reconcile = onSchedule(
+  {
+    schedule: 'every 15 minutes',
+    timeZone: 'Etc/UTC',
+    timeoutSeconds: 540,
+    // Повторять прогон незачем: следующий придёт через пятнадцать минут и
+    // подберёт то же самое
+    retryCount: 0,
+  },
+  async (event) => {
+    const runId = `reconcile-${event.jobName ?? 'run'}-${Date.now()}`;
 
-  if (!(await acquireLock(runId))) {
+    if (!(await acquireLock(runId))) {
+      await audit({
+        action: 'reconcile.skipped',
+        actor: SYSTEM,
+        subject: { type: 'system', id: 'reconcile' },
+        correlationId: runId,
+        details: { reason: 'already-running' },
+      });
+      logger.info('Сверка пропущена: предыдущий прогон ещё идёт');
+      return;
+    }
+
+    const counters: Counters = {
+      bindingsSettled: 0,
+      bindingsCanceled: 0,
+      bindingsStillPending: 0,
+      bindingsExpired: 0,
+      refundsRetried: 0,
+      deletionsResumed: 0,
+      errors: 0,
+    };
+
     await audit({
-      action: 'reconcile.skipped',
+      action: 'reconcile.started',
       actor: SYSTEM,
       subject: { type: 'system', id: 'reconcile' },
       correlationId: runId,
-      details: { reason: 'already-running' },
     });
-    logger.info('Сверка пропущена: предыдущий прогон ещё идёт');
-    return;
-  }
 
-  const counters: Counters = {
-    bindingsSettled: 0,
-    bindingsCanceled: 0,
-    bindingsStillPending: 0,
-    bindingsExpired: 0,
-    refundsRetried: 0,
-    deletionsResumed: 0,
-    errors: 0,
-  };
+    try {
+      await reconcileBindings(runId, counters);
+      await retryRefunds(runId, counters);
+      await sweepDeletions(runId, counters);
+    } catch (e) {
+      counters.errors += 1;
+      logger.error('Прогон сверки прерван', e);
+    } finally {
+      // Блокировку снимаем в любом случае: иначе одна ошибка остановит сверку
+      // на десять минут, а потом ещё и потребует ручного вмешательства
+      await releaseLock(runId, counters);
+    }
 
-  await audit({
-    action: 'reconcile.started',
-    actor: SYSTEM,
-    subject: { type: 'system', id: 'reconcile' },
-    correlationId: runId,
-  });
+    await audit({
+      action: 'reconcile.finished',
+      actor: SYSTEM,
+      subject: { type: 'system', id: 'reconcile' },
+      correlationId: runId,
+      details: { ...counters },
+    });
 
-  try {
-    await reconcileBindings(runId, counters);
-    await retryRefunds(runId, counters);
-    await sweepDeletions(runId, counters);
-  } catch (e) {
-    counters.errors += 1;
-    logger.error('Прогон сверки прерван', e);
-  } finally {
-    // Блокировку снимаем в любом случае: иначе одна ошибка остановит сверку
-    // на десять минут, а потом ещё и потребует ручного вмешательства
-    await releaseLock(runId, counters);
-  }
-
-  await audit({
-    action: 'reconcile.finished',
-    actor: SYSTEM,
-    subject: { type: 'system', id: 'reconcile' },
-    correlationId: runId,
-    details: { ...counters },
-  });
-
-  logger.info('Сверка завершена', counters);
-});
+    logger.info('Сверка завершена', counters);
+  },
+);

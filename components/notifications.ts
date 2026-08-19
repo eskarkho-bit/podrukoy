@@ -59,8 +59,9 @@ export async function getPushToken(): Promise<string | null> {
 
   if (!(await ensureNotificationPermission())) return null;
 
-  const projectId = Constants.expoConfig?.extra?.eas?.projectId
-    ?? (Constants as { easConfig?: { projectId?: string } }).easConfig?.projectId;
+  const projectId =
+    Constants.expoConfig?.extra?.eas?.projectId ??
+    (Constants as { easConfig?: { projectId?: string } }).easConfig?.projectId;
   if (!projectId) {
     // Проект ещё не заведён в EAS — до этого удалённые пуши невозможны,
     // но локальные уведомления работают и без него

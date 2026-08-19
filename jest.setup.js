@@ -84,5 +84,4 @@ jest.mock('expo-blur', () => {
 
 // Reanimated в тестах подменяется своим же моком: анимации не проигрываются,
 // но компоненты рендерятся
-jest.mock('react-native-reanimated', () =>
-  require('react-native-reanimated/mock'));
+jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));

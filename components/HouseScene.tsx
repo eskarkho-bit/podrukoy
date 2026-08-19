@@ -45,31 +45,49 @@ export type Room = {
 // План этажа: верхняя грань дома, разделённая на четыре комнаты
 export const ROOMS: Room[] = [
   {
-    id: 'kitchen', title: 'Кухня', icon: '🍳', x: 200, y: 118,
-    points: '200,100 255,127.5 200,155 145,127.5', fill: '#F5E9D2',
+    id: 'kitchen',
+    title: 'Кухня',
+    icon: '🍳',
+    x: 200,
+    y: 118,
+    points: '200,100 255,127.5 200,155 145,127.5',
+    fill: '#F5E9D2',
     objects: [
       { id: 'sink', title: 'Мойка', icon: '🚰', place: 'Кухня', x: 170, y: 120 },
       { id: 'stove', title: 'Плита', icon: '🔥', place: 'Кухня', x: 228, y: 140 },
     ],
   },
   {
-    id: 'living', title: 'Гостиная', icon: '🛋️', x: 255, y: 153,
-    points: '255,127.5 310,155 255,182.5 200,155', fill: '#E3ECDB',
-    objects: [
-      { id: 'light', title: 'Свет', icon: '💡', place: 'Гостиная', x: 255, y: 155 },
-    ],
+    id: 'living',
+    title: 'Гостиная',
+    icon: '🛋️',
+    x: 255,
+    y: 153,
+    points: '255,127.5 310,155 255,182.5 200,155',
+    fill: '#E3ECDB',
+    objects: [{ id: 'light', title: 'Свет', icon: '💡', place: 'Гостиная', x: 255, y: 155 }],
   },
   {
-    id: 'bath', title: 'Ванная', icon: '🛁', x: 200, y: 188,
-    points: '200,155 255,182.5 200,210 145,182.5', fill: '#D9E7E9',
+    id: 'bath',
+    title: 'Ванная',
+    icon: '🛁',
+    x: 200,
+    y: 188,
+    points: '200,155 255,182.5 200,210 145,182.5',
+    fill: '#D9E7E9',
     objects: [
       { id: 'shower', title: 'Душ', icon: '🚿', place: 'Ванная', x: 174, y: 170 },
       { id: 'pipe', title: 'Труба', icon: '🔧', place: 'Ванная', x: 230, y: 192 },
     ],
   },
   {
-    id: 'bedroom', title: 'Спальня', icon: '🛏️', x: 145, y: 153,
-    points: '145,127.5 200,155 145,182.5 90,155', fill: '#EFE4EE',
+    id: 'bedroom',
+    title: 'Спальня',
+    icon: '🛏️',
+    x: 145,
+    y: 153,
+    points: '145,127.5 200,155 145,182.5 90,155',
+    fill: '#EFE4EE',
     objects: [
       { id: 'socket', title: 'Розетка', icon: '🔌', place: 'Спальня', x: 119, y: 143 },
       { id: 'window', title: 'Окно', icon: '🪟', place: 'Спальня', x: 175, y: 167 },
@@ -129,8 +147,15 @@ type Props = {
 };
 
 export function HouseScene({
-  area, stage, roomId, focusedObjectId,
-  onOpenHouse, onSelectRoom, onSelectObject, onBack, paused,
+  area,
+  stage,
+  roomId,
+  focusedObjectId,
+  onOpenHouse,
+  onSelectRoom,
+  onSelectObject,
+  onBack,
+  paused,
 }: Props) {
   const [w, setW] = useState(0);
   const k = w / 400; // масштаб: координаты сцены → пиксели экрана
@@ -273,21 +298,58 @@ export function HouseScene({
           <Animated.View style={[StyleSheet.absoluteFill, cameraStyle]}>
             {/* Земля: лужайка, дорожка, гараж */}
             <Layer>
-              <Rect x={18} y={150} width={364} height={172} rx={56} fill="#E4EDDC" stroke="#D8E4CC" strokeWidth={1.5} />
+              <Rect
+                x={18}
+                y={150}
+                width={364}
+                height={172}
+                rx={56}
+                fill="#E4EDDC"
+                stroke="#D8E4CC"
+                strokeWidth={1.5}
+              />
               <Polygon points="244,252 294,277 320,264 270,239" fill="#ECEAE0" />
-              <Polygon points="80,238 124,260 84,280 40,258" fill="#DCE6D2" stroke="#FFFFFF" strokeWidth={2} strokeOpacity={0.6} />
+              <Polygon
+                points="80,238 124,260 84,280 40,258"
+                fill="#DCE6D2"
+                stroke="#FFFFFF"
+                strokeWidth={2}
+                strokeOpacity={0.6}
+              />
               <Polygon points="124,260 84,280 84,306 124,286" fill="#F6F4EC" />
               <Polygon points="40,258 84,280 84,306 40,284" fill="#EAE7DD" />
               <Polygon points="92,302 116,290 116,272 92,284" fill="#D5DCCB" />
-              <Line x1={92} y1={296} x2={116} y2={284} stroke="#FFFFFF" strokeWidth={1.5} strokeOpacity={0.55} />
-              <Line x1={92} y1={290} x2={116} y2={278} stroke="#FFFFFF" strokeWidth={1.5} strokeOpacity={0.55} />
+              <Line
+                x1={92}
+                y1={296}
+                x2={116}
+                y2={284}
+                stroke="#FFFFFF"
+                strokeWidth={1.5}
+                strokeOpacity={0.55}
+              />
+              <Line
+                x1={92}
+                y1={290}
+                x2={116}
+                y2={278}
+                stroke="#FFFFFF"
+                strokeWidth={1.5}
+                strokeOpacity={0.55}
+              />
             </Layer>
 
             {/* Тень дома: дышит в противофазе с ним */}
             <Animated.View
               pointerEvents="none"
               style={[
-                { position: 'absolute', left: 80 * k, top: 250 * k, width: 240 * k, height: 44 * k },
+                {
+                  position: 'absolute',
+                  left: 80 * k,
+                  top: 250 * k,
+                  width: 240 * k,
+                  height: 44 * k,
+                },
                 shadowStyle,
               ]}
             >
@@ -304,15 +366,32 @@ export function HouseScene({
                   <Polygon points="310,155 200,210 200,268 310,213" fill="#F8F6EF" />
                   <Polygon points="238,249 264,236 264,200 238,213" fill="#6E8A64" />
                   <Circle cx={259} cy={222} r={1.6} fill="#F2F5F0" />
-                  <Polygon points="110,223 136,236 136,210 110,197" fill="#C7D6E0" stroke="#FFFFFF" strokeWidth={2} />
-                  <Line x1={123} y1={203.5} x2={123} y2={229.5} stroke="#FFFFFF" strokeWidth={1.5} />
+                  <Polygon
+                    points="110,223 136,236 136,210 110,197"
+                    fill="#C7D6E0"
+                    stroke="#FFFFFF"
+                    strokeWidth={2}
+                  />
+                  <Line
+                    x1={123}
+                    y1={203.5}
+                    x2={123}
+                    y2={229.5}
+                    stroke="#FFFFFF"
+                    strokeWidth={1.5}
+                  />
                 </Layer>
               </Animated.View>
 
               {/* План этажа: появляется, когда крыша уходит */}
               <Animated.View style={[StyleSheet.absoluteFill, floorStyle]} pointerEvents="none">
                 <Layer>
-                  <Polygon points="200,100 310,155 200,210 90,155" fill="#FBF9F3" stroke="#E8E5DA" strokeWidth={1} />
+                  <Polygon
+                    points="200,100 310,155 200,210 90,155"
+                    fill="#FBF9F3"
+                    stroke="#E8E5DA"
+                    strokeWidth={1}
+                  />
                 </Layer>
                 {ROOMS.map((room) => (
                   <RoomLayer
@@ -330,7 +409,15 @@ export function HouseScene({
                   <Polygon points="200,100 310,155 255,144.5 145,89.5" fill="#7E9873" />
                   <Polygon points="90,155 200,210 255,144.5 145,89.5" fill="#9CB48E" />
                   <Polygon points="310,155 200,210 255,144.5" fill="#F3F1E8" />
-                  <Line x1={145} y1={89.5} x2={255} y2={144.5} stroke="#FFFFFF" strokeWidth={1.5} strokeOpacity={0.25} />
+                  <Line
+                    x1={145}
+                    y1={89.5}
+                    x2={255}
+                    y2={144.5}
+                    stroke="#FFFFFF"
+                    strokeWidth={1.5}
+                    strokeOpacity={0.25}
+                  />
                   <Polygon points="222,98 234,104 222,110 210,104" fill="#F0ECE0" />
                   <Polygon points="210,104 222,110 222,124 210,118" fill="#E8E4D6" />
                   <Polygon points="222,110 234,104 234,118 222,124" fill="#DDD8C8" />
@@ -360,7 +447,7 @@ export function HouseScene({
               ))}
 
             {/* Объекты выбранной комнаты (или двора/гаража) */}
-            {(stage === 'room' && focusedRoom ? focusedRoom.objects : areaObjects ?? []).map(
+            {(stage === 'room' && focusedRoom ? focusedRoom.objects : (areaObjects ?? [])).map(
               (obj, i) => (
                 <ObjectChip
                   key={obj.id}
@@ -387,7 +474,7 @@ export function HouseScene({
               style={styles.backWrap}
             >
               <PressableScale style={styles.backChip} onPress={onBack}>
-                <Text style={styles.backText}>‹  Назад</Text>
+                <Text style={styles.backText}>‹ Назад</Text>
               </PressableScale>
             </Animated.View>
           )}
@@ -433,9 +520,15 @@ function RoomLayer({ room, dimmed }: { room: Room; dimmed: boolean }) {
 }
 
 function RoomChip({
-  room, k, index, mode, onPress,
+  room,
+  k,
+  index,
+  mode,
+  onPress,
 }: {
-  room: Room; k: number; index: number;
+  room: Room;
+  k: number;
+  index: number;
   mode: 'normal' | 'dim' | 'hidden';
   onPress: () => void;
 }) {
@@ -449,7 +542,10 @@ function RoomChip({
     <Animated.View
       entering={FadeInDown.delay(140 + index * 65).duration(340)}
       exiting={FadeOut.duration(220)}
-      style={[{ position: 'absolute', left: room.x * k - 40, top: room.y * k - 26, width: 80 }, style]}
+      style={[
+        { position: 'absolute', left: room.x * k - 40, top: room.y * k - 26, width: 80 },
+        style,
+      ]}
       pointerEvents={mode === 'normal' ? 'auto' : 'none'}
     >
       <PressableScale style={styles.roomChipInner} onPress={onPress}>
@@ -463,9 +559,17 @@ function RoomChip({
 }
 
 function ObjectChip({
-  obj, k, index, focused, onPress,
+  obj,
+  k,
+  index,
+  focused,
+  onPress,
 }: {
-  obj: SceneObject; k: number; index: number; focused: boolean; onPress: () => void;
+  obj: SceneObject;
+  k: number;
+  index: number;
+  focused: boolean;
+  onPress: () => void;
 }) {
   const scale = useSharedValue(focused ? 1.08 : 1);
   useEffect(() => {
@@ -477,7 +581,13 @@ function ObjectChip({
       entering={FadeInDown.delay(160 + index * 70).duration(320)}
       exiting={FadeOut.duration(200)}
       style={[
-        { position: 'absolute', left: obj.x * k - 45, top: obj.y * k - 17, width: 90, alignItems: 'center' },
+        {
+          position: 'absolute',
+          left: obj.x * k - 45,
+          top: obj.y * k - 17,
+          width: 90,
+          alignItems: 'center',
+        },
         style,
       ]}
     >
@@ -492,15 +602,32 @@ function ObjectChip({
 }
 
 function Tree({
-  k, x, y, w, h, style,
+  k,
+  x,
+  y,
+  w,
+  h,
+  style,
 }: {
-  k: number; x: number; y: number; w: number; h: number; style: object;
+  k: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  style: object;
 }) {
   return (
     <Animated.View
       pointerEvents="none"
       style={[
-        { position: 'absolute', left: x * k, top: y * k, width: w * k, height: h * k, transformOrigin: '50% 100%' },
+        {
+          position: 'absolute',
+          left: x * k,
+          top: y * k,
+          width: w * k,
+          height: h * k,
+          transformOrigin: '50% 100%',
+        },
         style,
       ]}
     >
@@ -515,17 +642,22 @@ function Tree({
 }
 
 function Cloud({
-  k, y, w, h, style,
+  k,
+  y,
+  w,
+  h,
+  style,
 }: {
-  k: number; y: number; w: number; h: number; style: object;
+  k: number;
+  y: number;
+  w: number;
+  h: number;
+  style: object;
 }) {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[
-        { position: 'absolute', left: 0, top: y * k, width: w * k, height: h * k },
-        style,
-      ]}
+      style={[{ position: 'absolute', left: 0, top: y * k, width: w * k, height: h * k }, style]}
     >
       <Svg width="100%" height="100%" viewBox="0 0 68 30">
         <Ellipse cx={20} cy={18} rx={11} ry={8} fill="#FFFFFF" />

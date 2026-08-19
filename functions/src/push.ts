@@ -56,10 +56,14 @@ async function dropDeadTokens(owners: Map<string, string>, dead: string[]) {
     byUid.set(uid, [...(byUid.get(uid) ?? []), token]);
   });
 
-  await Promise.all([...byUid].map(([uid, tokens]) =>
-    db.doc(`users/${uid}`)
-      .update({ pushTokens: FieldValue.arrayRemove(...tokens) })
-      .catch((e) => logger.warn('Не удалось убрать мёртвый токен', { uid, e }))));
+  await Promise.all(
+    [...byUid].map(([uid, tokens]) =>
+      db
+        .doc(`users/${uid}`)
+        .update({ pushTokens: FieldValue.arrayRemove(...tokens) })
+        .catch((e) => logger.warn('Не удалось убрать мёртвый токен', { uid, e })),
+    ),
+  );
 }
 
 /** Отправляет одно уведомление всем устройствам перечисленных пользователей. */

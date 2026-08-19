@@ -57,9 +57,8 @@ export function applicationFrom(data: Record<string, unknown> | undefined): Appl
     cardLast4: typeof data.cardLast4 === 'string' ? data.cardLast4 : null,
     cardBrand: typeof data.cardBrand === 'string' ? data.cardBrand : null,
     cardBindingId: typeof data.cardBindingId === 'string' ? data.cardBindingId : null,
-    status: status === 'pending' || status === 'approved' || status === 'rejected'
-      ? status
-      : 'draft',
+    status:
+      status === 'pending' || status === 'approved' || status === 'rejected' ? status : 'draft',
     rejectionReason: typeof data.rejectionReason === 'string' ? data.rejectionReason : null,
     biometricConsent: typeof data.biometricConsent === 'string' ? data.biometricConsent : null,
     bindingState: BINDING_STATES.includes(data.bindingState as BindingState)
@@ -75,11 +74,7 @@ export function phoneValid(phone: string): boolean {
 
 export type CardBindingResult =
   /** Страница банка закрылась успешно — исход подтвердит сервер */
-  | 'awaiting'
-  | 'cancelled'
-  | 'not-configured'
-  | 'already-bound'
-  | 'failed';
+  'awaiting' | 'cancelled' | 'not-configured' | 'already-bound' | 'failed';
 
 /**
  * Привязка карты.
@@ -98,11 +93,14 @@ export type CardBindingResult =
  */
 export async function startCardBinding(): Promise<CardBindingResult> {
   try {
-    const create = httpsCallable<unknown, {
-      confirmationUrl?: string;
-      configured?: boolean;
-      alreadyBound?: boolean;
-    }>(functions, 'createCardBinding');
+    const create = httpsCallable<
+      unknown,
+      {
+        confirmationUrl?: string;
+        configured?: boolean;
+        alreadyBound?: boolean;
+      }
+    >(functions, 'createCardBinding');
     const { data } = await create({});
 
     if (data?.configured === false) return 'not-configured';

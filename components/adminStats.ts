@@ -72,7 +72,9 @@ export async function loadAdminStats(): Promise<AdminStats> {
   verifiedDocs.docs.forEach((d) => {
     const cities: string[] = Array.isArray(d.get('cities'))
       ? d.get('cities')
-      : (d.get('city') ? [String(d.get('city'))] : []);
+      : d.get('city')
+        ? [String(d.get('city'))]
+        : [];
     const skills: string[] = Array.isArray(d.get('skills')) ? d.get('skills') : [];
 
     if (!cities.length) anyEverywhere = true;
@@ -88,9 +90,7 @@ export async function loadAdminStats(): Promise<AdminStats> {
     pending,
     rejected,
     coverage: {
-      missingCategories: anySpecialist
-        ? []
-        : CATEGORIES.filter((c) => !coveredCategories.has(c)),
+      missingCategories: anySpecialist ? [] : CATEGORIES.filter((c) => !coveredCategories.has(c)),
       coveredSettlements: anyEverywhere ? SETTLEMENTS.length : coveredCities.size,
       totalSettlements: SETTLEMENTS.length,
       anyEverywhere,
@@ -100,6 +100,7 @@ export async function loadAdminStats(): Promise<AdminStats> {
 }
 
 /** Города республиканского значения — по ним понятнее всего, где пусто. */
-export const MAIN_CITIES = SETTLEMENTS
-  .filter((s) => s.kind === 'город')
-  .map((s) => ({ name: s.name, key: settlementKey(s.name) }));
+export const MAIN_CITIES = SETTLEMENTS.filter((s) => s.kind === 'город').map((s) => ({
+  name: s.name,
+  key: settlementKey(s.name),
+}));

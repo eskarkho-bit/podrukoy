@@ -35,10 +35,7 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
   };
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(240)}
-      style={[StyleSheet.absoluteFill, styles.root]}
-    >
+    <Animated.View entering={FadeIn.duration(240)} style={[StyleSheet.absoluteFill, styles.root]}>
       <ScrollView contentContainerStyle={styles.content}>
         <Animated.View entering={FadeInDown.duration(420)} style={styles.badge}>
           <Text style={styles.badgeIcon}>📄</Text>
@@ -48,8 +45,8 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
           Обновились документы
         </Animated.Text>
         <Animated.Text entering={FadeInDown.delay(100).duration(380)} style={styles.sub}>
-          Чтобы продолжить пользоваться сервисом, примите действующие редакции.
-          Читать можно прямо здесь — интернет для этого не нужен.
+          Чтобы продолжить пользоваться сервисом, примите действующие редакции. Читать можно прямо
+          здесь — интернет для этого не нужен.
         </Animated.Text>
 
         <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.card}>
@@ -71,9 +68,7 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
             >
               {accepted && <Text style={styles.checkboxTick}>✓</Text>}
             </PressableScale>
-            <Text style={styles.consentText}>
-              Прочитал и принимаю обе редакции
-            </Text>
+            <Text style={styles.consentText}>Прочитал и принимаю обе редакции</Text>
           </View>
 
           <PressableScale
@@ -96,73 +91,74 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  root: { backgroundColor: t.bg },
-  content: { padding: 20, paddingTop: 90, paddingBottom: 60 },
-  badge: {
-    alignSelf: 'center',
-    width: 60,
-    height: 60,
-    borderRadius: 20,
-    backgroundColor: t.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  badgeIcon: { fontSize: 27 },
-  title: { fontSize: 20, fontWeight: '800', color: t.text, textAlign: 'center' },
-  sub: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    color: t.textMuted,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginTop: 8,
-    marginBottom: 20,
-  },
-  card: {
-    backgroundColor: t.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 16,
-  },
-  docRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: t.border,
-  },
-  docBody: { flex: 1 },
-  docTitle: { fontSize: 13.5, fontWeight: '800', color: t.text },
-  docMeta: { fontSize: 11, fontWeight: '600', color: t.textMuted, marginTop: 2 },
-  docChevron: { fontSize: 18, color: t.accent, fontWeight: '700' },
-  consentRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 16 },
-  checkbox: {
-    width: 21,
-    height: 21,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: t.inputBorder,
-    backgroundColor: t.inputBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
-  checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
-  consentText: { flex: 1, fontSize: 12.5, fontWeight: '700', color: t.text },
-  btn: {
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: t.accent,
-    marginTop: 16,
-  },
-  btnDim: { opacity: 0.5 },
-  btnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
-  logoutBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
-  logoutText: { color: t.textMuted, fontWeight: '700', fontSize: 12.5 },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    root: { backgroundColor: t.bg },
+    content: { padding: 20, paddingTop: 90, paddingBottom: 60 },
+    badge: {
+      alignSelf: 'center',
+      width: 60,
+      height: 60,
+      borderRadius: 20,
+      backgroundColor: t.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+    },
+    badgeIcon: { fontSize: 27 },
+    title: { fontSize: 20, fontWeight: '800', color: t.text, textAlign: 'center' },
+    sub: {
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: t.textMuted,
+      textAlign: 'center',
+      lineHeight: 18,
+      marginTop: 8,
+      marginBottom: 20,
+    },
+    card: {
+      backgroundColor: t.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 16,
+    },
+    docRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: t.border,
+    },
+    docBody: { flex: 1 },
+    docTitle: { fontSize: 13.5, fontWeight: '800', color: t.text },
+    docMeta: { fontSize: 11, fontWeight: '600', color: t.textMuted, marginTop: 2 },
+    docChevron: { fontSize: 18, color: t.accent, fontWeight: '700' },
+    consentRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 16 },
+    checkbox: {
+      width: 21,
+      height: 21,
+      borderRadius: 6,
+      borderWidth: 1.5,
+      borderColor: t.inputBorder,
+      backgroundColor: t.inputBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
+    checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
+    consentText: { flex: 1, fontSize: 12.5, fontWeight: '700', color: t.text },
+    btn: {
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      backgroundColor: t.accent,
+      marginTop: 16,
+    },
+    btnDim: { opacity: 0.5 },
+    btnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
+    logoutBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+    logoutText: { color: t.textMuted, fontWeight: '700', fontSize: 12.5 },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

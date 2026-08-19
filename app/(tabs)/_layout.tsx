@@ -49,9 +49,7 @@ function FloatingTabBar() {
       onSelect={(tab) => router.navigate(ROUTE_BY_TAB[tab] as never)}
       hasUnreadMessages={hasUnreadMessages}
       hidden={
-        (active === 'messages' && chatOpen)
-        || (active === 'orders' && overlayOpen)
-        || masterOpen
+        (active === 'messages' && chatOpen) || (active === 'orders' && overlayOpen) || masterOpen
       }
     />
   );

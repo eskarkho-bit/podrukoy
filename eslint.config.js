@@ -39,11 +39,14 @@ module.exports = [
 
       // Переменная, оставшаяся от предыдущей правки, — обычно недоделка.
       // Осознанно пропущенный аргумент называют с подчёркивания.
-      '@typescript-eslint/no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        caughtErrors: 'none',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrors: 'none',
+        },
+      ],
 
       // `if (x = 1)` вместо `==`
       'no-cond-assign': 'error',
@@ -74,10 +77,13 @@ module.exports = [
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
 
-      '@typescript-eslint/no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        caughtErrors: 'none',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrors: 'none',
+        },
+      ],
 
       'no-cond-assign': 'error',
       'no-async-promise-executor': 'error',

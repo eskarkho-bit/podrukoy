@@ -48,10 +48,7 @@ describe('ActionSheet', () => {
     const onComplete = jest.fn();
     const view = await openForm(onComplete);
 
-    await fireEvent.changeText(
-      view.getByPlaceholderText(/Расскажите/i),
-      '  искрит и пахнет  ',
-    );
+    await fireEvent.changeText(view.getByPlaceholderText(/Расскажите/i), '  искрит и пахнет  ');
     await fireEvent.press(view.getByText(/Отправить заявку/));
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1), WAIT);
@@ -73,11 +70,7 @@ describe('ActionSheet', () => {
 
     const submit = view.getByText(/Отправить заявку/);
     // Без перерисовки между нажатиями — ровно как палец на телефоне
-    await Promise.all([
-      fireEvent.press(submit),
-      fireEvent.press(submit),
-      fireEvent.press(submit),
-    ]);
+    await Promise.all([fireEvent.press(submit), fireEvent.press(submit), fireEvent.press(submit)]);
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1), WAIT);
   });

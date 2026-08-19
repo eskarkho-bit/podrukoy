@@ -42,11 +42,16 @@ export type FakeCall = {
  * Ключ идемпотентности сохраняется отдельно: на нём держится защита от
  * повторного возврата, и проверять его надо явно.
  */
-export function fakeProvider(handler: (path: string, body: any) => {
-  ok?: boolean;
-  status?: number;
-  json: any;
-}) {
+export function fakeProvider(
+  handler: (
+    path: string,
+    body: any,
+  ) => {
+    ok?: boolean;
+    status?: number;
+    json: any;
+  },
+) {
   const calls: FakeCall[] = [];
 
   global.fetch = jest.fn(async (url: any, init: any) => {

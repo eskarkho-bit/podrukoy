@@ -42,8 +42,15 @@ export function statusColor(status: string, t: Palette) {
 // Детали заказа: фото крупно, комментарий, предложения мастеров и действия.
 // Отмена — в два касания, чтобы не отменить случайно.
 export function OrderSheet({
-  order, onClose, onCancel, onConfirmDone, onChat,
-  onAcceptOffer, onSubmitReview, onAcceptPrice, onDeclinePrice,
+  order,
+  onClose,
+  onCancel,
+  onConfirmDone,
+  onChat,
+  onAcceptOffer,
+  onSubmitReview,
+  onAcceptPrice,
+  onDeclinePrice,
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -124,8 +131,8 @@ export function OrderSheet({
               <View style={styles.waitingBox}>
                 <Text style={styles.waitingTitle}>Ждём предложений</Text>
                 <Text style={styles.waitingText}>
-                  Мастера рядом видят вашу заявку. Как только кто-то назовёт цену,
-                  она появится здесь.
+                  Мастера рядом видят вашу заявку. Как только кто-то назовёт цену, она появится
+                  здесь.
                 </Text>
               </View>
             ) : (
@@ -155,15 +162,18 @@ export function OrderSheet({
 
             <View style={styles.offerRow}>
               <PressableScale style={[styles.offerBtn, styles.offerAccept]} onPress={onAcceptPrice}>
-                <Text style={styles.offerAcceptText}>✓  Принять</Text>
+                <Text style={styles.offerAcceptText}>✓ Принять</Text>
               </PressableScale>
-              <PressableScale style={[styles.offerBtn, styles.offerDecline]} onPress={onDeclinePrice}>
-                <Text style={styles.offerDeclineText}>✕  Отклонить</Text>
+              <PressableScale
+                style={[styles.offerBtn, styles.offerDecline]}
+                onPress={onDeclinePrice}
+              >
+                <Text style={styles.offerDeclineText}>✕ Отклонить</Text>
               </PressableScale>
             </View>
 
             <PressableScale style={styles.offerDiscuss} onPress={onChat}>
-              <Text style={styles.offerDiscussText}>💬  Обговорить цену</Text>
+              <Text style={styles.offerDiscussText}>💬 Обговорить цену</Text>
             </PressableScale>
           </Animated.View>
         )}
@@ -191,7 +201,7 @@ export function OrderSheet({
         {awaitingConfirm && (
           <Animated.View entering={FadeInDown.delay(180).duration(300)}>
             <PressableScale style={styles.confirmBtn} onPress={onConfirmDone}>
-              <Text style={styles.confirmBtnText}>✓  Работа выполнена — подтвердить</Text>
+              <Text style={styles.confirmBtnText}>✓ Работа выполнена — подтвердить</Text>
             </PressableScale>
           </Animated.View>
         )}
@@ -214,7 +224,7 @@ export function OrderSheet({
                   (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
                 ]}
               >
-                💬  Написать мастеру
+                💬 Написать мастеру
               </Text>
             </PressableScale>
           </Animated.View>
@@ -324,191 +334,192 @@ function ReviewForm({ onSubmit }: { onSubmit: (stars: number, text: string) => v
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  wrap: { justifyContent: 'flex-end' },
-  dim: { backgroundColor: t.dim },
-  card: {
-    margin: 12,
-    borderRadius: 28,
-    backgroundColor: t.card,
-    padding: 20,
-    paddingBottom: 26,
-    shadowColor: t.shadow,
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
-  },
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
-  headerText: { flex: 1 },
-  title: { fontSize: 16, fontWeight: '800', color: t.text, lineHeight: 21 },
-  date: { fontSize: 11.5, color: t.textMuted, fontWeight: '600', marginTop: 3 },
-  statusChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusText: { fontSize: 11, fontWeight: '700' },
-  photo: {
-    width: '100%',
-    height: 170,
-    borderRadius: 16,
-    backgroundColor: t.chip,
-    marginBottom: 10,
-  },
-  commentBox: {
-    backgroundColor: t.soft,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 13,
-    marginBottom: 10,
-  },
-  commentLabel: { fontSize: 10.5, fontWeight: '800', color: t.textMuted, marginBottom: 4 },
-  commentText: { fontSize: 13, fontWeight: '600', color: t.text, lineHeight: 18 },
-  waitingBox: {
-    backgroundColor: t.soft,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 14,
-    marginBottom: 10,
-  },
-  waitingTitle: { fontSize: 13, fontWeight: '800', color: t.text },
-  waitingText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: t.textMuted,
-    lineHeight: 17,
-    marginTop: 4,
-  },
-  offersTitle: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginBottom: 8 },
-  offerCard: {
-    backgroundColor: t.soft,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: t.accentBorder,
-    padding: 14,
-    marginBottom: 10,
-  },
-  offerHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  offerWho: { flex: 1 },
-  offerName: { fontSize: 14, fontWeight: '800', color: t.text },
-  offerRating: { fontSize: 11.5, fontWeight: '700', color: t.textMuted, marginTop: 2 },
-  offerPriceSmall: { fontSize: 19, fontWeight: '800', color: t.text },
-  offerComment: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    color: t.textSoft,
-    lineHeight: 17,
-    marginTop: 8,
-  },
-  offerLabel: { fontSize: 11, fontWeight: '800', color: t.textMuted },
-  offerPrice: { fontSize: 26, fontWeight: '800', color: t.text, marginTop: 4, marginBottom: 12 },
-  offerRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  offerBtn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
-  offerAccept: { backgroundColor: t.accent },
-  offerAcceptConfirm: { backgroundColor: t.blue },
-  offerAcceptText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
-  offerDecline: { backgroundColor: t.card, borderWidth: 1, borderColor: t.border },
-  offerDeclineText: { color: t.danger, fontWeight: '800', fontSize: 13.5 },
-  offerDiscuss: { alignItems: 'center', paddingVertical: 11, marginTop: 4 },
-  offerDiscussText: { color: t.accent, fontWeight: '800', fontSize: 13 },
-  agreedCard: {
-    backgroundColor: t.accentFaint,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.accentBorder,
-    padding: 13,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  agreedText: { color: t.accent, fontWeight: '800', fontSize: 15 },
-  agreedSub: { color: t.textMuted, fontWeight: '700', fontSize: 11, marginTop: 2 },
-  declinedCard: {
-    backgroundColor: t.soft,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 13,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  declinedText: { color: t.textSoft, fontWeight: '700', fontSize: 12, textAlign: 'center' },
-  reviewCard: {
-    backgroundColor: t.soft,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 14,
-    marginBottom: 10,
-  },
-  reviewTitle: { fontSize: 13.5, fontWeight: '800', color: t.text },
-  starsRow: { flexDirection: 'row', gap: 2, marginTop: 8, marginBottom: 10 },
-  starHit: { padding: 3 },
-  star: { fontSize: 26, color: t.toggleOff },
-  starOn: { color: t.warn },
-  reviewInput: {
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
-    fontWeight: '600',
-    color: t.text,
-    backgroundColor: t.inputBg,
-    minHeight: 60,
-    textAlignVertical: 'top',
-  },
-  reviewBtn: {
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: t.accent,
-    marginTop: 10,
-  },
-  reviewBtnDim: { opacity: 0.5 },
-  reviewBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
-  confirmBtn: {
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: t.accent,
-    marginBottom: 9,
-  },
-  confirmBtnText: { fontWeight: '700', fontSize: 14.5, color: t.onAccent },
-  chatBtn: {
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: t.accent,
-    marginBottom: 9,
-  },
-  chatBtnSecondary: {
-    backgroundColor: t.card,
-    borderWidth: 1,
-    borderColor: t.accentBorder,
-    paddingVertical: 13,
-  },
-  chatBtnText: { fontWeight: '700', fontSize: 14.5, color: t.onAccent },
-  chatBtnTextSecondary: { color: t.accent },
-  cancelBtn: {
-    borderRadius: 16,
-    paddingVertical: 13,
-    alignItems: 'center',
-    backgroundColor: t.card,
-    borderWidth: 1,
-    borderColor: t.border,
-  },
-  cancelBtnConfirm: { backgroundColor: t.danger, borderColor: t.danger },
-  cancelText: { fontWeight: '700', fontSize: 13.5, color: t.danger },
-  cancelTextConfirm: { color: '#FFFFFF' },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    wrap: { justifyContent: 'flex-end' },
+    dim: { backgroundColor: t.dim },
+    card: {
+      margin: 12,
+      borderRadius: 28,
+      backgroundColor: t.card,
+      padding: 20,
+      paddingBottom: 26,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.16,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 8,
+    },
+    headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
+    headerText: { flex: 1 },
+    title: { fontSize: 16, fontWeight: '800', color: t.text, lineHeight: 21 },
+    date: { fontSize: 11.5, color: t.textMuted, fontWeight: '600', marginTop: 3 },
+    statusChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      borderWidth: 1,
+      borderRadius: 12,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+    },
+    statusDot: { width: 6, height: 6, borderRadius: 3 },
+    statusText: { fontSize: 11, fontWeight: '700' },
+    photo: {
+      width: '100%',
+      height: 170,
+      borderRadius: 16,
+      backgroundColor: t.chip,
+      marginBottom: 10,
+    },
+    commentBox: {
+      backgroundColor: t.soft,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 13,
+      marginBottom: 10,
+    },
+    commentLabel: { fontSize: 10.5, fontWeight: '800', color: t.textMuted, marginBottom: 4 },
+    commentText: { fontSize: 13, fontWeight: '600', color: t.text, lineHeight: 18 },
+    waitingBox: {
+      backgroundColor: t.soft,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginBottom: 10,
+    },
+    waitingTitle: { fontSize: 13, fontWeight: '800', color: t.text },
+    waitingText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: t.textMuted,
+      lineHeight: 17,
+      marginTop: 4,
+    },
+    offersTitle: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginBottom: 8 },
+    offerCard: {
+      backgroundColor: t.soft,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      padding: 14,
+      marginBottom: 10,
+    },
+    offerHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    offerWho: { flex: 1 },
+    offerName: { fontSize: 14, fontWeight: '800', color: t.text },
+    offerRating: { fontSize: 11.5, fontWeight: '700', color: t.textMuted, marginTop: 2 },
+    offerPriceSmall: { fontSize: 19, fontWeight: '800', color: t.text },
+    offerComment: {
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: t.textSoft,
+      lineHeight: 17,
+      marginTop: 8,
+    },
+    offerLabel: { fontSize: 11, fontWeight: '800', color: t.textMuted },
+    offerPrice: { fontSize: 26, fontWeight: '800', color: t.text, marginTop: 4, marginBottom: 12 },
+    offerRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+    offerBtn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
+    offerAccept: { backgroundColor: t.accent },
+    offerAcceptConfirm: { backgroundColor: t.blue },
+    offerAcceptText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
+    offerDecline: { backgroundColor: t.card, borderWidth: 1, borderColor: t.border },
+    offerDeclineText: { color: t.danger, fontWeight: '800', fontSize: 13.5 },
+    offerDiscuss: { alignItems: 'center', paddingVertical: 11, marginTop: 4 },
+    offerDiscussText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+    agreedCard: {
+      backgroundColor: t.accentFaint,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      padding: 13,
+      marginBottom: 10,
+      alignItems: 'center',
+    },
+    agreedText: { color: t.accent, fontWeight: '800', fontSize: 15 },
+    agreedSub: { color: t.textMuted, fontWeight: '700', fontSize: 11, marginTop: 2 },
+    declinedCard: {
+      backgroundColor: t.soft,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 13,
+      marginBottom: 10,
+      alignItems: 'center',
+    },
+    declinedText: { color: t.textSoft, fontWeight: '700', fontSize: 12, textAlign: 'center' },
+    reviewCard: {
+      backgroundColor: t.soft,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginBottom: 10,
+    },
+    reviewTitle: { fontSize: 13.5, fontWeight: '800', color: t.text },
+    starsRow: { flexDirection: 'row', gap: 2, marginTop: 8, marginBottom: 10 },
+    starHit: { padding: 3 },
+    star: { fontSize: 26, color: t.toggleOff },
+    starOn: { color: t.warn },
+    reviewInput: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 13,
+      fontWeight: '600',
+      color: t.text,
+      backgroundColor: t.inputBg,
+      minHeight: 60,
+      textAlignVertical: 'top',
+    },
+    reviewBtn: {
+      borderRadius: 14,
+      paddingVertical: 12,
+      alignItems: 'center',
+      backgroundColor: t.accent,
+      marginTop: 10,
+    },
+    reviewBtnDim: { opacity: 0.5 },
+    reviewBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
+    confirmBtn: {
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      backgroundColor: t.accent,
+      marginBottom: 9,
+    },
+    confirmBtnText: { fontWeight: '700', fontSize: 14.5, color: t.onAccent },
+    chatBtn: {
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      backgroundColor: t.accent,
+      marginBottom: 9,
+    },
+    chatBtnSecondary: {
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      paddingVertical: 13,
+    },
+    chatBtnText: { fontWeight: '700', fontSize: 14.5, color: t.onAccent },
+    chatBtnTextSecondary: { color: t.accent },
+    cancelBtn: {
+      borderRadius: 16,
+      paddingVertical: 13,
+      alignItems: 'center',
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    cancelBtnConfirm: { backgroundColor: t.danger, borderColor: t.danger },
+    cancelText: { fontWeight: '700', fontSize: 13.5, color: t.danger },
+    cancelTextConfirm: { color: '#FFFFFF' },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

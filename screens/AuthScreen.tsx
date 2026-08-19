@@ -231,8 +231,8 @@ export function AuthScreen() {
                 Принимаю{' '}
                 <Text style={styles.consentLink} onPress={() => setOpenDoc('terms')}>
                   пользовательское соглашение
-                </Text>
-                {' '}и{' '}
+                </Text>{' '}
+                и{' '}
                 <Text style={styles.consentLink} onPress={() => setOpenDoc('privacy')}>
                   политику конфиденциальности
                 </Text>
@@ -259,8 +259,12 @@ export function AuthScreen() {
           >
             <Text style={styles.btnText}>
               {loading
-                ? (isRegister ? 'Создаём аккаунт…' : 'Входим…')
-                : (isRegister ? 'Зарегистрироваться' : 'Войти')}
+                ? isRegister
+                  ? 'Создаём аккаунт…'
+                  : 'Входим…'
+                : isRegister
+                  ? 'Зарегистрироваться'
+                  : 'Войти'}
             </Text>
           </PressableScale>
 
@@ -273,13 +277,9 @@ export function AuthScreen() {
         </Animated.View>
 
         <Animated.View entering={FadeIn.delay(240).duration(360)} style={styles.switchRow}>
-          <Text style={styles.hint}>
-            {isRegister ? 'Уже есть аккаунт?' : 'Впервые здесь?'}
-          </Text>
+          <Text style={styles.hint}>{isRegister ? 'Уже есть аккаунт?' : 'Впервые здесь?'}</Text>
           <PressableScale onPress={switchMode} disabled={loading}>
-            <Text style={styles.switchText}>
-              {isRegister ? 'Войти' : 'Создать аккаунт'}
-            </Text>
+            <Text style={styles.switchText}>{isRegister ? 'Войти' : 'Создать аккаунт'}</Text>
           </PressableScale>
         </Animated.View>
       </ScrollView>
@@ -301,108 +301,115 @@ export function AuthScreen() {
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  fill: { flex: 1, backgroundColor: t.bg },
-  content: { padding: 24, paddingTop: 96, alignItems: 'center' },
-  badge: {
-    width: 64,
-    height: 64,
-    borderRadius: 22,
-    backgroundColor: t.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  badgeIcon: { fontSize: 32 },
-  title: { fontSize: 22, fontWeight: '800', color: t.text },
-  sub: {
-    color: t.textSoft,
-    fontSize: 12.5,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 20,
-    maxWidth: 280,
-    lineHeight: 18,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: t.card,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: t.border,
-    padding: 18,
-  },
-  fieldLabel: { color: t.textSoft, fontWeight: '700', fontSize: 11.5, marginBottom: 6 },
-  fieldLabelGap: { marginTop: 14 },
-  fieldInput: {
-    backgroundColor: t.inputBg,
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontSize: 13.5,
-    color: t.text,
-  },
-  fieldHint: { color: t.textMuted, fontWeight: '600', fontSize: 11, marginTop: 6 },
-  pickerField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: t.inputBorder,
-    borderRadius: 12,
-    backgroundColor: t.inputBg,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  pickerValue: { flex: 1, fontSize: 14, fontWeight: '700', color: t.text },
-  pickerPlaceholder: { color: t.textMuted, fontWeight: '600' },
-  pickerChevron: { fontSize: 18, fontWeight: '700', color: t.textMuted },
-  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginTop: 16 },
-  checkbox: {
-    width: 21,
-    height: 21,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: t.inputBorder,
-    backgroundColor: t.inputBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
-  checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
-  consentText: {
-    flex: 1,
-    fontSize: 11.5,
-    fontWeight: '600',
-    color: t.textMuted,
-    lineHeight: 17,
-  },
-  consentLink: { color: t.accent, fontWeight: '800' },
-  fieldError: { color: t.danger, fontWeight: '700', fontSize: 11.5, marginTop: 10 },
-  fieldNotice: { color: t.accent, fontWeight: '700', fontSize: 11.5, marginTop: 10, lineHeight: 16 },
-  forgot: {
-    color: t.textMuted,
-    fontWeight: '700',
-    fontSize: 11.5,
-    textAlign: 'center',
-    marginTop: 14,
-  },
-  btn: {
-    backgroundColor: t.accent,
-    borderRadius: 16,
-    paddingVertical: 13,
-    alignItems: 'center',
-    marginTop: 18,
-  },
-  btnDim: { backgroundColor: t.disabled },
-  btnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 18 },
-  hint: { color: t.textMuted, fontWeight: '600', fontSize: 11.5 },
-  switchText: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    fill: { flex: 1, backgroundColor: t.bg },
+    content: { padding: 24, paddingTop: 96, alignItems: 'center' },
+    badge: {
+      width: 64,
+      height: 64,
+      borderRadius: 22,
+      backgroundColor: t.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+    },
+    badgeIcon: { fontSize: 32 },
+    title: { fontSize: 22, fontWeight: '800', color: t.text },
+    sub: {
+      color: t.textSoft,
+      fontSize: 12.5,
+      fontWeight: '600',
+      textAlign: 'center',
+      marginTop: 6,
+      marginBottom: 20,
+      maxWidth: 280,
+      lineHeight: 18,
+    },
+    card: {
+      width: '100%',
+      maxWidth: 420,
+      backgroundColor: t.card,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 18,
+    },
+    fieldLabel: { color: t.textSoft, fontWeight: '700', fontSize: 11.5, marginBottom: 6 },
+    fieldLabelGap: { marginTop: 14 },
+    fieldInput: {
+      backgroundColor: t.inputBg,
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 14,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      fontSize: 13.5,
+      color: t.text,
+    },
+    fieldHint: { color: t.textMuted, fontWeight: '600', fontSize: 11, marginTop: 6 },
+    pickerField: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 14,
+      paddingVertical: 13,
+    },
+    pickerValue: { flex: 1, fontSize: 14, fontWeight: '700', color: t.text },
+    pickerPlaceholder: { color: t.textMuted, fontWeight: '600' },
+    pickerChevron: { fontSize: 18, fontWeight: '700', color: t.textMuted },
+    consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginTop: 16 },
+    checkbox: {
+      width: 21,
+      height: 21,
+      borderRadius: 6,
+      borderWidth: 1.5,
+      borderColor: t.inputBorder,
+      backgroundColor: t.inputBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
+    checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
+    consentText: {
+      flex: 1,
+      fontSize: 11.5,
+      fontWeight: '600',
+      color: t.textMuted,
+      lineHeight: 17,
+    },
+    consentLink: { color: t.accent, fontWeight: '800' },
+    fieldError: { color: t.danger, fontWeight: '700', fontSize: 11.5, marginTop: 10 },
+    fieldNotice: {
+      color: t.accent,
+      fontWeight: '700',
+      fontSize: 11.5,
+      marginTop: 10,
+      lineHeight: 16,
+    },
+    forgot: {
+      color: t.textMuted,
+      fontWeight: '700',
+      fontSize: 11.5,
+      textAlign: 'center',
+      marginTop: 14,
+    },
+    btn: {
+      backgroundColor: t.accent,
+      borderRadius: 16,
+      paddingVertical: 13,
+      alignItems: 'center',
+      marginTop: 18,
+    },
+    btnDim: { backgroundColor: t.disabled },
+    btnText: { color: t.onAccent, fontWeight: '800', fontSize: 14 },
+    switchRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 18 },
+    hint: { color: t.textMuted, fontWeight: '600', fontSize: 11.5 },
+    switchText: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

@@ -22,10 +22,11 @@ const app = (uid: string) => db.doc(`masters/${uid}/verification/application`);
 const minutesAgo = (m: number) => Timestamp.fromMillis(Date.now() - m * 60 * 1000);
 
 /** Прогон в обход расписания: onSchedule отдаёт функцию с .run(). */
-const run = () => (reconcile as any).run({
-  jobName: 'test',
-  scheduleTime: new Date().toISOString(),
-});
+const run = () =>
+  (reconcile as any).run({
+    jobName: 'test',
+    scheduleTime: new Date().toISOString(),
+  });
 
 const actions = async () => {
   const snap = await db.collection('audit').get();

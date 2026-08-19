@@ -1,11 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector, type PanGesture } from 'react-native-gesture-handler';
-import {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { springs } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 
@@ -63,19 +58,20 @@ export function SheetGrabber({ gesture }: { gesture: PanGesture }) {
   );
 }
 
-const makeStyles = (t: Palette) => StyleSheet.create({
-  zone: {
-    alignItems: 'center',
-    paddingVertical: 8,
-    marginTop: -8,
-    marginBottom: 8,
-  },
-  bar: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: t.toggleOff,
-  },
-});
+const makeStyles = (t: Palette) =>
+  StyleSheet.create({
+    zone: {
+      alignItems: 'center',
+      paddingVertical: 8,
+      marginTop: -8,
+      marginBottom: 8,
+    },
+    bar: {
+      width: 36,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: t.toggleOff,
+    },
+  });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };
