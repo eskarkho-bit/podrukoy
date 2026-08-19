@@ -39,6 +39,22 @@ describe('firestoreErrorText', () => {
     expect(firestoreErrorText(err('unavailable'), fallback)).toContain('интернет');
   });
 
+  // Бакет, которого нет, из браузера выглядит как обрыв сети: запрос упирается
+  // в CORS, повторы заканчиваются. Человек шёл проверять роутер, а подключить
+  // надо было Cloud Storage.
+  test('сбой загрузки называет и хранилище, а не только связь', () => {
+    const text = firestoreErrorText(err('storage/retry-limit-exceeded'), fallback);
+    expect(text).toContain('Storage');
+  });
+
+  test('несуществующий бакет назван своим именем', () => {
+    ['storage/unknown', 'storage/bucket-not-found', 'storage/project-not-found'].forEach((code) => {
+      const text = firestoreErrorText(err(code), fallback);
+      expect(text).toContain('Storage');
+      expect(text).not.toContain('интернет');
+    });
+  });
+
   test('истёкшая сессия предлагает войти заново', () => {
     expect(firestoreErrorText(err('unauthenticated'), fallback)).toContain('войдите');
   });

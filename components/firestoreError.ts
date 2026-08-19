@@ -20,8 +20,18 @@ export function firestoreErrorText(e: unknown, fallback: string): string {
     case 'unauthenticated':
       return 'Сессия истекла — войдите заново';
     case 'unavailable':
-    case 'storage/retry-limit-exceeded':
       return 'Нет связи с сервером. Проверьте интернет';
+    // Хранилище отвечает по-разному в зависимости от того, откуда его зовут:
+    // из браузера запрос к несуществующему бакету упирается в CORS, повторы
+    // заканчиваются, и это выглядит как обрыв сети. Отсюда и оговорка —
+    // отправлять человека проверять роутер, когда Storage просто не подключён,
+    // мы уже пробовали.
+    case 'storage/retry-limit-exceeded':
+      return 'Файл не загрузился: нет связи либо в проекте не подключён Cloud Storage';
+    case 'storage/unknown':
+    case 'storage/bucket-not-found':
+    case 'storage/project-not-found':
+      return 'Хранилище файлов недоступно — похоже, Cloud Storage не подключён в Firebase';
     case 'resource-exhausted':
       return 'Слишком много запросов. Попробуйте через несколько минут';
     case 'failed-precondition':
