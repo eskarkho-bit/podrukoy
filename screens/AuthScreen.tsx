@@ -6,12 +6,11 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { PressableScale } from '../components/PressableScale';
 import { authErrorText, useAuth } from '../components/AuthState';
-import { currentConsents, LEGAL_DOCS, rememberConsent, type LegalDocId } from '../components/legal';
+import { currentConsents, rememberConsent, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { rememberSignup } from '../components/signupDraft';
 import { LegalScreen } from './LegalScreen';

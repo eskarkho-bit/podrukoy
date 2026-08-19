@@ -63,12 +63,6 @@ export type Order = {
   priceStatus?: PriceStatus;
 };
 
-function today() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
-}
-
 type Props = {
   orders: Order[];
   addresses: string[];
@@ -358,7 +352,7 @@ function HeaderChevron({ open }: { open: boolean }) {
   const turn = useSharedValue(open ? 1 : 0);
   useEffect(() => {
     turn.value = withSpring(open ? 1 : 0, springs.card);
-  }, [open]);
+  }, [open, turn]);
   const style = useAnimatedStyle(() => ({
     transform: [{ rotate: `${turn.value * 180}deg` }],
   }));
@@ -382,7 +376,7 @@ function Tabs({ area, onSelect }: { area: AreaId; onSelect: (a: AreaId) => void 
     if (measured.current) x.value = withSpring(idx * pillW, springs.card);
     else x.value = idx * pillW;
     measured.current = true;
-  }, [idx, pillW]);
+  }, [idx, pillW, x]);
   const pillStyle = useAnimatedStyle(() => ({
     width: pillW,
     transform: [{ translateX: x.value }],
@@ -412,7 +406,7 @@ function TabLabel({
   const on = useSharedValue(selected ? 1 : 0);
   useEffect(() => {
     on.value = withTiming(selected ? 1 : 0, { duration: 220 });
-  }, [selected]);
+  }, [selected, on]);
   const style = useAnimatedStyle(() => ({
     color: interpolateColor(on.value, [0, 1], [t.textSoft, t.accentStrong]),
   }));

@@ -67,12 +67,20 @@ export function MessagesScreen({
     onThreadOpenChange(false);
   };
 
-  // Другой экран попросил открыть чат (профиль → поддержка, заказ → мастер)
+  // Другой экран попросил открыть чат (профиль → поддержка, заказ → мастер).
+  //
+  // Обработчики держим в ссылках, а не в зависимостях: они пересоздаются на
+  // каждой отрисовке, а `handleOpen` помечает тред прочитанным — то есть
+  // пишет в Firestore. В зависимостях это дало бы запись на каждую отрисовку.
+  const handleOpenRef = useRef(handleOpen);
+  handleOpenRef.current = handleOpen;
+  const onHandledRef = useRef(onOpenRequestHandled);
+  onHandledRef.current = onOpenRequestHandled;
+
   useEffect(() => {
-    if (openRequestId) {
-      handleOpen(openRequestId);
-      onOpenRequestHandled();
-    }
+    if (!openRequestId) return;
+    handleOpenRef.current(openRequestId);
+    onHandledRef.current();
   }, [openRequestId]);
 
   return (
@@ -265,9 +273,12 @@ function TypingDots() {
       withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.sin) }), -1, false,
     );
     return () => cancelAnimation(p);
-  }, [reduceMotion]);
+  }, [reduceMotion, p]);
 
-  const dotStyle = (phase: number) =>
+  // Это настоящий хук: три вызова ниже безусловны и всегда в одном порядке.
+  // Имя с `use` не косметика — оно включает правило, которое не даст обернуть
+  // вызов в условие и тихо сломать порядок хуков.
+  const useDotStyle = (phase: number) =>
     useAnimatedStyle(() => {
       const wave = 0.5 + 0.5 * Math.sin(2 * Math.PI * (p.value - phase));
       return {
@@ -276,9 +287,9 @@ function TypingDots() {
       };
     });
 
-  const d0 = dotStyle(0);
-  const d1 = dotStyle(0.18);
-  const d2 = dotStyle(0.36);
+  const d0 = useDotStyle(0);
+  const d1 = useDotStyle(0.18);
+  const d2 = useDotStyle(0.36);
 
   return (
     <View style={styles.typingRow}>

@@ -36,9 +36,13 @@
     "@testing-library/react-native": "^14.0.1",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.1.10",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~10.0.0",
+    "eslint-config-prettier": "^10.1.8",
     "firebase-tools": "^15.26.0",
     "jest": "^29.7.0",
     "jest-expo": "~54.0.18",
+    "prettier": "^3.9.6",
     "typescript": "~5.9.2"
   },
   "scripts": {
@@ -51,7 +55,11 @@
     "test:rules": "firebase emulators:exec --only firestore --project demo-podrukoy \"node --test tests/firestore.rules.test.mjs\"",
     "rules:check": "node scripts/rules-state.mjs check",
     "rules:deploy": "firebase deploy --only firestore:rules,firestore:indexes && node scripts/rules-state.mjs record firestore.rules firestore.indexes.json",
-    "storage:deploy": "firebase deploy --only storage && node scripts/rules-state.mjs record storage.rules"
+    "storage:deploy": "firebase deploy --only storage && node scripts/rules-state.mjs record storage.rules",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "private": true
 }

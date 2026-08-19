@@ -47,16 +47,16 @@ export function BottomTabs({ active, onSelect, hasUnreadMessages, hidden }: Prop
     if (measured.current) x.value = withSpring(idx * pillW, springs.card);
     else x.value = idx * pillW;
     measured.current = true;
-  }, [idx, pillW]);
+  }, [idx, pillW, x]);
 
   const away = useSharedValue(hidden ? 1 : 0);
   useEffect(() => {
     away.value = withTiming(hidden ? 1 : 0, { duration: 220 });
-  }, [hidden]);
+  }, [hidden, away]);
   const shift = useSharedValue(hidden ? 24 : 0);
   useEffect(() => {
     shift.value = withSpring(hidden ? 24 : 0, springs.sheet);
-  }, [hidden]);
+  }, [hidden, shift]);
 
   const pillStyle = useAnimatedStyle(() => ({
     width: pillW,
@@ -99,11 +99,11 @@ function TabButton({
   const on = useSharedValue(selected ? 1 : 0);
   useEffect(() => {
     on.value = withTiming(selected ? 1 : 0, { duration: 220 });
-  }, [selected]);
+  }, [selected, on]);
   const scale = useSharedValue(selected ? 1.08 : 1);
   useEffect(() => {
     scale.value = withSpring(selected ? 1.08 : 1, springs.micro);
-  }, [selected]);
+  }, [selected, scale]);
 
   const textStyle = useAnimatedStyle(() => ({
     color: interpolateColor(on.value, [0, 1], [t.textMuted, t.accentStrong]),

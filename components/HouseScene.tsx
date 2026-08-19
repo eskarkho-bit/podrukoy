@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   Extrapolation,
-  FadeIn,
   FadeInDown,
   FadeOut,
   cancelAnimation,
@@ -175,7 +174,7 @@ export function HouseScene({
       cancelAnimation(drift);
       sway.value = 0;
     };
-  }, [idle, reduceMotion]);
+  }, [idle, reduceMotion, drift, sway]);
 
   // Дыхание дома: замирает внутри дома и полностью останавливается, когда
   // сцены не видно
@@ -195,7 +194,7 @@ export function HouseScene({
     breath.value = withRepeat(withTiming(1, { duration: 8400, easing: Easing.linear }), -1, false);
     breathOn.value = withTiming(1, { duration: 600 });
     return () => cancelAnimation(breath);
-  }, [idle, stage]);
+  }, [idle, stage, breath, breathOn]);
 
   // Камера плавно едет к цели при каждой смене состояния
   useEffect(() => {
@@ -208,14 +207,14 @@ export function HouseScene({
     cs.value = withSpring(t.s, cfg);
     cx.value = withSpring((CX - t.x) * t.s * k, cfg);
     cy.value = withSpring((CY - t.y) * t.s * k, cfg);
-  }, [area, stage, roomId, focusedObjectId, k]);
+  }, [area, stage, roomId, focusedObjectId, k, cs, cx, cy]);
 
   // Крыша поднимается, стены становятся полупрозрачными, дыхание замирает
   useEffect(() => {
     const open = stage !== 'exterior';
     openP.value = withSpring(open ? 1 : 0, springs.hero);
     breathOn.value = withTiming(open ? 0 : 1, { duration: 600 });
-  }, [stage]);
+  }, [stage, breathOn, openP]);
 
   const cameraStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: cx.value }, { translateY: cy.value }, { scale: cs.value }],
@@ -416,7 +415,7 @@ function RoomLayer({ room, dimmed }: { room: Room; dimmed: boolean }) {
   const opacity = useSharedValue(dimmed ? 0.25 : 1);
   useEffect(() => {
     opacity.value = withTiming(dimmed ? 0.25 : 1, { duration: 320 });
-  }, [dimmed]);
+  }, [dimmed, opacity]);
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, style]} pointerEvents="none">
@@ -444,7 +443,7 @@ function RoomChip({
   const opacity = useSharedValue(target);
   useEffect(() => {
     opacity.value = withTiming(target, { duration: 320 });
-  }, [target]);
+  }, [target, opacity]);
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
     <Animated.View
@@ -471,7 +470,7 @@ function ObjectChip({
   const scale = useSharedValue(focused ? 1.08 : 1);
   useEffect(() => {
     scale.value = withSpring(focused ? 1.08 : 1, springs.micro);
-  }, [focused]);
+  }, [focused, scale]);
   const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
     <Animated.View

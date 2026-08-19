@@ -34,7 +34,6 @@ import {
   collectionGroup,
   deleteDoc,
   doc,
-  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -183,7 +182,13 @@ export function MasterScreen({ open, onClose }: Props) {
   const [editingProfile, setEditingProfile] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [openJobId, setOpenJobId] = useState<string | null>(null);
-  // В какой заявке клиент сейчас «печатает»
+  // В какой заявке клиент сейчас «печатает».
+  //
+  // ДОЛГ: разводка по интерфейсу есть, а источника нет — setTypingJobId не
+  // вызывается нигде, поэтому индикатор у мастера не показывается никогда.
+  // Признак «печатает» требует записи в Firestore на каждое нажатие клавиши,
+  // и это отдельное решение по стоимости, а не забытая строчка.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [typingJobId, setTypingJobId] = useState<string | null>(null);
 
   const openJob = jobs.find((j) => j.id === openJobId) ?? null;
@@ -196,7 +201,7 @@ export function MasterScreen({ open, onClose }: Props) {
   useEffect(() => {
     shown.value = withTiming(open ? 1 : 0, { duration: 260 });
     slide.value = withSpring(open ? 0 : 60, springs.nav);
-  }, [open]);
+  }, [open, shown, slide]);
   const layerStyle = useAnimatedStyle(() => ({
     opacity: shown.value,
     transform: [{ translateX: slide.value }],
@@ -1479,9 +1484,12 @@ function TypingDots() {
       withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.sin) }), -1, false,
     );
     return () => cancelAnimation(p);
-  }, [reduceMotion]);
+  }, [reduceMotion, p]);
 
-  const dotStyle = (phase: number) =>
+  // Это настоящий хук: три вызова ниже безусловны и всегда в одном порядке.
+  // Имя с `use` не косметика — оно включает правило, которое не даст обернуть
+  // вызов в условие и тихо сломать порядок хуков.
+  const useDotStyle = (phase: number) =>
     useAnimatedStyle(() => {
       const wave = 0.5 + 0.5 * Math.sin(2 * Math.PI * (p.value - phase));
       return {
@@ -1490,9 +1498,9 @@ function TypingDots() {
       };
     });
 
-  const d0 = dotStyle(0);
-  const d1 = dotStyle(0.18);
-  const d2 = dotStyle(0.36);
+  const d0 = useDotStyle(0);
+  const d1 = useDotStyle(0.18);
+  const d2 = useDotStyle(0.36);
 
   return (
     <View style={styles.typingRow}>

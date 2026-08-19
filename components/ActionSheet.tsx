@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import Animated, {
   FadeIn,
-  FadeInDown,
   FadeInLeft,
   FadeInRight,
   FadeOut,

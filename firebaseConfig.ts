@@ -43,6 +43,7 @@ function createAuth(): Auth {
   if (Platform.OS === 'web') {
     return initializeAuth(app, { persistence: browserLocalPersistence });
   }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- см. комментарий выше
   const rn = require('firebase/auth') as {
     getReactNativePersistence: (storage: unknown) => never;
   };

@@ -115,6 +115,15 @@ type AppState = {
   deleteAccount: (password: string) => Promise<void>;
 };
 
+/**
+ * Название чата по заявке.
+ *
+ * Живёт вне компонента намеренно: внутри оно попало бы в зависимости
+ * эффекта и пересоздавалось бы каждую отрисовку, перезапуская подписки.
+ */
+const masterThreadName = (order?: { masterName?: string | null }) =>
+  (order?.masterName ? `Мастер ${order.masterName}` : 'Мастер');
+
 const AppStateContext = createContext<AppState | null>(null);
 
 export function useAppState() {
@@ -380,6 +389,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // выводятся из неё, и обе стороны видят одни и те же сообщения.
   const orderIdsKey = orders.map((o) => o.id).join(',');
 
+  // Подписка перезапускается только при смене набора заявок, а имя мастера
+  // появляется в уже существующей. Замыкание держало бы `orders` на момент
+  // подписки, и чат остался бы «Мастер» без имени.
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
+
   useEffect(() => {
     if (!uid) {
       setOrderThreads([]);
@@ -404,11 +419,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             time: v.time,
           };
         });
-        const order = orders.find((o) => o.id === orderId);
+        const order = ordersRef.current.find((o) => o.id === orderId);
         setOrderThreads((prev) => {
           const next: Thread = {
             id: orderId,
-            name: order?.masterName ? `Мастер ${order.masterName}` : 'Мастер',
+            name: masterThreadName(order),
             icon: '🧑‍🔧',
             unread: false,
             messages,
@@ -423,6 +438,24 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     return () => unsubs.forEach((u) => u());
   }, [uid, orderIdsKey]);
+
+  // Мастера назначили на существующую заявку: набор идентификаторов прежний,
+  // подписка не перезапустилась, а название чата уже другое. Без этого имя
+  // появлялось бы только со следующим сообщением.
+  useEffect(() => {
+    setOrderThreads((prev) => {
+      let changed = false;
+      const next = prev.map((t) => {
+        const name = masterThreadName(orders.find((o) => o.id === t.id));
+        if (t.name === name) return t;
+        changed = true;
+        return { ...t, name };
+      });
+      // Возвращаем прежний массив, если менять нечего: иначе каждая правка
+      // заявки перерисовывала бы список чатов
+      return changed ? next : prev;
+    });
+  }, [orders]);
 
   // ---------- обращение в поддержку ----------
   // Оно личное, поэтому остаётся в поддереве пользователя

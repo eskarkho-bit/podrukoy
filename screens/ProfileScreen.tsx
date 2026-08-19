@@ -344,7 +344,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   useEffect(() => {
     on.value = withTiming(value ? 1 : 0, { duration: 200 });
     knob.value = withSpring(value ? 18 : 2, springs.micro);
-  }, [value]);
+  }, [value, knob, on]);
 
   const trackStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(on.value, [0, 1], [t.toggleOff, t.accent]),

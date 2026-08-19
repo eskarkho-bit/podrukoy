@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, {
   FadeIn,
@@ -73,7 +73,9 @@ export function AdminScreen({ open, onClose }: Props) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const refreshStats = async () => {
+  // Сводка — пять агрегирующих запросов. Функцию закрепляем, иначе она
+  // пересоздавалась бы каждую отрисовку и эффект считал бы всё заново.
+  const refreshStats = useCallback(async () => {
     setRefreshing(true);
     try {
       setStats(await loadAdminStats());
@@ -82,12 +84,12 @@ export function AdminScreen({ open, onClose }: Props) {
       showNotice(firestoreErrorText(e, 'Не удалось посчитать сводку'));
     }
     setRefreshing(false);
-  };
+  }, [showNotice]);
 
   useEffect(() => {
     if (!open || !isAdmin) return;
     refreshStats();
-  }, [open, isAdmin]);
+  }, [open, isAdmin, refreshStats]);
 
   // Оверлей выезжает справа. Значения ведём из эффекта, а не изнутри стиля:
   // экран перерисовывается на каждом изменении очереди, и анимация в стиле
@@ -97,7 +99,7 @@ export function AdminScreen({ open, onClose }: Props) {
   useEffect(() => {
     shown.value = withTiming(open ? 1 : 0, { duration: 260 });
     slide.value = withSpring(open ? 0 : 60, springs.nav);
-  }, [open]);
+  }, [open, shown, slide]);
   const layerStyle = useAnimatedStyle(() => ({
     opacity: shown.value,
     transform: [{ translateX: slide.value }],
