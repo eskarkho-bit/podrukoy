@@ -29,8 +29,21 @@ jobs:
       - name: Установка зависимостей
         run: npm ci
 
+      # Линтер разбирает functions/ вместе с типами — без зависимостей функций
+      # firebase-admin становится `any`, и no-floating-promises молча замолкает
+      # вместо того, чтобы падать. Проверка была бы зелёной и бессмысленной.
+      - name: Зависимости функций (нужны линтеру)
+        run: npm ci
+        working-directory: functions
+
       - name: Типы
         run: npx tsc --noEmit
+
+      - name: Линтер
+        run: npm run lint
+
+      - name: Формат
+        run: npm run format:check
 
       - name: Тесты
         run: npm test -- --ci
