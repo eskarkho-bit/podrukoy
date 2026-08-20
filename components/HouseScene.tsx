@@ -397,7 +397,7 @@ export function HouseScene({
                   <RoomLayer
                     key={room.id}
                     room={room}
-                    dimmed={stage === 'room' && roomId !== room.id}
+                    hidden={stage === 'room' && roomId !== room.id}
                   />
                 ))}
               </Animated.View>
@@ -441,7 +441,7 @@ export function HouseScene({
                   room={room}
                   k={k}
                   index={i}
-                  mode={stage === 'room' ? (roomId === room.id ? 'hidden' : 'dim') : 'normal'}
+                  visible={stage !== 'room'}
                   onPress={() => onSelectRoom(room)}
                 />
               ))}
@@ -495,14 +495,16 @@ function Layer({ children }: { children: ReactNode }) {
   );
 }
 
-// Комната на плане: гаснет до 25%, когда выбрана другая
-function RoomLayer({ room, dimmed }: { room: Room; dimmed: boolean }) {
+// Комната на плане. Когда выбрана другая, эта уходит совсем, а не бледнеет:
+// полупрозрачные соседние комнаты просвечивали сквозь объекты выбранной и
+// читались как часть неё.
+function RoomLayer({ room, hidden }: { room: Room; hidden: boolean }) {
   // Анимация запускается из эффекта, а не изнутри useAnimatedStyle: там она
   // пересоздавалась бы на каждой перерисовке и могла оборваться на полпути
-  const opacity = useSharedValue(dimmed ? 0.25 : 1);
+  const opacity = useSharedValue(hidden ? 0 : 1);
   useEffect(() => {
-    opacity.value = withTiming(dimmed ? 0.25 : 1, { duration: 320 });
-  }, [dimmed, opacity]);
+    opacity.value = withTiming(hidden ? 0 : 1, { duration: 320 });
+  }, [hidden, opacity]);
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, style]} pointerEvents="none">
@@ -519,20 +521,26 @@ function RoomLayer({ room, dimmed }: { room: Room; dimmed: boolean }) {
   );
 }
 
+// Подпись комнаты на плане.
+//
+// Внутри комнаты не показывается ни одна: раньше соседние гасли до 25% и
+// оставались читаемыми — «Спальня» и «Гостиная» просвечивали сквозь мойку
+// и плиту, и было непонятно, где ты находишься. Промежуточного состояния
+// больше нет, поэтому и видимость теперь одним флагом.
 function RoomChip({
   room,
   k,
   index,
-  mode,
+  visible,
   onPress,
 }: {
   room: Room;
   k: number;
   index: number;
-  mode: 'normal' | 'dim' | 'hidden';
+  visible: boolean;
   onPress: () => void;
 }) {
-  const target = mode === 'normal' ? 1 : mode === 'dim' ? 0.25 : 0;
+  const target = visible ? 1 : 0;
   const opacity = useSharedValue(target);
   useEffect(() => {
     opacity.value = withTiming(target, { duration: 320 });
@@ -546,7 +554,7 @@ function RoomChip({
         { position: 'absolute', left: room.x * k - 40, top: room.y * k - 26, width: 80 },
         style,
       ]}
-      pointerEvents={mode === 'normal' ? 'auto' : 'none'}
+      pointerEvents={visible ? 'auto' : 'none'}
     >
       <PressableScale style={styles.roomChipInner} onPress={onPress}>
         <View style={styles.roomCircle}>
