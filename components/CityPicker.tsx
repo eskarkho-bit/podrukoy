@@ -4,7 +4,7 @@ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
 import { counted } from './format';
-import { searchSettlements, settlementKey, type Settlement } from './cities';
+import { OPEN_SETTLEMENTS, searchSettlements, settlementKey, type Settlement } from './cities';
 
 // Выбор населённого пункта.
 //
@@ -12,8 +12,20 @@ import { searchSettlements, settlementKey, type Settlement } from './cities';
 // написаний, и мастер из «Грозного» не видел заявок из «грозного». Раз обе
 // стороны выбирают из одного списка, совпадение гарантировано.
 //
-// С поиском, потому что пунктов около полутора сотен: пролистывать их —
-// не выбор, а наказание.
+// С поиском, потому что в полном списке около полутора сотен пунктов, и он
+// ещё пригодится: сейчас выбор сужен до открытых городов, но список цел.
+
+/**
+ * Почему в списке мало пунктов.
+ *
+ * Человек, набравший «Аргун» и не нашедший его, иначе решит, что ошибся
+ * в написании, и будет пробовать снова. Текст считается от открытого
+ * списка — открыли город, надпись поменялась сама.
+ */
+const openNote =
+  OPEN_SETTLEMENTS.length === 1
+    ? `Пока мы работаем только в одном городе — ${OPEN_SETTLEMENTS[0]?.name ?? ''}.`
+    : `Пока мы работаем в ${counted(OPEN_SETTLEMENTS.length, 'городе', 'городах', 'городах')}.`;
 
 type Props = {
   onClose: () => void;
@@ -37,6 +49,15 @@ export function CityPicker(props: Props) {
 
   const isPicked = (key: string) =>
     props.mode === 'multi' ? props.values.includes(key) : props.value === key;
+
+  const Note = () => (
+    <View style={styles.noteWrap}>
+      <Text style={styles.noteTitle}>{openNote}</Text>
+      <Text style={styles.noteText}>
+        Другие населённые пункты появятся в следующих обновлениях.
+      </Text>
+    </View>
+  );
 
   const renderItem = ({ item }: { item: Settlement }) => {
     const key = settlementKey(item.name);
@@ -93,10 +114,8 @@ export function CityPicker(props: Props) {
       {found.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>Ничего не нашлось</Text>
-          <Text style={styles.emptyText}>
-            Проверьте написание. Если вашего населённого пункта нет в списке, напишите в поддержку —
-            добавим.
-          </Text>
+          <Text style={styles.emptyText}>Проверьте написание.</Text>
+          <Note />
         </View>
       ) : (
         // Список длинный, поэтому FlatList: рисуются только видимые строки
@@ -107,6 +126,7 @@ export function CityPicker(props: Props) {
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           initialNumToRender={14}
+          ListFooterComponent={Note}
         />
       )}
 
@@ -205,6 +225,20 @@ const makeStyles = (t: Palette) =>
       textAlign: 'center',
       marginTop: 6,
     },
+    // Под списком, а не над ним: сначала выбор, потом объяснение,
+    // почему выбор такой короткий
+    noteWrap: {
+      marginTop: 14,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+      gap: 4,
+    },
+    noteTitle: { fontSize: 12.5, fontWeight: '800', color: t.text, lineHeight: 18 },
+    noteText: { fontSize: 12.5, fontWeight: '600', color: t.textMuted, lineHeight: 18 },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

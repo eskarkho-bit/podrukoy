@@ -9,7 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { CATEGORIES, type Category } from './serviceOptions';
-import { SETTLEMENTS, settlementKey } from './cities';
+import { isSettlementOpen, OPEN_SETTLEMENTS, settlementKey } from './cities';
 
 // Сводка для модератора.
 //
@@ -91,16 +91,26 @@ export async function loadAdminStats(): Promise<AdminStats> {
     rejected,
     coverage: {
       missingCategories: anySpecialist ? [] : CATEGORIES.filter((c) => !coveredCategories.has(c)),
-      coveredSettlements: anyEverywhere ? SETTLEMENTS.length : coveredCities.size,
-      totalSettlements: SETTLEMENTS.length,
+      // Считаем от открытых пунктов, а не от всего списка: «1 из 160» говорил
+      // бы о дыре там, где заявок и не бывает. У мастера при этом может
+      // остаться город, выбранный до сужения, — его в знаменатель не берём.
+      coveredSettlements: anyEverywhere
+        ? OPEN_SETTLEMENTS.length
+        : [...coveredCities].filter(isSettlementOpen).length,
+      totalSettlements: OPEN_SETTLEMENTS.length,
       anyEverywhere,
       coveredKeys: [...coveredCities],
     },
   };
 }
 
-/** Города республиканского значения — по ним понятнее всего, где пусто. */
-export const MAIN_CITIES = SETTLEMENTS.filter((s) => s.kind === 'город').map((s) => ({
+/**
+ * Города, по которым показываем, где пусто.
+ *
+ * Только открытые: строка «Аргун — нет мастеров» про город, куда нельзя
+ * подать заявку, — не сигнал, а шум. Откроется город — появится и здесь.
+ */
+export const MAIN_CITIES = OPEN_SETTLEMENTS.map((s) => ({
   name: s.name,
   key: settlementKey(s.name),
 }));

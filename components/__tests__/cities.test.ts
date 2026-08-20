@@ -1,5 +1,9 @@
 import {
   DISTRICTS,
+  isSettlementOpen,
+  matchesSettlement,
+  OPEN_SETTLEMENT_KEYS,
+  OPEN_SETTLEMENTS,
   searchSettlements,
   SETTLEMENTS,
   settlementByKey,
@@ -61,39 +65,75 @@ describe('settlementKey', () => {
   });
 });
 
-describe('поиск', () => {
-  test('пустой запрос отдаёт весь список', () => {
-    expect(searchSettlements('')).toHaveLength(SETTLEMENTS.length);
-    expect(searchSettlements('   ')).toHaveLength(SETTLEMENTS.length);
+// Логику сопоставления проверяем на полном списке, а не на открытом. Дефисы
+// и «ё» встречаются как раз в закрытых пока названиях, и, открывая их, мы
+// должны знать, что поиск по ним работает, — а не выяснять это на людях.
+describe('сопоставление с запросом', () => {
+  const matching = (q: string) =>
+    SETTLEMENTS.filter((s) => matchesSettlement(s, q)).map((s) => s.name);
+
+  test('пустой запрос совпадает со всеми', () => {
+    expect(matching('')).toHaveLength(SETTLEMENTS.length);
+    expect(matching('   ')).toHaveLength(SETTLEMENTS.length);
   });
 
-  test('находит по началу названия', () => {
-    const found = searchSettlements('гроз').map((s) => s.name);
-    expect(found).toContain('Грозный');
-  });
-
-  test('находит по части названия', () => {
-    expect(searchSettlements('мартан').map((s) => s.name)).toContain('Урус-Мартан');
+  test('находит по началу и по части названия', () => {
+    expect(matching('гроз')).toContain('Грозный');
+    expect(matching('мартан')).toContain('Урус-Мартан');
   });
 
   // Дефис на телефонной клавиатуре неудобен, и человек его пропустит
   test('находит без дефиса', () => {
-    expect(searchSettlements('урусмартан').map((s) => s.name)).toContain('Урус-Мартан');
-    expect(searchSettlements('ачхоймартан').map((s) => s.name)).toContain('Ачхой-Мартан');
+    expect(matching('урусмартан')).toContain('Урус-Мартан');
+    expect(matching('ачхоймартан')).toContain('Ачхой-Мартан');
   });
 
   test('находит по району', () => {
-    const found = searchSettlements('шелковской');
+    const found = SETTLEMENTS.filter((s) => matchesSettlement(s, 'шелковской'));
     expect(found.length).toBeGreaterThan(3);
     found.forEach((s) => expect(s.district).toBe('Шелковской'));
   });
 
   test('регистр и ё не мешают', () => {
-    expect(searchSettlements('ЧЕРВЛЕННАЯ').map((s) => s.name)).toContain('Червлённая');
+    expect(matching('ЧЕРВЛЕННАЯ')).toContain('Червлённая');
   });
 
   test('несуществующее не находится', () => {
-    expect(searchSettlements('владивосток')).toHaveLength(0);
+    expect(matching('владивосток')).toHaveLength(0);
+  });
+});
+
+// Список сознательно сужен до открытых городов, а полный оставлен: по нему
+// разбираются подписи у мастеров и заявок, сохранённых до сужения.
+describe('открытые пункты', () => {
+  test('выбор идёт только по открытым', () => {
+    expect(searchSettlements('')).toEqual(OPEN_SETTLEMENTS);
+    expect(OPEN_SETTLEMENTS.length).toBeGreaterThan(0);
+  });
+
+  test('открыт Грозный', () => {
+    expect(searchSettlements('').map((s) => s.name)).toContain('Грозный');
+    expect(isSettlementOpen('грозный')).toBe(true);
+  });
+
+  test('закрытый город не предлагается, хотя в списке есть', () => {
+    expect(searchSettlements('аргун')).toHaveLength(0);
+    expect(isSettlementOpen('аргун')).toBe(false);
+    // Но из запаса он никуда не делся — открыть можно одной строкой
+    expect(SETTLEMENTS.map((s) => s.name)).toContain('Аргун');
+  });
+
+  test('каждый открытый ключ есть в полном списке', () => {
+    OPEN_SETTLEMENT_KEYS.forEach((key) => {
+      expect(settlementByKey(key)).not.toBeNull();
+    });
+  });
+
+  // Мастер мог выбрать город до сужения. Показать ему сырой ключ вместо
+  // названия — значит наказать за наше решение.
+  test('подпись закрытого города всё равно человеческая', () => {
+    expect(settlementLabel('аргун')).toBe('Аргун');
+    expect(settlementLabel('урус-мартан')).toBe('Урус-Мартан');
   });
 });
 

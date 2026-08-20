@@ -19,6 +19,21 @@ export type Settlement = {
   kind: SettlementKind;
 };
 
+/**
+ * Что открыто для выбора прямо сейчас.
+ *
+ * Список ниже полный и остаётся полным намеренно — по нему разбираются
+ * подписи у мастеров и заявок, сохранённых раньше. Ограничивается только
+ * выбор нового: ликвидность на маркетплейсе местная, и сорок мастеров в одном
+ * городе — это работающий рынок, а те же сорок на сто шестьдесят пунктов —
+ * пусто везде.
+ *
+ * ОТКРЫТЬ СЛЕДУЮЩИЙ ГОРОД — дописать сюда его ключ (строчными, «ё» → «е»).
+ * Больше ничего менять не надо: и поиск, и подписи, и сводка модерации
+ * считаются от этого списка.
+ */
+export const OPEN_SETTLEMENT_KEYS = ['грозный'];
+
 // Порядок внутри района не важен — список всё равно показывается поиском.
 // Города вынесены наверх: с них начинается любой запуск.
 export const SETTLEMENTS: Settlement[] = [
@@ -229,25 +244,53 @@ export function settlementKey(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ').replace(/ё/g, 'е');
 }
 
-const searchable = SETTLEMENTS.map((s) => ({
-  settlement: s,
-  haystack: `${settlementKey(s.name)} ${settlementKey(s.district)}`,
-  // Дефис в названиях частый, а на клавиатуре неудобен: «урусмартан»
-  // должен находить «Урус-Мартан»
-  compact: settlementKey(s.name).replace(/-/g, ''),
-}));
+/** Открытые для выбора пункты — в том же порядке, что и в полном списке. */
+export const OPEN_SETTLEMENTS: Settlement[] = SETTLEMENTS.filter((s) =>
+  OPEN_SETTLEMENT_KEYS.includes(settlementKey(s.name)),
+);
 
-/** Поиск по названию или району. Пустой запрос отдаёт весь список. */
-export function searchSettlements(query: string): Settlement[] {
-  const q = settlementKey(query);
-  if (!q) return SETTLEMENTS;
-  const compact = q.replace(/-/g, '');
-  return searchable
-    .filter((s) => s.haystack.includes(q) || s.compact.includes(compact))
-    .map((s) => s.settlement);
+/** Можно ли выбрать этот пункт сейчас. Сохранённый раньше может быть и закрыт. */
+export function isSettlementOpen(key: string): boolean {
+  return OPEN_SETTLEMENT_KEYS.includes(key);
 }
 
-/** Находит населённый пункт по сохранённому ключу. */
+/**
+ * Совпадает ли пункт с запросом. Пустой запрос совпадает со всеми.
+ *
+ * Вынесено из searchSettlements намеренно. Поиск ходит только по открытым
+ * пунктам, а проверять логику надо на всех: дефисы и «ё» встречаются как раз
+ * в закрытых пока названиях — «Урус-Мартан», «Червлённая». Открыв их, мы
+ * должны знать, что поиск по ним цел, а не выяснять это на людях.
+ */
+export function matchesSettlement(s: Settlement, query: string): boolean {
+  const q = settlementKey(query);
+  if (!q) return true;
+  const haystack = `${settlementKey(s.name)} ${settlementKey(s.district)}`;
+  // Дефис в названиях частый, а на клавиатуре неудобен: «урусмартан»
+  // должен находить «Урус-Мартан»
+  const compact = settlementKey(s.name).replace(/-/g, '');
+  return haystack.includes(q) || compact.includes(q.replace(/-/g, ''));
+}
+
+/**
+ * Поиск по названию или району среди открытых пунктов.
+ *
+ * Показать в выборе город, где заявку никто не увидит, — значит пообещать
+ * то, чего нет. Пустой запрос отдаёт весь открытый список.
+ *
+ * Считается на каждый запрос, без заранее собранной таблицы: открытых пунктов
+ * единицы, и экономить тут нечего.
+ */
+export function searchSettlements(query: string): Settlement[] {
+  return OPEN_SETTLEMENTS.filter((s) => matchesSettlement(s, query));
+}
+
+/**
+ * Находит населённый пункт по сохранённому ключу.
+ *
+ * Ищет по полному списку, а не по открытому: у мастера мог остаться город,
+ * выбранный до сужения, и подпись «Аргун» лучше, чем сырой ключ «аргун».
+ */
 export function settlementByKey(key: string): Settlement | null {
   return SETTLEMENTS.find((s) => settlementKey(s.name) === key) ?? null;
 }
