@@ -253,6 +253,13 @@ function OfferCard({ offer, onPick }: { offer: Offer; onPick: () => void }) {
   const { mode } = useTheme();
   const styles = themed[mode];
   const [confirming, setConfirming] = useState(false);
+  // Профиль мастера раскрывается на месте, а не отдельным экраном: шторка
+  // поверх шторки перекрыла бы кнопку выбора — то, ради чего всё открыто
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  // Имя из предложения, фамилия из анкеты: у старых анкет фамилии нет,
+  // и имя не должно превращаться в «Иван undefined»
+  const fullName = [offer.masterName, offer.lastName].filter(Boolean).join(' ');
 
   return (
     <Animated.View
@@ -261,16 +268,43 @@ function OfferCard({ offer, onPick }: { offer: Offer; onPick: () => void }) {
       style={styles.offerCard}
     >
       <View style={styles.offerHead}>
-        <View style={styles.offerWho}>
-          <Text style={styles.offerName}>{offer.masterName}</Text>
+        <Pressable style={styles.offerWho} onPress={() => setProfileOpen((v) => !v)}>
+          <Text style={styles.offerName}>{fullName}</Text>
           <Text style={styles.offerRating}>
             {offer.rating != null
               ? `★ ${ratingText(offer.rating)} · ${counted(offer.reviewsCount, 'отзыв', 'отзыва', 'отзывов')}`
               : 'Пока без отзывов'}
           </Text>
-        </View>
+          <Text style={styles.offerProfileToggle}>
+            {profileOpen ? 'Свернуть профиль' : 'Профиль мастера ›'}
+          </Text>
+        </Pressable>
         <Text style={styles.offerPriceSmall}>{rub(offer.price)}</Text>
       </View>
+
+      {profileOpen && (
+        <Animated.View entering={FadeIn.duration(220)} style={styles.profileBox}>
+          <ProfileRow
+            label="Выполнено заказов"
+            value={
+              offer.completedOrders > 0
+                ? counted(offer.completedOrders, 'заказ', 'заказа', 'заказов')
+                : 'пока нет'
+            }
+          />
+          <ProfileRow
+            label="Стаж"
+            value={
+              offer.experienceYears == null
+                ? 'не указан'
+                : offer.experienceYears === 0
+                  ? 'меньше года'
+                  : counted(offer.experienceYears, 'год', 'года', 'лет')
+            }
+          />
+          <ProfileRow label="Образование" value={offer.education ?? 'не указано'} />
+        </Animated.View>
+      )}
 
       {offer.comment ? <Text style={styles.offerComment}>{offer.comment}</Text> : null}
 
@@ -288,6 +322,17 @@ function OfferCard({ offer, onPick }: { offer: Offer; onPick: () => void }) {
         </PressableScale>
       </View>
     </Animated.View>
+  );
+}
+
+function ProfileRow({ label, value }: { label: string; value: string }) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  return (
+    <View style={styles.profileRow}>
+      <Text style={styles.profileLabel}>{label}</Text>
+      <Text style={styles.profileValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -411,7 +456,26 @@ const makeStyles = (t: Palette) =>
     offerWho: { flex: 1 },
     offerName: { fontSize: 14, fontWeight: '800', color: t.text },
     offerRating: { fontSize: 11.5, fontWeight: '700', color: t.textMuted, marginTop: 2 },
+    offerProfileToggle: { fontSize: 11.5, fontWeight: '800', color: t.accent, marginTop: 4 },
     offerPriceSmall: { fontSize: 19, fontWeight: '800', color: t.text },
+    profileBox: {
+      backgroundColor: t.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      marginTop: 10,
+    },
+    profileRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 6,
+    },
+    profileLabel: { fontSize: 12, fontWeight: '700', color: t.textMuted },
+    profileValue: { fontSize: 12.5, fontWeight: '800', color: t.text, flexShrink: 1 },
     offerComment: {
       fontSize: 12.5,
       fontWeight: '600',

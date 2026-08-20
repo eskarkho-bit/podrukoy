@@ -21,6 +21,7 @@ import { db } from '../firebaseConfig';
 import { ChatMessage, Thread } from '../screens/MessagesScreen';
 import { Offer, Order } from '../screens/OrdersScreen';
 import { cityKey } from './serviceOptions';
+import { educationFrom } from './education';
 import { palettes, ThemeContext, ThemeMode } from '../theme';
 import { authErrorText, useAuth } from './AuthState';
 import { firestoreErrorText } from './firestoreError';
@@ -334,10 +335,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // предложение перебить нельзя, а заявка остаётся открытой, пока клиент
   // не выбрал, — в этом и смысл: цены конкурируют.
   const [offersByOrder, setOffersByOrder] = useState<Record<string, Offer[]>>({});
-  // Рейтинг мастера лежит в его анкете, а не в предложении: иначе мастер мог
-  // бы прислать любые звёзды вместе с ценой
+  // Профиль мастера лежит в его анкете, а не в предложении: иначе мастер мог
+  // бы прислать любые звёзды и стаж вместе с ценой
   const [masterCards, setMasterCards] = useState<
-    Record<string, { rating: number | null; reviewsCount: number }>
+    Record<
+      string,
+      {
+        rating: number | null;
+        reviewsCount: number;
+        lastName: string;
+        experienceYears: number | null;
+        education: string | null;
+        completedOrders: number;
+      }
+    >
   >({});
   const masterCardsAsked = useRef(new Set<string>());
 
@@ -350,10 +361,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setMasterCards((prev) => ({
           ...prev,
           [masterId]: {
-            // Агрегат считает Cloud Function: пока её нет, рейтинга просто
+            // Агрегаты считает Cloud Function: пока её нет, рейтинга просто
             // не будет — врать про «5.0» хуже, чем молчать
             rating: typeof v?.rating === 'number' ? v.rating : null,
             reviewsCount: typeof v?.reviewsCount === 'number' ? v.reviewsCount : 0,
+            lastName: typeof v?.lastName === 'string' ? v.lastName : '',
+            experienceYears: typeof v?.experienceYears === 'number' ? v.experienceYears : null,
+            education: educationFrom(v?.education),
+            completedOrders: typeof v?.completedOrders === 'number' ? v.completedOrders : 0,
           },
         }));
       })
@@ -391,8 +406,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               price: v.price,
               comment: v.comment ?? '',
               status: v.status === 'accepted' ? 'accepted' : 'pending',
+              // Профиль подошьётся из masterCards, когда анкета догрузится
               rating: null,
               reviewsCount: 0,
+              lastName: '',
+              experienceYears: null,
+              education: null,
+              completedOrders: 0,
             };
           });
           setOffersByOrder((prev) => ({ ...prev, [orderId]: list }));
@@ -958,18 +978,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const hasUnreadMessages = threads.some((t) => t.unread);
   const ordersActive = orders.filter((o) => !CLOSED.includes(o.status)).length;
 
-  // Предложения и рейтинги живут отдельными подписками — экрану они нужны
-  // внутри заявки, поэтому сшиваем их здесь, а не в UI
+  // Предложения и профили мастеров живут отдельными подписками — экрану они
+  // нужны внутри заявки, поэтому сшиваем их здесь, а не в UI
   const ordersWithOffers: Order[] = orders.map((o) => {
     const list = offersByOrder[o.id];
     if (!list?.length) return o;
     return {
       ...o,
-      offers: list.map((offer) => ({
-        ...offer,
-        rating: masterCards[offer.masterId]?.rating ?? null,
-        reviewsCount: masterCards[offer.masterId]?.reviewsCount ?? 0,
-      })),
+      offers: list.map((offer) => {
+        const card = masterCards[offer.masterId];
+        return {
+          ...offer,
+          rating: card?.rating ?? null,
+          reviewsCount: card?.reviewsCount ?? 0,
+          lastName: card?.lastName ?? '',
+          experienceYears: card?.experienceYears ?? null,
+          education: card?.education ?? null,
+          completedOrders: card?.completedOrders ?? 0,
+        };
+      }),
     };
   });
 

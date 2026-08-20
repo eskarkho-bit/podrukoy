@@ -35,6 +35,13 @@ export type Offer = {
   // не посчитан (его ведёт Cloud Function).
   rating: number | null;
   reviewsCount: number;
+  // Остальной профиль — из анкеты мастера, а не из предложения: в предложение
+  // он написал бы что угодно, а анкету видит модератор при проверке
+  lastName: string;
+  experienceYears: number | null;
+  education: string | null;
+  // Считает сервер по завершённым заявкам — как rating
+  completedOrders: number;
 };
 
 // Согласование цены у заявок, созданных до появления offers: предложение

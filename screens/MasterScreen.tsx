@@ -56,6 +56,7 @@ import { firestoreErrorText } from '../components/firestoreError';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { settlementLabel } from '../components/cities';
+import { EDUCATION_LEVELS, educationFrom, type EducationLevel } from '../components/education';
 import { LegalScreen } from './LegalScreen';
 import {
   applicationFrom,
@@ -158,15 +159,23 @@ type Props = {
 
 type MasterProfile = {
   name: string;
+  // Фамилия отдельно от имени: вместе они подписывают профиль, который клиент
+  // видит у предложения. У старых анкет её нет.
+  lastName: string;
   // Куда мастер готов выезжать. Пустой массив — вся республика.
   // У анкет, заведённых до множественного выбора, читается прежнее поле city.
   cities: string[];
   skills: Category[];
+  // Со слов мастера — проверить стаж и образование всё равно нечем,
+  // но клиенту при выборе они помогают
+  experienceYears: number | null;
+  education: EducationLevel | null;
   // Ставит только модератор. Без него заявок не видно — это и есть проверка.
   verified: boolean;
-  // Считает Cloud Function по отзывам — сам мастер эти поля переписать не может
+  // Считает Cloud Function — сам мастер эти поля переписать не может
   rating: number | null;
   reviewsCount: number;
+  completedOrders: number;
 };
 
 // Моё предложение по чужой пока заявке. Название заявки лежит копией в самом
@@ -227,6 +236,7 @@ export function MasterScreen({ open, onClose }: Props) {
           snap.exists() && v
             ? {
                 name: String(v.name ?? ''),
+                lastName: typeof v.lastName === 'string' ? v.lastName : '',
                 cities: Array.isArray(v.cities)
                   ? (v.cities as string[])
                   : // Анкеты до множественного выбора: один город строкой
@@ -234,9 +244,12 @@ export function MasterScreen({ open, onClose }: Props) {
                     ? [String(v.city)]
                     : [],
                 skills: Array.isArray(v.skills) ? (v.skills as Category[]) : [],
+                experienceYears: typeof v.experienceYears === 'number' ? v.experienceYears : null,
+                education: educationFrom(v.education),
                 verified: v.verified === true,
                 rating: typeof v.rating === 'number' ? v.rating : null,
                 reviewsCount: typeof v.reviewsCount === 'number' ? v.reviewsCount : 0,
+                completedOrders: typeof v.completedOrders === 'number' ? v.completedOrders : 0,
               }
             : null,
         );
@@ -658,8 +671,15 @@ function MasterApplicationScreen({
   const rejected = application.status === 'rejected';
 
   const [name, setName] = useState(profile?.name || defaultName);
+  const [lastName, setLastName] = useState(profile?.lastName ?? '');
   const [cities, setCities] = useState<string[]>(profile?.cities ?? []);
   const [skills, setSkills] = useState<Category[]>(profile?.skills ?? []);
+  // Стаж редактируется строкой: пустое поле означает «не указан», а ноль —
+  // честное «меньше года», и это разные вещи
+  const [experienceDraft, setExperienceDraft] = useState(
+    profile?.experienceYears != null ? String(profile.experienceYears) : '',
+  );
+  const [education, setEducation] = useState<EducationLevel | null>(profile?.education ?? null);
   const [phone, setPhone] = useState(application.phone);
   const [about, setAbout] = useState(application.about);
   const [photoUri, setPhotoUri] = useState<string | null>(application.photoUrl);
@@ -773,14 +793,21 @@ function MasterApplicationScreen({
     setError(null);
     setLoading(true);
     try {
+      const experienceYears = /^\d+$/.test(experienceDraft.trim())
+        ? parseInt(experienceDraft.trim(), 10)
+        : null;
+
       // Документ masters/{uid} — это роль мастера. Флаг verified сюда не
       // пишем: правила его отсюда и не пропустят, ставит его модератор.
       await setDoc(
         doc(db, 'masters', myUid),
         {
           name: name.trim(),
+          lastName: lastName.trim(),
           cities,
           skills,
+          experienceYears,
+          education,
           createdAt: serverTimestamp(),
         },
         { merge: true },
@@ -846,7 +873,7 @@ function MasterApplicationScreen({
           </Animated.Text>
 
           <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.loginCard}>
-            <SummaryRow label="Имя" value={name} />
+            <SummaryRow label="Имя" value={[name, lastName].filter(Boolean).join(' ')} />
             <SummaryRow
               label="Где работает"
               value={cities.length ? cities.map(settlementLabel).join(', ') : 'вся республика'}
@@ -914,10 +941,23 @@ function MasterApplicationScreen({
             style={styles.fieldInput}
             value={name}
             onChangeText={setName}
-            placeholder="Иван Петров"
+            placeholder="Иван"
             placeholderTextColor={t.textMuted}
             editable={!loading}
           />
+
+          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Фамилия</Text>
+          <TextInput
+            style={styles.fieldInput}
+            value={lastName}
+            onChangeText={setLastName}
+            placeholder="Петров"
+            placeholderTextColor={t.textMuted}
+            editable={!loading}
+          />
+          <Text style={styles.fieldHint}>
+            Имя и фамилию клиент видит в вашем профиле, когда выбирает мастера
+          </Text>
 
           <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Где работаете</Text>
           {/* Выбор из списка, а не ввод: заявка находит мастера сравнением
@@ -961,6 +1001,40 @@ function MasterApplicationScreen({
             })}
           </View>
           <Text style={styles.fieldHint}>Ничего не выбрано — в ленте будут заявки всех видов</Text>
+
+          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Стаж, лет</Text>
+          <TextInput
+            style={styles.fieldInput}
+            value={experienceDraft}
+            onChangeText={(v) => setExperienceDraft(v.replace(/\D/g, ''))}
+            placeholder="5"
+            placeholderTextColor={t.textMuted}
+            keyboardType="number-pad"
+            editable={!loading}
+            maxLength={2}
+          />
+          <Text style={styles.fieldHint}>
+            Со слов — мы не проверяем, но клиент видит стаж рядом с вашей ценой
+          </Text>
+
+          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Образование</Text>
+          {/* Закрытый список по той же причине, что и специальности: свободный
+              текст у каждого писался бы по-своему */}
+          <View style={styles.chipsWrap}>
+            {EDUCATION_LEVELS.map((level) => {
+              const on = education === level;
+              return (
+                <PressableScale
+                  key={level}
+                  style={[styles.skillChip, on && styles.skillChipOn]}
+                  onPress={() => setEducation(on ? null : level)}
+                >
+                  <Text style={[styles.skillChipText, on && styles.skillChipTextOn]}>{level}</Text>
+                </PressableScale>
+              );
+            })}
+          </View>
+          <Text style={styles.fieldHint}>Можно не указывать — в профиле будет «не указано»</Text>
 
           {/* Всё, что ниже, нужно только для проверки: у проверенного мастера
               эти данные уже приняты и больше не спрашиваются */}
@@ -1209,9 +1283,18 @@ function JobList({
           Я мастер
         </Animated.Text>
         <Animated.Text entering={FadeInDown.delay(40).duration(380)} style={styles.headerSub}>
-          {profile.rating != null
-            ? `★ ${ratingText(profile.rating)} · ${counted(profile.reviewsCount, 'отзыв', 'отзыва', 'отзывов')}`
-            : email}
+          {/* Рейтинг и счётчик заказов считает сервер; пока ни того ни
+              другого нет, подписываем шапку почтой — пустой она не бывает */}
+          {[
+            profile.rating != null
+              ? `★ ${ratingText(profile.rating)} · ${counted(profile.reviewsCount, 'отзыв', 'отзыва', 'отзывов')}`
+              : null,
+            profile.completedOrders > 0
+              ? counted(profile.completedOrders, 'заказ', 'заказа', 'заказов')
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' · ') || email}
         </Animated.Text>
 
         <Animated.View entering={FadeInDown.delay(80).duration(360)} style={styles.statsRow}>

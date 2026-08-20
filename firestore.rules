@@ -104,8 +104,9 @@ service cloud.firestore {
     match /masters/{uid} {
 
       // Поля, которые считает сервер, а не их владелец: rating и reviewsCount
-      // пересчитывает Cloud Function по отзывам, verified проставляет
-      // модерация. Иначе мастер нарисовал бы себе пятёрки сам.
+      // пересчитывает Cloud Function по отзывам, completedOrders — по
+      // завершённым заявкам, verified проставляет модерация. Иначе мастер
+      // нарисовал бы себе пятёрки и сотню заказов сам.
       function keepsServerField(field, fallback) {
         return request.resource.data.get(field, fallback) == resource.data.get(field, fallback);
       }
@@ -113,7 +114,9 @@ service cloud.firestore {
       allow read: if authed();
 
       allow create: if isOwner(uid)
-        && !request.resource.data.keys().hasAny(['verified', 'rating', 'reviewsCount']);
+        && !request.resource.data.keys().hasAny([
+          'verified', 'rating', 'reviewsCount', 'completedOrders',
+        ]);
 
       // Отказаться от собственного допуска можно самому — понижение прав ничем
       // не грозит. Нужно при отзыве согласия на фотографию: без неё личность
@@ -127,7 +130,8 @@ service cloud.firestore {
       allow update: if isOwner(uid)
         && verifiedKeptOrDropped()
         && keepsServerField('rating', 0)
-        && keepsServerField('reviewsCount', 0);
+        && keepsServerField('reviewsCount', 0)
+        && keepsServerField('completedOrders', 0);
 
       // Модератор трогает ровно один флаг — тот, что открывает доступ к заявкам
       allow update: if isAdmin()

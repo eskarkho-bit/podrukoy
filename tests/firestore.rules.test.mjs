@@ -548,11 +548,34 @@ describe('Отзывы и рейтинг', () => {
     );
   });
 
+  test('мастер не может накрутить себе счётчик заказов', async () => {
+    await assertFails(updateDoc(doc(as('master1'), 'masters/master1'), { completedOrders: 100 }));
+    await assertFails(
+      setDoc(doc(as('newbie'), 'masters/newbie'), {
+        name: 'Новичок',
+        skills: [],
+        completedOrders: 100,
+      }),
+    );
+  });
+
   test('обычные поля анкеты мастер меняет свободно', async () => {
     await assertSucceeds(
       updateDoc(doc(as('master1'), 'masters/master1'), {
         city: 'казань',
         skills: ['сантехника'],
+      }),
+    );
+  });
+
+  // Профиль, который видит клиент у предложения: фамилия, стаж, образование.
+  // Всё со слов мастера — проверять нечем, но и вреда от них нет.
+  test('фамилию, стаж и образование мастер пишет сам', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('master1'), 'masters/master1'), {
+        lastName: 'Петров',
+        experienceYears: 7,
+        education: 'среднее специальное',
       }),
     );
   });

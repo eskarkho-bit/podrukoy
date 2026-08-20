@@ -10,6 +10,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
 import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
+import { recountCompletedOrders } from './masterStats';
 
 export { createCardBinding, yookassaWebhook } from './payments';
 export { onDeletionRequested } from './deletion';
@@ -195,6 +196,8 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
       typeof after.agreedPrice === 'number' ? after.agreedPrice : 0,
     );
     if (masterId) {
+      // Счётчик заказов в анкете — клиент видит его в профиле мастера
+      await recountCompletedOrders(masterId);
       await pushTo([masterId], 'Клиент подтвердил работу', title, { href: '/profile' });
     }
     return;
