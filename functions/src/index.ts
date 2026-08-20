@@ -16,7 +16,7 @@ export { onDeletionRequested } from './deletion';
 export { onMasterDeleted, onMasterUnverified } from './masterExit';
 export { reconcile } from './reconcile';
 
-// Серверная часть «Подрукой». Здесь живёт всё, чему нельзя доверять клиенту:
+// Серверная часть «domio». Здесь живёт всё, чему нельзя доверять клиенту:
 // рассылка уведомлений (клиент не вправе читать чужие токены) и пересчёт
 // рейтинга мастера (иначе он поставил бы себе любой).
 //

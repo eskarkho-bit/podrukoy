@@ -131,7 +131,7 @@ export function AuthScreen() {
           entering={FadeInDown.delay(60).duration(380)}
           style={styles.title}
         >
-          {isRegister ? 'Регистрация' : 'Подрукой'}
+          {isRegister ? 'Регистрация' : 'domio'}
         </Animated.Text>
         <Animated.Text
           key={`sub-${mode}`}
@@ -140,7 +140,7 @@ export function AuthScreen() {
         >
           {isRegister
             ? 'Создайте аккаунт — и вызывайте мастера в пару касаний.'
-            : 'Мастер по дому — под рукой. Войдите, чтобы продолжить.'}
+            : 'Мастер, которого проверили. Войдите, чтобы продолжить.'}
         </Animated.Text>
 
         <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.card}>

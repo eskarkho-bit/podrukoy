@@ -351,8 +351,8 @@ export const createCardBinding = onCall(async (request) => {
         amount: { value: HOLD_AMOUNT, currency: 'RUB' },
         capture: true,
         save_payment_method: true,
-        description: 'Подтверждение личности мастера «Подрукой»',
-        confirmation: { type: 'redirect', return_url: 'podrukoy://card-bound' },
+        description: 'Подтверждение личности мастера «domio»',
+        confirmation: { type: 'redirect', return_url: 'domio://card-bound' },
         metadata: { uid, purpose: 'master-verification' },
       },
     });

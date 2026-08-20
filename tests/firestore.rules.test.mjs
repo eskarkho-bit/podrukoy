@@ -27,7 +27,7 @@ import {
 } from 'firebase/firestore';
 
 // Префикс demo- гарантирует, что обращения никогда не уйдут в настоящий проект
-const PROJECT_ID = 'demo-podrukoy';
+const PROJECT_ID = 'demo-domio';
 
 let env;
 

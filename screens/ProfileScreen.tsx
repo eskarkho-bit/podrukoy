@@ -255,7 +255,7 @@ export function ProfileScreen({
           style={styles.row}
         >
           <Text style={styles.rowLabel}>О приложении</Text>
-          <Text style={styles.rowValue}>Подрукой · v1.0.0</Text>
+          <Text style={styles.rowValue}>domio · v1.0.0</Text>
         </Animated.View>
 
         {/* Выход и удаление аккаунта. Удаление обязано быть здесь, а не письмом

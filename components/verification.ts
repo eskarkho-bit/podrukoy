@@ -107,10 +107,10 @@ export async function startCardBinding(): Promise<CardBindingResult> {
     if (data?.alreadyBound) return 'already-bound';
     if (!data?.confirmationUrl) return 'failed';
 
-    // Возврат в приложение по схеме podrukoy:// — она объявлена в app.json
+    // Возврат в приложение по схеме domio:// — она объявлена в app.json
     const result = await WebBrowser.openAuthSessionAsync(
       data.confirmationUrl,
-      'podrukoy://card-bound',
+      'domio://card-bound',
     );
     if (result.type !== 'success') return 'cancelled';
 

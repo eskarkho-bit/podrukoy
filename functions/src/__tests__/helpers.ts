@@ -8,7 +8,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 // в тестах невозможен и не нужен.
 
 /** Тот же демо-проект, что и в тестах правил: в настоящий он не ходит. */
-export const PROJECT_ID = 'demo-podrukoy';
+export const PROJECT_ID = 'demo-domio';
 
 export function initTestApp() {
   process.env.GCLOUD_PROJECT = PROJECT_ID;

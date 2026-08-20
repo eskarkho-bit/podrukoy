@@ -1,20 +1,20 @@
 {
   "expo": {
-    "name": "podrukoy",
-    "slug": "podrukoy",
+    "name": "domio",
+    "slug": "domio",
     "version": "1.0.0",
-    "scheme": "podrukoy",
+    "scheme": "domio",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.podrukoy.app"
+      "bundleIdentifier": "com.domio.app"
     },
     "android": {
-      "package": "com.podrukoy.app",
+      "package": "com.domio.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#5E7A56",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"

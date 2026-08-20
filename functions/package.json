@@ -1,5 +1,5 @@
 {
-  "name": "podrukoy-functions",
+  "name": "domio-functions",
   "version": "1.0.0",
   "private": true,
   "main": "lib/index.js",
@@ -10,7 +10,7 @@
     "build": "tsc",
     "watch": "tsc --watch",
     "deploy": "firebase deploy --only functions",
-    "test": "firebase emulators:exec --only firestore,auth --project demo-podrukoy \"jest\"",
+    "test": "firebase emulators:exec --only firestore,auth --project demo-domio \"jest\"",
     "test:jest": "jest"
   },
   "dependencies": {

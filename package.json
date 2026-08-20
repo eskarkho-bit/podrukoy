@@ -1,5 +1,5 @@
 {
-  "name": "podrukoy",
+  "name": "domio",
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
@@ -52,7 +52,7 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-podrukoy \"node --test tests/firestore.rules.test.mjs\"",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-domio \"node --test tests/firestore.rules.test.mjs\"",
     "rules:check": "node scripts/rules-state.mjs check",
     "rules:deploy": "firebase deploy --only firestore:rules,firestore:indexes && node scripts/rules-state.mjs record firestore.rules firestore.indexes.json",
     "storage:deploy": "firebase deploy --only storage && node scripts/rules-state.mjs record storage.rules",
