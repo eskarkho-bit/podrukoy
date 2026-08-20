@@ -25,7 +25,7 @@ import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
 import { useAuth } from '../components/AuthState';
 import { useAppState } from '../components/AppState';
-import { counted } from '../components/format';
+import { counted, rub } from '../components/format';
 import { firestoreErrorText } from '../components/firestoreError';
 import { settlementLabel } from '../components/cities';
 import { loadAdminStats, MAIN_CITIES, type AdminStats } from '../components/adminStats';
@@ -239,11 +239,11 @@ export function AdminScreen({ open, onClose }: Props) {
   );
 }
 
-// Сводка: что происходит с мастерами и где в республике пусто.
+// Сводка: что происходит с мастерами, где в республике пусто и почём работа.
 //
-// Заявок клиентов здесь нет намеренно — модератор их не читает. Считать их
-// он сможет, когда развернутся функции: они будут вести счётчики на сервере,
-// и модератор увидит числа, не получив доступа к адресам.
+// Самих заявок здесь нет намеренно — модератор их не читает. Цены приходят
+// гистограммой, которую собирает функция на завершении заказа: числа видны,
+// адреса и комментарии — нет.
 function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
   const { mode } = useTheme();
   const styles = themed[mode];
@@ -293,6 +293,33 @@ function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
       {/* Пустая специальность — это заявки, на которые некому откликнуться */}
       {coverage.missingCategories.length > 0 && (
         <Text style={styles.statsAlert}>Нет мастеров: {coverage.missingCategories.join(', ')}</Text>
+      )}
+
+      <Text style={styles.statsTitle}>Чек</Text>
+
+      {stats.prices ? (
+        <>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceValue}>
+              {stats.prices.medianAtCap ? 'дороже ' : ''}
+              {rub(stats.prices.median)}
+            </Text>
+            <Text style={styles.priceLabel}>медиана</Text>
+          </View>
+          <Text style={styles.statsLine}>
+            Половина заказов между {rub(stats.prices.p25)} и {rub(stats.prices.p75)}
+          </Text>
+          <Text style={styles.statsHint}>
+            Среднее {rub(stats.prices.average)} ·{' '}
+            {counted(stats.prices.count, 'заказ', 'заказа', 'заказов')} с ценой
+          </Text>
+        </>
+      ) : (
+        // Ноль рублей выглядел бы как настоящее число. Пока функции не
+        // развёрнуты, честнее сказать, что считать нечем.
+        <Text style={styles.statsHint}>
+          Появится, когда завершится первый заказ и будут развёрнуты функции
+        </Text>
       )}
     </Animated.View>
   );
@@ -506,6 +533,17 @@ const makeStyles = (t: Palette) =>
     statsAlert: { fontSize: 12, fontWeight: '700', color: t.warn, marginTop: 12, lineHeight: 17 },
     statsTitle: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginTop: 16 },
     statsLine: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
+    statsHint: {
+      fontSize: 11.5,
+      fontWeight: '600',
+      color: t.textMuted,
+      marginTop: 6,
+      lineHeight: 16,
+    },
+    // Медиана — то число, ради которого сюда смотрят, поэтому крупно
+    priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6 },
+    priceValue: { fontSize: 22, fontWeight: '800', color: t.text },
+    priceLabel: { fontSize: 11, fontWeight: '700', color: t.textMuted },
     chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
     cityChip: {
       borderRadius: 10,

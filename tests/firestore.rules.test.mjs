@@ -1022,6 +1022,39 @@ describe('Журнал действий', () => {
   });
 });
 
+describe('Сводка по заявкам', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'stats/orders'), {
+        completed: 12,
+        sum: 36000,
+        buckets: { 2500: 5, 3000: 7 },
+      });
+    });
+  });
+
+  test('модератор читает сводку', async () => {
+    await assertSucceeds(getDoc(doc(as('admin1'), 'stats/orders')));
+  });
+
+  // Сводка нужна модератору вместо доступа к заявкам, а не в дополнение
+  // к нему. Мастеру и клиенту она не нужна вовсе.
+  test('остальные сводку не читают', async () => {
+    await assertFails(getDoc(doc(as('client1'), 'stats/orders')));
+    await assertFails(getDoc(doc(as('master1'), 'stats/orders')));
+    await assertFails(getDoc(doc(anon(), 'stats/orders')));
+  });
+
+  // По этим числам решают, какой брать процент. Возможность их накрутить
+  // означала бы возможность влиять на ставку.
+  test('писать сводку не может никто, включая модератора', async () => {
+    await assertFails(setDoc(doc(as('admin1'), 'stats/orders'), { completed: 999 }));
+    await assertFails(updateDoc(doc(as('admin1'), 'stats/orders'), { completed: 999 }));
+    await assertFails(updateDoc(doc(as('master1'), 'stats/orders'), { completed: 999 }));
+    await assertFails(deleteDoc(doc(as('admin1'), 'stats/orders')));
+  });
+});
+
 describe('Профиль пользователя', () => {
   test('владелец читает и пишет свой профиль', async () => {
     await assertSucceeds(setDoc(doc(as('client1'), 'users/client1'), { name: 'Дмитрий' }));

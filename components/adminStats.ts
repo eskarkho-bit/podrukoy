@@ -1,7 +1,9 @@
 import {
   collection,
   collectionGroup,
+  doc,
   getCountFromServer,
+  getDoc,
   getDocs,
   limit,
   query,
@@ -10,6 +12,7 @@ import {
 import { db } from '../firebaseConfig';
 import { CATEGORIES, type Category } from './serviceOptions';
 import { isSettlementOpen, OPEN_SETTLEMENTS, settlementKey } from './cities';
+import { priceSummary, type OrderStats, type PriceSummary } from './orderStats';
 
 // Сводка для модератора.
 //
@@ -40,6 +43,11 @@ export type AdminStats = {
   pending: number;
   rejected: number;
   coverage: Coverage;
+  /**
+   * Разброс цен по завершённым заявкам. null — пока считать нечего: сводку
+   * пишет функция, а до развёртывания функций документа просто нет.
+   */
+  prices: PriceSummary | null;
 };
 
 // Читать анкеты приходится целиком: покрытие считается по массивам городов и
@@ -54,12 +62,15 @@ export async function loadAdminStats(): Promise<AdminStats> {
   const masters = collection(db, 'masters');
   const applications = collectionGroup(db, 'verification');
 
-  const [total, verified, pending, rejected, verifiedDocs] = await Promise.all([
+  const [total, verified, pending, rejected, verifiedDocs, priceDoc] = await Promise.all([
     countOf(query(masters)),
     countOf(query(masters, where('verified', '==', true))),
     countOf(query(applications, where('status', '==', 'pending'))),
     countOf(query(applications, where('status', '==', 'rejected'))),
     getDocs(query(masters, where('verified', '==', true), limit(COVERAGE_SCAN_LIMIT))),
+    // Читаем документ, а не заявки: сами заявки модератору не видны и правила
+    // их ему не отдадут. Гистограмму собирает функция на завершении заказа.
+    getDoc(doc(db, 'stats', 'orders')),
   ]);
 
   // Пустой список городов у мастера означает «вся республика», пустой список
@@ -89,6 +100,7 @@ export async function loadAdminStats(): Promise<AdminStats> {
     verified,
     pending,
     rejected,
+    prices: priceSummary(priceDoc.exists() ? (priceDoc.data() as OrderStats) : null),
     coverage: {
       missingCategories: anySpecialist ? [] : CATEGORIES.filter((c) => !coveredCategories.has(c)),
       // Считаем от открытых пунктов, а не от всего списка: «1 из 160» говорил

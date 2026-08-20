@@ -9,6 +9,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
 import { audit, SYSTEM, type AuditAction } from './audit';
+import { recordCompletedOrder } from './orderStats';
 
 export { createCardBinding, yookassaWebhook } from './payments';
 export { onDeletionRequested } from './deletion';
@@ -185,8 +186,17 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
     return;
   }
 
-  if (after.status === 'Завершена' && masterId) {
-    await pushTo([masterId], 'Клиент подтвердил работу', title, { href: '/profile' });
+  if (after.status === 'Завершена') {
+    // Цена уходит в гистограмму: модератору нужна медиана чека, а заявок он
+    // не видит. Отметка о зачёте ставится на саму заявку, поэтому повтор
+    // события второй раз её не посчитает.
+    await recordCompletedOrder(
+      event.params.orderId,
+      typeof after.agreedPrice === 'number' ? after.agreedPrice : 0,
+    );
+    if (masterId) {
+      await pushTo([masterId], 'Клиент подтвердил работу', title, { href: '/profile' });
+    }
     return;
   }
 
