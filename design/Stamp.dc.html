@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@300..600&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Oswald', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #c1462f; } a:hover { color: #93331f; }
+  </style>
+</helmet>
+
+<div style="width: 880px; height: 560px; background: #fafaf7; color: #1b2430; display: flex; flex-direction: column; padding: 44px 52px; box-sizing: border-box; gap: 26px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: #c1462f">Направление Д</div>
+    <div style="font-size: 12px; font-weight: 300; letter-spacing: 0.12em; text-transform: uppercase; color: #7d8794">Клеймо</div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: center; gap: 44px">
+
+    <div style="background: #ffffff; border: 1px solid #e4e6e2; padding: 36px 44px; display: flex; align-items: center; gap: 32px">
+      <svg width="132" height="132" viewBox="0 0 120 120" aria-label="Знак domio">
+        <defs>
+          <path id="ringBig" d="M 60,60 m -45,0 a 45,45 0 1,1 90,0 a 45,45 0 1,1 -90,0"></path>
+        </defs>
+        <circle cx="60" cy="60" r="57" fill="none" stroke="#1b2430" stroke-width="2.5"></circle>
+        <circle cx="60" cy="60" r="36" fill="none" stroke="#1b2430" stroke-width="1.5"></circle>
+        <text font-family="Oswald, sans-serif" font-size="11.5" font-weight="500" letter-spacing="3.4" fill="#1b2430">
+          <textPath href="#ringBig" startOffset="2%">ПРОВЕРЕНО · DOMIO · ПРОВЕРЕНО ·</textPath>
+        </text>
+        <polygon points="42,62 60,47 78,62" fill="#1b2430"></polygon>
+        <rect x="46" y="62" width="28" height="21" fill="#1b2430"></rect>
+        <rect x="56" y="70" width="8" height="13" fill="#c1462f"></rect>
+      </svg>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <div style="font-size: 58px; font-weight: 500; letter-spacing: 0.06em; line-height: 1; text-transform: uppercase; color: #1b2430">domio</div>
+        <div style="font-size: 12px; font-weight: 300; letter-spacing: 0.34em; text-transform: uppercase; color: #7d8794">мастер по дому</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div style="font-size: 11px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: #7d8794">Без обода текста</div>
+      <div style="display: flex; align-items: center; gap: 18px">
+        <svg width="60" height="60" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="57" fill="none" stroke="#1b2430" stroke-width="5"></circle>
+          <polygon points="38,64 60,45 82,64" fill="#1b2430"></polygon>
+          <rect x="43" y="64" width="34" height="25" fill="#1b2430"></rect>
+          <rect x="55" y="74" width="10" height="15" fill="#fafaf7"></rect>
+        </svg>
+        <svg width="34" height="34" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="55" fill="#1b2430"></circle>
+          <polygon points="38,64 60,45 82,64" fill="#fafaf7"></polygon>
+          <rect x="43" y="64" width="34" height="25" fill="#fafaf7"></rect>
+          <rect x="55" y="74" width="10" height="15" fill="#1b2430"></rect>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 300; letter-spacing: 0.02em; color: #7d8794; line-height: 1.5; max-width: 24ch; text-wrap: pretty">Обод с текстом снимается в мелком размере — остаётся круг и дом.</div>
+    </div>
+
+  </div>
+
+  <div style="background: #1b2430; padding: 20px 26px; display: flex; align-items: center; gap: 20px">
+    <svg width="44" height="44" viewBox="0 0 120 120">
+      <circle cx="60" cy="60" r="57" fill="none" stroke="#fafaf7" stroke-width="5"></circle>
+      <polygon points="38,64 60,45 82,64" fill="#fafaf7"></polygon>
+      <rect x="43" y="64" width="34" height="25" fill="#fafaf7"></rect>
+      <rect x="55" y="74" width="10" height="15" fill="#c1462f"></rect>
+    </svg>
+    <div style="font-size: 28px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #fafaf7">domio</div>
+  </div>
+
+  <div style="display: flex; gap: 36px; border-top: 1px solid #e4e6e2; padding-top: 16px">
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #c1462f; margin-bottom: 5px">За что</div>
+      <div style="font-family: system-ui, sans-serif; font-size: 13px; font-weight: 400; line-height: 1.55; color: #3c4652; text-wrap: pretty">Ваше отличие — проверка каждого мастера. Клеймо говорит это до того, как человек прочитал хоть слово.</div>
+    </div>
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #8a6a2f; margin-bottom: 5px">Против</div>
+      <div style="font-family: system-ui, sans-serif; font-size: 13px; font-weight: 400; line-height: 1.55; color: #3c4652; text-wrap: pretty">Строгий, ведомственный тон. Приложение в доме у человека — а знак похож на печать в справке.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":880,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

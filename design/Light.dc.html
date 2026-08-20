@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Commissioner:wght@200..700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Commissioner', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #f2c46b; } a:hover { color: #ffd98a; }
+  </style>
+</helmet>
+
+<div style="width: 880px; height: 560px; background: #111512; color: #ede7da; display: flex; flex-direction: column; padding: 44px 52px; box-sizing: border-box; gap: 26px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: #f2c46b">Направление Е</div>
+    <div style="font-size: 12px; font-weight: 300; letter-spacing: 0.12em; text-transform: uppercase; color: #7d8477">Свет</div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: center; gap: 44px">
+
+    <div style="background: #1a201a; border: 1px solid #262e25; border-radius: 24px; padding: 40px 48px; display: flex; align-items: center; gap: 32px">
+      <svg width="120" height="120" viewBox="0 0 120 120" aria-label="Знак domio">
+        <polygon points="60,16 104,50 104,104 16,104 16,50" fill="#252d24"></polygon>
+        <polygon points="60,50 78,64 60,78 42,64" fill="#f2c46b" opacity="0.22"></polygon>
+        <polygon points="60,56 72,64 60,72 48,64" fill="#ffd98a"></polygon>
+      </svg>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <div style="font-size: 60px; font-weight: 200; letter-spacing: 0.08em; line-height: 1; color: #ede7da">domio</div>
+        <div style="font-size: 12.5px; font-weight: 300; letter-spacing: 0.2em; color: #8b9384">свет в окне</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #7d8477">Знак отдельно</div>
+      <div style="display: flex; align-items: center; gap: 18px">
+        <svg width="56" height="56" viewBox="0 0 120 120">
+          <polygon points="60,16 104,50 104,104 16,104 16,50" fill="#2c3529"></polygon>
+          <polygon points="60,56 72,64 60,72 48,64" fill="#ffd98a"></polygon>
+        </svg>
+        <svg width="34" height="34" viewBox="0 0 120 120">
+          <polygon points="60,16 104,50 104,104 16,104 16,50" fill="#2c3529"></polygon>
+          <polygon points="60,54 74,64 60,74 46,64" fill="#ffd98a"></polygon>
+        </svg>
+        <svg width="20" height="20" viewBox="0 0 120 120">
+          <polygon points="60,16 104,50 104,104 16,104 16,50" fill="#333d30"></polygon>
+          <polygon points="60,52 76,64 60,76 44,64" fill="#ffd98a"></polygon>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 300; color: #8b9384; line-height: 1.5; max-width: 24ch; text-wrap: pretty">Окно растёт по мере уменьшения — в 20 пикселях остаётся горящая точка.</div>
+    </div>
+
+  </div>
+
+  <div style="background: #f2f0e9; border-radius: 18px; padding: 22px 28px; display: flex; align-items: center; gap: 22px">
+    <svg width="46" height="46" viewBox="0 0 120 120">
+      <polygon points="60,16 104,50 104,104 16,104 16,50" fill="#1a201a"></polygon>
+      <polygon points="60,56 72,64 60,72 48,64" fill="#e2a636"></polygon>
+    </svg>
+    <div style="font-size: 30px; font-weight: 200; letter-spacing: 0.08em; color: #1a201a">domio</div>
+  </div>
+
+  <div style="display: flex; gap: 36px; border-top: 1px solid #262e25; padding-top: 16px">
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #f2c46b; margin-bottom: 5px">За что</div>
+      <div style="font-size: 13px; font-weight: 300; line-height: 1.6; color: #c3c9bb; text-wrap: pretty">Говорит не про дом, а про то, ради чего вызывают мастера: сломалось — починили, и в доме снова свет. Тёмный знак в категории, где у всех светло-зелёное.</div>
+    </div>
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #d8a05f; margin-bottom: 5px">Против</div>
+      <div style="font-size: 13px; font-weight: 300; line-height: 1.6; color: #c3c9bb; text-wrap: pretty">Приложение светлое, знак тёмный — придётся держать две версии и следить, чтобы они не разошлись.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":880,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

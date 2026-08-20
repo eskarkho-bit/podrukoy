@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="domio — иконка приложения">
+  <title>domio — иконка приложения</title>
+  <rect width="1024" height="1024" fill="#5E7A56"/>
+  <g transform="translate(379.89,237.09) scale(3.3028)">
+    <polygon points="18,112 62,112 54,42 26,42" fill="#FFFFFF"/>
+    <polygon points="23,42 57,42 57,33 23,33" fill="#FFFFFF"/>
+    <polygon points="27,33 53,33 53,25 27,25" fill="#FFFFFF"/>
+    <polygon points="31,25 49,25 49,18 31,18" fill="#FFFFFF"/>
+    <polygon points="31,18 49,18 40,3" fill="#FFFFFF"/>
+  </g>
+  <text x="521.80" y="777.00" text-anchor="middle" font-family="Oswald, 'Segoe UI', sans-serif" font-size="140.0" font-weight="400" letter-spacing="19.60" fill="#FFFFFF">DOMIO</text>
+</svg>

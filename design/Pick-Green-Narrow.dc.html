@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@300..600&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Oswald', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #5e7a56; } a:hover { color: #2e3a2a; }
+  </style>
+</helmet>
+
+<div style="width: 720px; height: 520px; background: #f2f5f0; color: #2e3a2a; display: flex; flex-direction: column; padding: 32px 36px; box-sizing: border-box; gap: 18px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: #5e7a56">Палитра Ж2 · шрифт Ж1</div>
+    <div style="font-family: system-ui, sans-serif; font-size: 11.5px; font-weight: 500; color: #7a857a">Зелёный дом + узкий</div>
+  </div>
+
+  <div style="flex-grow: 1; background: #ffffff; border: 1px solid #e6e9e1; display: flex; align-items: center; justify-content: center; gap: 28px">
+    <svg width="53" height="80" viewBox="0 0 80 120" aria-label="Знак domio"><polygon points="18,112 62,112 55,38 25,38" fill="#5e7a56"></polygon><polygon points="24,38 56,38 51.5,29 28.5,29" fill="#5e7a56"></polygon><polygon points="27.5,29 52.5,29 48,20 32,20" fill="#5e7a56"></polygon><polygon points="31,20 49,20 40,4" fill="#5e7a56"></polygon><rect x="36" y="58" width="8" height="18" fill="#ffffff"></rect><rect x="36" y="86" width="8" height="14" fill="#ffffff"></rect></svg>
+    <div style="font-size:54px;font-weight:400;letter-spacing:0.14em;text-transform:uppercase; line-height: 1; color: #2e3a2a">domio</div>
+  </div>
+
+  <div style="display: flex; gap: 16px; height: 150px">
+    <div style="width: 200px; background: #ffffff; border: 1px solid #e6e9e1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px">
+      <svg width="40" height="60" viewBox="0 0 80 120"><polygon points="18,112 62,112 55,38 25,38" fill="#5e7a56"></polygon><polygon points="24,38 56,38 51.5,29 28.5,29" fill="#5e7a56"></polygon><polygon points="27.5,29 52.5,29 48,20 32,20" fill="#5e7a56"></polygon><polygon points="31,20 49,20 40,4" fill="#5e7a56"></polygon><rect x="36" y="58" width="8" height="18" fill="#ffffff"></rect><rect x="36" y="86" width="8" height="14" fill="#ffffff"></rect></svg>
+      <div style="font-size:30px;font-weight:400;letter-spacing:0.14em;text-transform:uppercase; line-height: 1; color: #2e3a2a">domio</div>
+    </div>
+
+    <div style="flex-grow: 1; background: #ffffff; border: 1px solid #e6e9e1; display: flex; align-items: flex-start; justify-content: center; gap: 26px; padding-top: 20px">
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <svg width="64" height="64" viewBox="0 0 120 120">
+          <rect x="0" y="0" width="120" height="120" rx="27" fill="#5e7a56"></rect>
+          <g transform="translate(35.2,24.04) scale(0.62)"><polygon points="18,112 62,112 55,38 25,38" fill="#ffffff"></polygon><polygon points="24,38 56,38 51.5,29 28.5,29" fill="#ffffff"></polygon><polygon points="27.5,29 52.5,29 48,20 32,20" fill="#ffffff"></polygon><polygon points="31,20 49,20 40,4" fill="#ffffff"></polygon></g>
+        </svg>
+        <div style="font-size:11.5px;font-weight:400;letter-spacing:0.12em;text-transform:uppercase; line-height: 1; color: #2e3a2a">domio</div>
+      </div>
+      <svg width="40" height="40" viewBox="0 0 120 120">
+        <rect x="0" y="0" width="120" height="120" rx="27" fill="#5e7a56"></rect>
+        <g transform="translate(35.2,24.04) scale(0.62)"><polygon points="18,112 62,112 55,38 25,38" fill="#ffffff"></polygon><polygon points="24,38 56,38 51.5,29 28.5,29" fill="#ffffff"></polygon><polygon points="27.5,29 52.5,29 48,20 32,20" fill="#ffffff"></polygon><polygon points="31,20 49,20 40,4" fill="#ffffff"></polygon></g>
+      </svg>
+      <svg width="22" height="22" viewBox="0 0 120 120">
+        <rect x="0" y="0" width="120" height="120" rx="27" fill="#5e7a56"></rect>
+        <g transform="translate(35.2,24.04) scale(0.62)"><polygon points="18,112 62,112 55,38 25,38" fill="#ffffff"></polygon><polygon points="24,38 56,38 51.5,29 28.5,29" fill="#ffffff"></polygon><polygon points="27.5,29 52.5,29 48,20 32,20" fill="#ffffff"></polygon><polygon points="31,20 49,20 40,4" fill="#ffffff"></polygon></g>
+      </svg>
+    </div>
+  </div>
+
+  <div style="font-family: system-ui, sans-serif; font-size: 12px; font-weight: 500; color: #7a857a; line-height: 1.5; text-wrap: pretty">Новое. Палитра приложения с узкими прописными: зелёный смягчает, шрифт держит вертикаль башни.</div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":720,"height":520}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

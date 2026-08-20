@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 250" width="420" height="250" role="img" aria-label="domio — вертикальный замок">
+  <title>domio — вертикальный замок</title>
+  <g transform="translate(158.62,-3.85) scale(1.2844)">
+    <polygon points="18,112 62,112 54,42 26,42" fill="#5E7A56"/>
+    <polygon points="23,42 57,42 57,33 23,33" fill="#5E7A56"/>
+    <polygon points="27,33 53,33 53,25 27,25" fill="#5E7A56"/>
+    <polygon points="31,25 49,25 49,18 31,18" fill="#5E7A56"/>
+    <polygon points="31,18 49,18 40,3" fill="#5E7A56"/>
+  </g>
+  <text x="214.3" y="202" text-anchor="middle" font-family="Oswald, 'Segoe UI', sans-serif" font-size="62" font-weight="400" letter-spacing="8.68" fill="#2E3A2A">DOMIO</text>
+  <text x="212.1" y="232" text-anchor="middle" font-family="Oswald, 'Segoe UI', sans-serif" font-size="15" font-weight="300" letter-spacing="4.2" fill="#2E3A2A" opacity="0.62">МАСТЕР ПО ДОМУ</text>
+</svg>
