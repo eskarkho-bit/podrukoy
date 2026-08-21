@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
 import { Auth, browserLocalPersistence, initializeAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { collection, doc, getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
 import { Platform } from 'react-native';
 
@@ -20,6 +21,19 @@ const app = initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+// Регион должен совпадать с тем, где развёрнуты функции: в functions/src
+// регион не задан, значит us-central1
+export const functions = getFunctions(app, 'us-central1');
+
+/**
+ * Идентификатор будущей заявки, выданный заранее.
+ *
+ * Нужен, чтобы создание было идемпотентным: с известным id запись идёт через
+ * setDoc, и повторная отправка перезаписала бы тот же документ, а не создала
+ * второй. Генератор берём у SDK — у его идентификаторов равномерное
+ * распределение, а последовательные ключи упирались бы в один шард.
+ */
+export const newOrderId = () => doc(collection(db, 'orders')).id;
 
 // Сессия должна переживать перезапуск приложения, иначе пользователь будет
 // логиниться при каждом запуске. Хранилище на вебе и на телефоне разное:
@@ -29,6 +43,7 @@ function createAuth(): Auth {
   if (Platform.OS === 'web') {
     return initializeAuth(app, { persistence: browserLocalPersistence });
   }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- см. комментарий выше
   const rn = require('firebase/auth') as {
     getReactNativePersistence: (storage: unknown) => never;
   };

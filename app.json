@@ -1,18 +1,20 @@
 {
   "expo": {
-    "name": "podrukoy",
-    "slug": "podrukoy",
+    "name": "domio",
+    "slug": "domio",
     "version": "1.0.0",
-    "scheme": "podrukoy",
+    "scheme": "domio",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.domio.app"
     },
     "android": {
+      "package": "com.domio.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#5E7A56",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -30,10 +32,31 @@
         {
           "color": "#5E7A56"
         }
+      ],
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Фотографии нужны, чтобы приложить снимок поломки к заявке.",
+          "cameraPermission": "Камера нужна для снимка поломки и для фотографии лица при проверке мастера."
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "28c1b795-47e5-4188-ad30-fd8a9b94a9fa"
+      }
+    },
+    "owner": "kaimetsy",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/28c1b795-47e5-4188-ad30-fd8a9b94a9fa"
     }
   }
 }

@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #5e7a56; } a:hover { color: #42593c; }
+  </style>
+</helmet>
+
+<div style="width: 880px; height: 560px; background: #f2f5f0; color: #2e3a2a; display: flex; flex-direction: column; padding: 44px 52px; box-sizing: border-box; gap: 28px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: #5e7a56">Направление А</div>
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #7b8a76">Дом</div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: center; gap: 40px">
+
+    <div style="background: #ffffff; border: 1px solid #e6e9e1; border-radius: 20px; padding: 40px 48px; display: flex; align-items: center; gap: 30px">
+      <svg width="132" height="106" viewBox="0 0 120 96" aria-label="Знак domio">
+        <polygon points="16,44 60,66 60,88 16,66" fill="#efece1"></polygon>
+        <polygon points="60,66 104,44 104,66 60,88" fill="#fbf9f3"></polygon>
+        <polygon points="74.1,58.9 82,55 82,69 74.1,72.9" fill="#5e7a56"></polygon>
+        <polygon points="60,22 16,44 38,17.8" fill="#708a66"></polygon>
+        <polygon points="60,22 104,44 82,39.8 38,17.8" fill="#7e9873"></polygon>
+        <polygon points="16,44 60,66 82,39.8 38,17.8" fill="#9cb48e"></polygon>
+        <polygon points="104,44 60,66 82,39.8" fill="#f3f1e8"></polygon>
+      </svg>
+      <div style="font-size: 62px; font-weight: 800; letter-spacing: -0.045em; line-height: 1; color: #2e3a2a">domio</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #7b8a76">Знак отдельно</div>
+      <div style="display: flex; align-items: flex-end; gap: 20px">
+        <svg width="72" height="58" viewBox="0 0 120 96">
+          <polygon points="16,44 60,66 60,88 16,66" fill="#efece1"></polygon>
+          <polygon points="60,66 104,44 104,66 60,88" fill="#fbf9f3"></polygon>
+          <polygon points="74.1,58.9 82,55 82,69 74.1,72.9" fill="#5e7a56"></polygon>
+          <polygon points="60,22 16,44 38,17.8" fill="#708a66"></polygon>
+          <polygon points="60,22 104,44 82,39.8 38,17.8" fill="#7e9873"></polygon>
+          <polygon points="16,44 60,66 82,39.8 38,17.8" fill="#9cb48e"></polygon>
+          <polygon points="104,44 60,66 82,39.8" fill="#f3f1e8"></polygon>
+        </svg>
+        <svg width="40" height="32" viewBox="0 0 120 96">
+          <polygon points="16,44 60,66 60,88 16,66" fill="#5e7a56"></polygon>
+          <polygon points="60,66 104,44 104,66 60,88" fill="#5e7a56"></polygon>
+          <polygon points="60,22 16,44 38,17.8" fill="#2e3a2a"></polygon>
+          <polygon points="60,22 104,44 82,39.8 38,17.8" fill="#2e3a2a"></polygon>
+          <polygon points="16,44 60,66 82,39.8 38,17.8" fill="#42593c"></polygon>
+          <polygon points="104,44 60,66 82,39.8" fill="#42593c"></polygon>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 600; color: #7b8a76; line-height: 1.5; max-width: 26ch; text-wrap: pretty">Справа — в два тона, когда цвет печатать нельзя.</div>
+    </div>
+
+  </div>
+
+  <div style="background: #141a13; border-radius: 16px; padding: 22px 28px; display: flex; align-items: center; gap: 22px">
+    <svg width="52" height="42" viewBox="0 0 120 96">
+      <polygon points="16,44 60,66 60,88 16,66" fill="#2b3227"></polygon>
+      <polygon points="60,66 104,44 104,66 60,88" fill="#3a4234"></polygon>
+      <polygon points="74.1,58.9 82,55 82,69 74.1,72.9" fill="#8faf83"></polygon>
+      <polygon points="60,22 16,44 38,17.8" fill="#5e7a56"></polygon>
+      <polygon points="60,22 104,44 82,39.8 38,17.8" fill="#6d8a63"></polygon>
+      <polygon points="16,44 60,66 82,39.8 38,17.8" fill="#8faf83"></polygon>
+      <polygon points="104,44 60,66 82,39.8" fill="#b4cca8"></polygon>
+    </svg>
+    <div style="font-size: 30px; font-weight: 800; letter-spacing: -0.045em; color: #e6ece1">domio</div>
+  </div>
+
+  <div style="display: flex; gap: 36px; border-top: 1px solid #e6e9e1; padding-top: 18px">
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #5e7a56; margin-bottom: 6px">За что</div>
+      <div style="font-size: 13.5px; font-weight: 500; line-height: 1.55; color: #3f4c3b; text-wrap: pretty">Тот самый дом, который человек видит на первом экране. Логотип и продукт — одна вещь, узнавание не надо строить заново.</div>
+    </div>
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #8c5a3f; margin-bottom: 6px">Против</div>
+      <div style="font-size: 13.5px; font-weight: 500; line-height: 1.55; color: #3f4c3b; text-wrap: pretty">Семь плоскостей и дверь: в иконке 32 пикселя всё это слипается в зелёное пятно.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":880,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

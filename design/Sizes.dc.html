@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #5e7a56; } a:hover { color: #42593c; }
+  </style>
+</helmet>
+
+<div style="width: 1840px; height: 420px; background: #f2f5f0; color: #2e3a2a; display: flex; flex-direction: column; padding: 40px 52px; box-sizing: border-box; gap: 22px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: #5e7a56">Проверка размером</div>
+    <div style="font-size: 12px; font-weight: 600; color: #7b8a76">Иконка приложения живёт в 48 пикселях, значок вкладки — в 16. Здесь видно, что до этого размера доезжает.</div>
+  </div>
+
+  <div style="flex-grow: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px">
+
+    <div style="background: #ffffff; border: 1px solid #e6e9e1; border-radius: 18px; padding: 24px 26px; display: flex; flex-direction: column; gap: 18px">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #7b8a76">А · Дом</div>
+      <div style="display: flex; align-items: flex-end; gap: 22px; flex-grow: 1">
+        <svg width="80" height="64" viewBox="0 0 120 96">
+          <polygon points="16,44 60,66 60,88 16,66" fill="#efece1"></polygon>
+          <polygon points="60,66 104,44 104,66 60,88" fill="#fbf9f3"></polygon>
+          <polygon points="74.1,58.9 82,55 82,69 74.1,72.9" fill="#5e7a56"></polygon>
+          <polygon points="60,22 16,44 38,17.8" fill="#708a66"></polygon>
+          <polygon points="60,22 104,44 82,39.8 38,17.8" fill="#7e9873"></polygon>
+          <polygon points="16,44 60,66 82,39.8 38,17.8" fill="#9cb48e"></polygon>
+          <polygon points="104,44 60,66 82,39.8" fill="#f3f1e8"></polygon>
+        </svg>
+        <svg width="40" height="32" viewBox="0 0 120 96">
+          <polygon points="16,44 60,66 60,88 16,66" fill="#efece1"></polygon>
+          <polygon points="60,66 104,44 104,66 60,88" fill="#fbf9f3"></polygon>
+          <polygon points="74.1,58.9 82,55 82,69 74.1,72.9" fill="#5e7a56"></polygon>
+          <polygon points="60,22 16,44 38,17.8" fill="#708a66"></polygon>
+          <polygon points="60,22 104,44 82,39.8 38,17.8" fill="#7e9873"></polygon>
+          <polygon points="16,44 60,66 82,39.8 38,17.8" fill="#9cb48e"></polygon>
+          <polygon points="104,44 60,66 82,39.8" fill="#f3f1e8"></polygon>
+        </svg>
+        <svg width="20" height="16" viewBox="0 0 120 96">
+          <polygon points="16,44 60,66 60,88 16,66" fill="#efece1"></polygon>
+          <polygon points="60,66 104,44 104,66 60,88" fill="#fbf9f3"></polygon>
+          <polygon points="74.1,58.9 82,55 82,69 74.1,72.9" fill="#5e7a56"></polygon>
+          <polygon points="60,22 16,44 38,17.8" fill="#708a66"></polygon>
+          <polygon points="60,22 104,44 82,39.8 38,17.8" fill="#7e9873"></polygon>
+          <polygon points="16,44 60,66 82,39.8 38,17.8" fill="#9cb48e"></polygon>
+          <polygon points="104,44 60,66 82,39.8" fill="#f3f1e8"></polygon>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 600; color: #8c5a3f; line-height: 1.45; text-wrap: pretty">В 20 пикселях грани сливаются — нужна отдельная упрощённая иконка.</div>
+    </div>
+
+    <div style="background: #ffffff; border: 1px solid #e6e9e1; border-radius: 18px; padding: 24px 26px; display: flex; flex-direction: column; gap: 18px">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #7b8a76">Б · Крыша</div>
+      <div style="display: flex; align-items: flex-end; gap: 22px; flex-grow: 1">
+        <svg width="72" height="72" viewBox="0 0 120 120">
+          <rect x="0" y="0" width="120" height="120" rx="30" fill="#5e7a56"></rect>
+          <path d="M22 64 L60 32 L98 64" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"></path>
+          <rect x="34" y="64" width="52" height="30" rx="7" fill="#ffffff"></rect>
+          <rect x="52" y="76" width="16" height="18" rx="5" fill="#5e7a56"></rect>
+        </svg>
+        <svg width="36" height="36" viewBox="0 0 120 120">
+          <rect x="0" y="0" width="120" height="120" rx="30" fill="#5e7a56"></rect>
+          <path d="M22 64 L60 32 L98 64" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"></path>
+          <rect x="34" y="64" width="52" height="30" rx="7" fill="#ffffff"></rect>
+          <rect x="52" y="76" width="16" height="18" rx="5" fill="#5e7a56"></rect>
+        </svg>
+        <svg width="20" height="20" viewBox="0 0 120 120">
+          <rect x="0" y="0" width="120" height="120" rx="30" fill="#5e7a56"></rect>
+          <path d="M22 64 L60 32 L98 64" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"></path>
+          <rect x="34" y="64" width="52" height="30" rx="7" fill="#ffffff"></rect>
+          <rect x="52" y="76" width="16" height="18" rx="5" fill="#5e7a56"></rect>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 600; color: #4a6543; line-height: 1.45; text-wrap: pretty">Держится до 16 пикселей без единой правки. Одна иконка на все случаи.</div>
+    </div>
+
+    <div style="background: #ffffff; border: 1px solid #e6e9e1; border-radius: 18px; padding: 24px 26px; display: flex; flex-direction: column; gap: 18px">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #7b8a76">В · План</div>
+      <div style="display: flex; align-items: flex-end; gap: 22px; flex-grow: 1">
+        <svg width="84" height="48" viewBox="0 0 120 68">
+          <polygon points="60,6 87,20 60,34 33,20" fill="#f5e9d2" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="87,20 114,34 87,48 60,34" fill="#e3ecdb" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="60,34 87,48 60,62 33,48" fill="#d9e7e9" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="33,20 60,34 33,48 6,34" fill="#efe4ee" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+        </svg>
+        <svg width="42" height="24" viewBox="0 0 120 68">
+          <polygon points="60,6 87,20 60,34 33,20" fill="#f5e9d2" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="87,20 114,34 87,48 60,34" fill="#e3ecdb" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="60,34 87,48 60,62 33,48" fill="#d9e7e9" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="33,20 60,34 33,48 6,34" fill="#efe4ee" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+        </svg>
+        <svg width="24" height="14" viewBox="0 0 120 68">
+          <polygon points="60,6 87,20 60,34 33,20" fill="#f5e9d2" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="87,20 114,34 87,48 60,34" fill="#e3ecdb" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="60,34 87,48 60,62 33,48" fill="#d9e7e9" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="33,20 60,34 33,48 6,34" fill="#efe4ee" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 600; color: #8c5a3f; line-height: 1.45; text-wrap: pretty">Пастель гаснет уже в 24 пикселях. Для иконки нужен контурный вариант.</div>
+    </div>
+
+    <div style="background: #ffffff; border: 1px solid #e6e9e1; border-radius: 18px; padding: 24px 26px; display: flex; flex-direction: column; gap: 18px">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #7b8a76">Г · Литера</div>
+      <div style="display: flex; align-items: flex-end; gap: 22px; flex-grow: 1">
+        <svg width="80" height="48" viewBox="0 0 66 40">
+          <polygon points="33,4 62,20 33,36 4,20" fill="none" stroke="#5e7a56" stroke-width="4" stroke-linejoin="round"></polygon>
+          <path d="M18.5 12 L47.5 28 M47.5 12 L18.5 28" stroke="#cbdcc5" stroke-width="3.5" stroke-linecap="round"></path>
+        </svg>
+        <svg width="40" height="24" viewBox="0 0 66 40">
+          <polygon points="33,4 62,20 33,36 4,20" fill="none" stroke="#5e7a56" stroke-width="6" stroke-linejoin="round"></polygon>
+        </svg>
+        <svg width="22" height="14" viewBox="0 0 66 40">
+          <polygon points="33,4 62,20 33,36 4,20" fill="none" stroke="#5e7a56" stroke-width="9" stroke-linejoin="round"></polygon>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 600; color: #8c5a3f; line-height: 1.45; text-wrap: pretty">Своего знака нет — на иконку идёт ромб, а он без слова не читается как дом.</div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":1840,"height":420}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

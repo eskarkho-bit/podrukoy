@@ -21,6 +21,15 @@ expo-env.d.ts
 # Metro
 .metro-health-check*
 
+# Firebase
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+# Страницы документов собираются из components/legal.ts перед деплоем
+legal-site/
+# Отпечаток последней выкатки правил — у каждого свой, в общей истории не нужен
+.rules-deployed.json
+
 # debug
 npm-debug.*
 yarn-debug.*

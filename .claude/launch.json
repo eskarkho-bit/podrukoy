@@ -2,32 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "podrukoy - start",
+      "//": "Единственная конфигурация, которую видно в браузерной панели. --android и --ios требуют устройства или симулятора и здесь не отрисуются; запускайте их сами через npm run android. Порт задан явно: Expo не читает переменную PORT, а без флага берёт 8081, спрашивает «занять 8082?» и падает в неинтерактивном режиме. 8090 вместо 8081, чтобы не сталкиваться с dev-сервером параллельной сессии.",
+      "name": "domio - web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start"],
-      "port": 8081,
-      "autoPort": true
-    },
-    {
-      "name": "podrukoy - android",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "android"],
-      "port": 8081,
-      "autoPort": true
-    },
-    {
-      "name": "podrukoy - ios",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "ios"],
-      "port": 8081,
-      "autoPort": true
-    },
-    {
-      "name": "podrukoy - web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "web"],
-      "port": 8081,
-      "autoPort": true
+      "runtimeArgs": ["run", "web", "--", "--port", "8090"],
+      "port": 8090,
+      "url": "http://localhost:8090"
     }
   ]
 }

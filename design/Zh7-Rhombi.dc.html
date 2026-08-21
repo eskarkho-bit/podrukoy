@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #5e7a56; } a:hover { color: #2e3a2a; }
+  </style>
+</helmet>
+
+<div style="width: 720px; height: 480px; background: #f2f5f0; color: #2e3a2a; display: flex; flex-direction: column; padding: 34px 38px; box-sizing: border-box; gap: 20px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #5e7a56">Ж7 · Ромб</div>
+    <div style="font-family: system-ui, sans-serif; font-size: 11.5px; font-weight: 500; color: #7a857a">геометрия приложения</div>
+  </div>
+
+  <div style="flex-grow: 1; background: #ffffff; border: 1px solid #e6e9e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 30px">
+    <svg width="90" height="118" viewBox="0 10 80 105" aria-label="Знак domio"><polygon points="40,86 64,98 40,110 16,98" fill="#42593c"></polygon><polygon points="40,66 60,76 40,86 20,76" fill="#5e7a56"></polygon><polygon points="40,48 56,56 40,64 24,56" fill="#708a66"></polygon><polygon points="40,32 52,38 40,44 28,38" fill="#9cb48e"></polygon><polygon points="40,20 48,24 40,28 32,24" fill="#cbdcc5"></polygon></svg>
+    <div style="font-size:50px;font-weight:700;letter-spacing:-0.035em; line-height: 1; color: #2e3a2a">domio</div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 26px">
+    <div style="display: flex; align-items: center; gap: 16px">
+      <svg width="30" height="40" viewBox="0 10 80 105"><polygon points="40,86 64,98 40,110 16,98" fill="#5e7a56"></polygon><polygon points="40,66 60,76 40,86 20,76" fill="#5e7a56"></polygon><polygon points="40,48 56,56 40,64 24,56" fill="#5e7a56"></polygon><polygon points="40,32 52,38 40,44 28,38" fill="#5e7a56"></polygon><polygon points="40,20 48,24 40,28 32,24" fill="#5e7a56"></polygon></svg>
+      <svg width="20" height="26" viewBox="0 10 80 105"><polygon points="40,86 64,98 40,110 16,98" fill="#5e7a56"></polygon><polygon points="40,66 60,76 40,86 20,76" fill="#5e7a56"></polygon><polygon points="40,48 56,56 40,64 24,56" fill="#5e7a56"></polygon><polygon points="40,32 52,38 40,44 28,38" fill="#5e7a56"></polygon><polygon points="40,20 48,24 40,28 32,24" fill="#5e7a56"></polygon></svg>
+      <svg width="11" height="14" viewBox="0 10 80 105"><polygon points="40,86 64,98 40,110 16,98" fill="#5e7a56"></polygon><polygon points="40,66 60,76 40,86 20,76" fill="#5e7a56"></polygon><polygon points="40,48 56,56 40,64 24,56" fill="#5e7a56"></polygon><polygon points="40,32 52,38 40,44 28,38" fill="#5e7a56"></polygon><polygon points="40,20 48,24 40,28 32,24" fill="#5e7a56"></polygon></svg>
+    </div>
+    <div style="font-family: system-ui, sans-serif; font-size: 12px; font-weight: 500; color: #7a857a; line-height: 1.5; flex-grow: 1; text-wrap: pretty">Башня сложена из тех же изометрических ромбов, что образуют план комнат в приложении.</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":720,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

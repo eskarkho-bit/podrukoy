@@ -5,5 +5,30 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["node_modules", ".git", "*.log"],
+      "predeploy": ["npm --prefix functions run build"]
+    }
+  ],
+  "hosting": {
+    "public": "legal-site",
+    "predeploy": ["node scripts/legal-site.mjs"],
+    "ignore": ["**/.*"]
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true,
+    "auth": {
+      "port": 9099
+    }
   }
 }

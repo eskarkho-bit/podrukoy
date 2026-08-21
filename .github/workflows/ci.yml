@@ -1,0 +1,156 @@
+name: CI
+
+# Тот же набор проверок, что запускается руками перед коммитом. Смысл в том,
+# чтобы он запускался и тогда, когда о нём забыли.
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+    branches: [main]
+
+# Новый пуш в ту же ветку отменяет предыдущий прогон: смысла проверять
+# устаревший коммит нет
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Приложение
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      # Линтер разбирает functions/ вместе с типами — без зависимостей функций
+      # firebase-admin становится `any`, и no-floating-promises молча замолкает
+      # вместо того, чтобы падать. Проверка была бы зелёной и бессмысленной.
+      - name: Зависимости функций (нужны линтеру)
+        run: npm ci
+        working-directory: functions
+
+      - name: Типы
+        run: npx tsc --noEmit
+
+      - name: Линтер
+        run: npm run lint
+
+      - name: Формат
+        run: npm run format:check
+
+      - name: Тесты
+        run: npm test -- --ci
+
+      # Ходит в API Expo и в React Native Directory, поэтому иногда падает от
+      # сети, а не от кода. Красная сборка по такой причине быстро приучает
+      # не смотреть на CI — пусть предупреждает, но не блокирует.
+      - name: Соответствие версий Expo
+        run: npx expo-doctor
+        continue-on-error: true
+
+  functions:
+    name: Cloud Functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      # Тесты функций идут против настоящего Firestore в эмуляторе, а он на Java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Установка зависимостей
+        run: npm ci
+        working-directory: functions
+
+      # Эмулятор поднимает firebase-tools, а он объявлен в корневом
+      # package.json — в functions/ его нет. Локально это незаметно: npm
+      # добавляет node_modules/.bin родителя в PATH, и корневая установка
+      # там уже стоит. В CI её не было, и `firebase` не находился.
+      - name: Зависимости корня (в них firebase-tools для эмулятора)
+        run: npm ci
+
+      - name: Сборка
+        run: npm run build
+        working-directory: functions
+
+      - name: Кэш эмуляторов
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}
+
+      # Идемпотентность платежей и возобновление удаления аккаунта: то, что
+      # ломается тихо и обнаруживается по чужим деньгам
+      - name: Тесты
+        run: npm test
+        working-directory: functions
+
+  rules:
+    name: Правила доступа
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Эмулятор Firestore работает на Java, firebase-tools требует 21 или новее
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      # Эмулятор скачивает бинарник при первом запуске — кэшируем, иначе
+      # каждый прогон начинается с загрузки
+      - name: Кэш эмуляторов
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}
+
+      - name: Тесты правил
+        run: npm run test:rules
+
+  audit:
+    name: Уязвимости зависимостей
+    runs-on: ubuntu-latest
+    # Не блокирует ветку: большинство high в этом проекте — сборочный
+    # инструментарий Expo, который чинится только переходом на SDK 57.
+    # Задача шага — не пропустить новую уязвимость незамеченной.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Приложение
+        run: npm audit --audit-level=high
+
+      - name: Cloud Functions
+        run: npm audit --audit-level=high
+        working-directory: functions

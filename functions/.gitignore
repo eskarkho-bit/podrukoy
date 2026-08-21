@@ -1,0 +1,7 @@
+node_modules/
+lib/
+*.log
+
+# Ключи платёжного провайдера
+.env
+.env.local

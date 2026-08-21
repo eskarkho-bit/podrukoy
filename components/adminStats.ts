@@ -1,0 +1,128 @@
+import {
+  collection,
+  collectionGroup,
+  doc,
+  getCountFromServer,
+  getDoc,
+  getDocs,
+  limit,
+  query,
+  where,
+} from 'firebase/firestore';
+import { db } from '../firebaseConfig';
+import { CATEGORIES, type Category } from './serviceOptions';
+import { isSettlementOpen, OPEN_SETTLEMENTS, settlementKey } from './cities';
+import { priceSummary, type OrderStats, type PriceSummary } from './orderStats';
+
+// Сводка для модератора.
+//
+// Считаем только мастеров: заявки клиентов модератору не видны, и это
+// сознательно — мы весь механизм проверки строили ради того, чтобы адрес
+// видело как можно меньше людей. Статистика по заявкам появится счётчиками
+// на стороне сервера, когда будут развёрнуты функции: тогда модератор увидит
+// числа, не получив доступа к самим данным.
+//
+// Числа берутся агрегатными запросами: сервер возвращает количество, не
+// выкачивая документы, — это в разы дешевле, чем считать их на телефоне.
+
+export type Coverage = {
+  /** Специальности, по которым нет ни одного проверенного мастера */
+  missingCategories: Category[];
+  /** Сколько населённых пунктов охвачено хотя бы одним мастером */
+  coveredSettlements: number;
+  totalSettlements: number;
+  /** Есть ли мастер, готовый выезжать куда угодно */
+  anyEverywhere: boolean;
+  /** Ключи охваченных пунктов — по ним отмечаются города на экране */
+  coveredKeys: string[];
+};
+
+export type AdminStats = {
+  masters: number;
+  verified: number;
+  pending: number;
+  rejected: number;
+  coverage: Coverage;
+  /**
+   * Разброс цен по завершённым заявкам. null — пока считать нечего: сводку
+   * пишет функция, а до развёртывания функций документа просто нет.
+   */
+  prices: PriceSummary | null;
+};
+
+// Читать анкеты приходится целиком: покрытие считается по массивам городов и
+// специальностей, а их агрегатным запросом не получить. При сотнях мастеров
+// это терпимо, при тысячах покрытие надо будет считать на сервере.
+const COVERAGE_SCAN_LIMIT = 500;
+
+const countOf = async (q: Parameters<typeof getCountFromServer>[0]) =>
+  (await getCountFromServer(q)).data().count;
+
+export async function loadAdminStats(): Promise<AdminStats> {
+  const masters = collection(db, 'masters');
+  const applications = collectionGroup(db, 'verification');
+
+  const [total, verified, pending, rejected, verifiedDocs, priceDoc] = await Promise.all([
+    countOf(query(masters)),
+    countOf(query(masters, where('verified', '==', true))),
+    countOf(query(applications, where('status', '==', 'pending'))),
+    countOf(query(applications, where('status', '==', 'rejected'))),
+    getDocs(query(masters, where('verified', '==', true), limit(COVERAGE_SCAN_LIMIT))),
+    // Читаем документ, а не заявки: сами заявки модератору не видны и правила
+    // их ему не отдадут. Гистограмму собирает функция на завершении заказа.
+    getDoc(doc(db, 'stats', 'orders')),
+  ]);
+
+  // Пустой список городов у мастера означает «вся республика», пустой список
+  // специальностей — «любые работы». Тот же смысл, что и в ленте.
+  const coveredCities = new Set<string>();
+  const coveredCategories = new Set<string>();
+  let anyEverywhere = false;
+  let anySpecialist = false;
+
+  verifiedDocs.docs.forEach((d) => {
+    const cities: string[] = Array.isArray(d.get('cities'))
+      ? d.get('cities')
+      : d.get('city')
+        ? [String(d.get('city'))]
+        : [];
+    const skills: string[] = Array.isArray(d.get('skills')) ? d.get('skills') : [];
+
+    if (!cities.length) anyEverywhere = true;
+    else cities.forEach((c) => coveredCities.add(c));
+
+    if (!skills.length) anySpecialist = true;
+    else skills.forEach((s) => coveredCategories.add(s));
+  });
+
+  return {
+    masters: total,
+    verified,
+    pending,
+    rejected,
+    prices: priceSummary(priceDoc.exists() ? (priceDoc.data() as OrderStats) : null),
+    coverage: {
+      missingCategories: anySpecialist ? [] : CATEGORIES.filter((c) => !coveredCategories.has(c)),
+      // Считаем от открытых пунктов, а не от всего списка: «1 из 160» говорил
+      // бы о дыре там, где заявок и не бывает. У мастера при этом может
+      // остаться город, выбранный до сужения, — его в знаменатель не берём.
+      coveredSettlements: anyEverywhere
+        ? OPEN_SETTLEMENTS.length
+        : [...coveredCities].filter(isSettlementOpen).length,
+      totalSettlements: OPEN_SETTLEMENTS.length,
+      anyEverywhere,
+      coveredKeys: [...coveredCities],
+    },
+  };
+}
+
+/**
+ * Города, по которым показываем, где пусто.
+ *
+ * Только открытые: строка «Аргун — нет мастеров» про город, куда нельзя
+ * подать заявку, — не сигнал, а шум. Откроется город — появится и здесь.
+ */
+export const MAIN_CITIES = OPEN_SETTLEMENTS.map((s) => ({
+  name: s.name,
+  key: settlementKey(s.name),
+}));

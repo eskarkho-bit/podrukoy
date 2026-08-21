@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #5e7a56; } a:hover { color: #42593c; }
+  </style>
+</helmet>
+
+<div style="width: 880px; height: 560px; background: #f2f5f0; color: #2e3a2a; display: flex; flex-direction: column; padding: 44px 52px; box-sizing: border-box; gap: 28px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: #5e7a56">Направление В</div>
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #7b8a76">План</div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; align-items: center; gap: 40px">
+
+    <div style="background: #ffffff; border: 1px solid #e6e9e1; border-radius: 20px; padding: 40px 46px; display: flex; align-items: center; gap: 28px">
+      <svg width="128" height="76" viewBox="0 0 120 68" aria-label="Знак domio">
+        <polygon points="60,6 87,20 60,34 33,20" fill="#f5e9d2" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+        <polygon points="87,20 114,34 87,48 60,34" fill="#e3ecdb" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+        <polygon points="60,34 87,48 60,62 33,48" fill="#d9e7e9" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+        <polygon points="33,20 60,34 33,48 6,34" fill="#efe4ee" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+      </svg>
+      <div style="font-size: 58px; font-weight: 500; letter-spacing: -0.03em; line-height: 1; color: #2e3a2a">domio</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #7b8a76">Знак отдельно</div>
+      <div style="display: flex; align-items: center; gap: 20px">
+        <svg width="76" height="44" viewBox="0 0 120 68">
+          <polygon points="60,6 87,20 60,34 33,20" fill="#f5e9d2" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="87,20 114,34 87,48 60,34" fill="#e3ecdb" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="60,34 87,48 60,62 33,48" fill="#d9e7e9" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+          <polygon points="33,20 60,34 33,48 6,34" fill="#efe4ee" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"></polygon>
+        </svg>
+        <svg width="54" height="31" viewBox="0 0 120 68">
+          <polygon points="60,6 114,34 60,62 6,34" fill="none" stroke="#5e7a56" stroke-width="4" stroke-linejoin="round"></polygon>
+          <path d="M33 20 L87 48 M87 20 L33 48" stroke="#5e7a56" stroke-width="4" stroke-linecap="round"></path>
+        </svg>
+      </div>
+      <div style="font-size: 12px; font-weight: 600; color: #7b8a76; line-height: 1.5; max-width: 26ch; text-wrap: pretty">Справа — контурный вариант: те же четыре комнаты одной линией.</div>
+    </div>
+
+  </div>
+
+  <div style="background: #141a13; border-radius: 16px; padding: 22px 28px; display: flex; align-items: center; gap: 22px">
+    <svg width="62" height="36" viewBox="0 0 120 68">
+      <polygon points="60,6 87,20 60,34 33,20" fill="#c8b78e" stroke="#141a13" stroke-width="2.5" stroke-linejoin="round"></polygon>
+      <polygon points="87,20 114,34 87,48 60,34" fill="#8faf83" stroke="#141a13" stroke-width="2.5" stroke-linejoin="round"></polygon>
+      <polygon points="60,34 87,48 60,62 33,48" fill="#7fa5a8" stroke="#141a13" stroke-width="2.5" stroke-linejoin="round"></polygon>
+      <polygon points="33,20 60,34 33,48 6,34" fill="#a58ba3" stroke="#141a13" stroke-width="2.5" stroke-linejoin="round"></polygon>
+    </svg>
+    <div style="font-size: 28px; font-weight: 500; letter-spacing: -0.03em; color: #e6ece1">domio</div>
+  </div>
+
+  <div style="display: flex; gap: 36px; border-top: 1px solid #e6e9e1; padding-top: 18px">
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #5e7a56; margin-bottom: 6px">За что</div>
+      <div style="font-size: 13.5px; font-weight: 500; line-height: 1.55; color: #3f4c3b; text-wrap: pretty">Ни у кого такого нет: это план четырёх комнат из вашего же приложения. Цвета комнат уже работают внутри — знак и интерфейс говорят одно.</div>
+    </div>
+    <div style="flex-grow: 1">
+      <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #8c5a3f; margin-bottom: 6px">Против</div>
+      <div style="font-size: 13.5px; font-weight: 500; line-height: 1.55; color: #3f4c3b; text-wrap: pretty">Без подписи это ромб, а не дом. Четыре пастельных цвета плохо живут в мелком размере и в один тон.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":880,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

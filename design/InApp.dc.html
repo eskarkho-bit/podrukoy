@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@300..600&family=Rubik:wght@300..800&display=swap">
+  <style>
+    body { margin: 0; font-family: system-ui, 'Segoe UI', sans-serif; }
+    a { color: #5e7a56; } a:hover { color: #42593c; }
+  </style>
+</helmet>
+
+<div style="width: 1840px; height: 760px; background: #ffffff; color: #2e3a2a; display: flex; flex-direction: column; padding: 40px 52px; box-sizing: border-box; gap: 26px">
+
+  <div style="display: flex; justify-content: space-between; align-items: baseline">
+    <div style="font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: #5e7a56">В приложении</div>
+    <div style="font-size: 12px; font-weight: 600; color: #7a857a">Экран входа — единственное место, где логотип видит клиент. Фон, поля и кнопка взяты из theme.ts как есть.</div>
+  </div>
+
+  <div style="flex-grow: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px">
+
+    <div style="display: flex; gap: 30px">
+      <div style="width: 320px; background: #f2f5f0; border: 1px solid #e6e9e1; border-radius: 26px; padding: 26px 22px; display: flex; flex-direction: column; align-items: center; gap: 14px; box-sizing: border-box">
+        <div style="width: 76px; height: 76px; border-radius: 22px; background: #2e2a24; display: flex; align-items: center; justify-content: center">
+          <svg width="30" height="52" viewBox="0 0 80 120">
+            <polygon points="18,112 62,112 55,38 25,38" fill="#f4f1ea"></polygon>
+            <polygon points="24,38 56,38 51.5,29 28.5,29" fill="#f4f1ea"></polygon>
+            <polygon points="27.5,29 52.5,29 48,20 32,20" fill="#f4f1ea"></polygon>
+            <polygon points="31,20 49,20 40,4" fill="#f4f1ea"></polygon>
+          </svg>
+        </div>
+        <div style="font-family: 'Oswald', system-ui, sans-serif; font-size: 30px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: #2e3a2a">domio</div>
+        <div style="font-size: 12.5px; font-weight: 500; color: #7a857a; text-align: center; line-height: 1.45; max-width: 30ch">Мастер по дому — под рукой. Войдите, чтобы продолжить.</div>
+
+        <div style="width: 100%; background: #ffffff; border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; margin-top: 6px">
+          <div style="display: flex; flex-direction: column; gap: 5px">
+            <div style="font-size: 10.5px; font-weight: 800; color: #7a857a">Email</div>
+            <div style="border: 1px solid #cbd6c5; background: #fbfcfa; border-radius: 14px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; color: #a6afa1">you@example.ru</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 5px">
+            <div style="font-size: 10.5px; font-weight: 800; color: #7a857a">Пароль</div>
+            <div style="border: 1px solid #cbd6c5; background: #fbfcfa; border-radius: 14px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; color: #a6afa1">••••••</div>
+          </div>
+          <div style="background: #5e7a56; border-radius: 16px; padding: 13px; text-align: center; font-size: 13px; font-weight: 800; color: #ffffff">Войти</div>
+          <div style="text-align: center; font-size: 11.5px; font-weight: 700; color: #a6afa1">Забыли пароль?</div>
+        </div>
+
+        <div style="font-size: 11.5px; font-weight: 700; color: #a6afa1">Впервые здесь? <span style="color: #5e7a56">Создать аккаунт</span></div>
+      </div>
+
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 18px">
+        <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #a6afa1">Среди чужих иконок</div>
+        <div style="display: flex; gap: 12px; align-items: center">
+          <div style="width: 52px; height: 52px; border-radius: 13px; background: #dfe1dc"></div>
+          <svg width="52" height="52" viewBox="0 0 120 120">
+            <rect x="0" y="0" width="120" height="120" rx="27" fill="#2e2a24"></rect>
+            <g transform="translate(35.2,24.04) scale(0.62)">
+              <polygon points="18,112 62,112 55,38 25,38" fill="#f4f1ea"></polygon>
+              <polygon points="24,38 56,38 51.5,29 28.5,29" fill="#f4f1ea"></polygon>
+              <polygon points="27.5,29 52.5,29 48,20 32,20" fill="#f4f1ea"></polygon>
+              <polygon points="31,20 49,20 40,4" fill="#f4f1ea"></polygon>
+            </g>
+          </svg>
+          <div style="width: 52px; height: 52px; border-radius: 13px; background: #d7dbd5"></div>
+          <div style="width: 52px; height: 52px; border-radius: 13px; background: #e3e0d9"></div>
+        </div>
+        <div style="font-size: 12.5px; font-weight: 500; color: #7a857a; line-height: 1.55; text-wrap: pretty">Тёмная плитка держит внимание, не повышая голос. Вертикальный силуэт среди круглых и квадратных иконок читается как чужой в хорошем смысле.</div>
+        <div style="border-top: 1px solid #e6e9e1; padding-top: 16px; font-size: 12.5px; font-weight: 500; color: #2e3a2a; line-height: 1.55; text-wrap: pretty">Приложение перекрашивать не нужно: тёмно-коричневый знак спокойно сидит на зелёном фоне, кнопка остаётся фирменной зелёной.</div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 30px">
+      <div style="width: 320px; background: #f2f5f0; border: 1px solid #e6e9e1; border-radius: 26px; padding: 26px 22px; display: flex; flex-direction: column; align-items: center; gap: 14px; box-sizing: border-box">
+        <div style="width: 76px; height: 76px; border-radius: 22px; background: #15171c; display: flex; align-items: center; justify-content: center">
+          <svg width="42" height="42" viewBox="0 0 120 120">
+            <rect x="4" y="4" width="52" height="52" rx="13" fill="#f5f2ed"></rect>
+            <rect x="64" y="4" width="52" height="52" rx="13" fill="#f5f2ed"></rect>
+            <rect x="4" y="64" width="52" height="52" rx="13" fill="#f5f2ed"></rect>
+            <polygon points="90,62 118,90 90,118 62,90" fill="#e8600f"></polygon>
+          </svg>
+        </div>
+        <div style="font-family: 'Rubik', system-ui, sans-serif; font-size: 32px; font-weight: 600; letter-spacing: -0.035em; color: #15171c">domio</div>
+        <div style="font-size: 12.5px; font-weight: 500; color: #7a857a; text-align: center; line-height: 1.45; max-width: 30ch">Мастер по дому — под рукой. Войдите, чтобы продолжить.</div>
+
+        <div style="width: 100%; background: #ffffff; border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; margin-top: 6px">
+          <div style="display: flex; flex-direction: column; gap: 5px">
+            <div style="font-size: 10.5px; font-weight: 800; color: #7a857a">Email</div>
+            <div style="border: 1px solid #cbd6c5; background: #fbfcfa; border-radius: 14px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; color: #a6afa1">you@example.ru</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 5px">
+            <div style="font-size: 10.5px; font-weight: 800; color: #7a857a">Пароль</div>
+            <div style="border: 1px solid #cbd6c5; background: #fbfcfa; border-radius: 14px; padding: 11px 13px; font-size: 12.5px; font-weight: 600; color: #a6afa1">••••••</div>
+          </div>
+          <div style="background: #e8600f; border-radius: 16px; padding: 13px; text-align: center; font-size: 13px; font-weight: 800; color: #ffffff">Войти</div>
+          <div style="text-align: center; font-size: 11.5px; font-weight: 700; color: #a6afa1">Забыли пароль?</div>
+        </div>
+
+        <div style="font-size: 11.5px; font-weight: 700; color: #a6afa1">Впервые здесь? <span style="color: #e8600f">Создать аккаунт</span></div>
+      </div>
+
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 18px">
+        <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #a6afa1">Среди чужих иконок</div>
+        <div style="display: flex; gap: 12px; align-items: center">
+          <div style="width: 52px; height: 52px; border-radius: 13px; background: #dfe1dc"></div>
+          <svg width="52" height="52" viewBox="0 0 120 120">
+            <rect x="0" y="0" width="120" height="120" rx="27" fill="#e8600f"></rect>
+            <g transform="translate(24,24) scale(0.6)">
+              <rect x="4" y="4" width="52" height="52" rx="13" fill="#15171c"></rect>
+              <rect x="64" y="4" width="52" height="52" rx="13" fill="#15171c"></rect>
+              <rect x="4" y="64" width="52" height="52" rx="13" fill="#15171c"></rect>
+              <polygon points="90,62 118,90 90,118 62,90" fill="#f5f2ed"></polygon>
+            </g>
+          </svg>
+          <div style="width: 52px; height: 52px; border-radius: 13px; background: #d7dbd5"></div>
+          <div style="width: 52px; height: 52px; border-radius: 13px; background: #e3e0d9"></div>
+        </div>
+        <div style="font-size: 12.5px; font-weight: 500; color: #7a857a; line-height: 1.55; text-wrap: pretty">Оранжевая плитка выигрывает соседство с любым экраном — её найдут глазами быстрее всех остальных.</div>
+        <div style="border-top: 1px solid #e6e9e1; padding-top: 16px; font-size: 12.5px; font-weight: 500; color: #b8564f; line-height: 1.55; text-wrap: pretty">Здесь и видна цена: кнопка перекрашена в оранжевый, иначе знак и интерфейс спорят. А зелёный — это весь `accent` в theme.ts: кнопки, ссылки, выбранные вкладки, подсветка. Перекрашивать придётся всё.</div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"$preview":{"width":1840,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

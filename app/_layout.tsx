@@ -2,10 +2,15 @@ import * as Notifications from 'expo-notifications';
 import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
-import 'react-native-reanimated';
+import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ReduceMotion, ReducedMotionConfig } from 'react-native-reanimated';
 import { AppStateProvider, useAppState } from '../components/AppState';
 import { AuthProvider, useAuth } from '../components/AuthState';
+import { ConsentGate } from '../components/ConsentGate';
+import { consentsCurrent } from '../components/legal';
+import { NoticeBanner } from '../components/NoticeBanner';
+import { AdminScreen } from '../screens/AdminScreen';
 import { MasterScreen } from '../screens/MasterScreen';
 import { useTheme } from '../theme';
 
@@ -23,7 +28,21 @@ export default function RootLayout() {
 function RootShell() {
   const { mode, colors } = useTheme();
   const { user, initializing } = useAuth();
-  const { masterOpen, setMasterOpen } = useAppState();
+  const {
+    masterOpen,
+    setMasterOpen,
+    isAdmin,
+    adminOpen,
+    setAdminOpen,
+    notice,
+    dismissNotice,
+    consents,
+    acceptConsents,
+    logout,
+  } = useAppState();
+  // Профиль ещё грузится, пока consents === null: показывать в этот момент
+  // требование принять документы значит мигать им у тех, кто их уже принял
+  const needsConsent = !!user && consents !== null && !consentsCurrent(consents);
   const segments = useSegments();
 
   // Без сессии данные всё равно не сохранить — правила Firestore требуют
@@ -49,7 +68,9 @@ function RootShell() {
     // приложение открыли нажатием на уведомление из закрытого состояния
     if (!coldStartHandled.current) {
       coldStartHandled.current = true;
-      Notifications.getLastNotificationResponseAsync().then(go).catch(() => {});
+      Notifications.getLastNotificationResponseAsync()
+        .then(go)
+        .catch(() => {});
     }
 
     const sub = Notifications.addNotificationResponseReceivedListener(go);
@@ -57,8 +78,14 @@ function RootShell() {
   }, [user]);
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+    // Корень жестов нужен всему, что тянут пальцем, — сейчас это нижние шторки
+    <GestureHandlerRootView style={[styles.root, { backgroundColor: colors.bg }]}>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+
+      {/* Уважаем системное «уменьшение движения»: тогда анимации не
+          проигрываются, а сразу показывают результат. Настройка общая на все
+          анимации Reanimated, поэтому стоит один раз в корне. */}
+      <ReducedMotionConfig mode={ReduceMotion.System} />
 
       <Stack
         screenOptions={{
@@ -71,7 +98,18 @@ function RootShell() {
           смонтированным: иначе сессия мастера и его заявки сбрасывались бы при
           каждом выходе в профиль. */}
       {user && <MasterScreen open={masterOpen} onClose={() => setMasterOpen(false)} />}
-    </View>
+
+      {/* Модерация — такой же оверлей. Монтируется только у модераторов:
+          у остальных правила всё равно не дадут прочитать очередь. */}
+      {user && isAdmin && <AdminScreen open={adminOpen} onClose={() => setAdminOpen(false)} />}
+
+      {/* Поверх всего, кроме сообщения о сбое: без действующего согласия
+          пользоваться сервисом нельзя вообще */}
+      {needsConsent && <ConsentGate onAccept={acceptConsents} onLogout={logout} />}
+
+      {/* Поверх всего, включая режим мастера: сбой важнее того, что открыто */}
+      {notice && <NoticeBanner text={notice} onDismiss={dismissNotice} />}
+    </GestureHandlerRootView>
   );
 }
 

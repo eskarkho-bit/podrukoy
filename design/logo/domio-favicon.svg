@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="domio — favicon">
+  <title>domio — favicon</title>
+  <rect width="64" height="64" rx="12" fill="#5E7A56"/>
+  <g transform="translate(18.85,13.09) scale(0.3288)">
+    <polygon points="18,112 62,112 54,42 26,42" fill="#FFFFFF"/>
+    <polygon points="23,42 57,42 57,33 23,33" fill="#FFFFFF"/>
+    <polygon points="27,33 53,33 53,25 27,25" fill="#FFFFFF"/>
+    <polygon points="31,25 49,25 49,18 31,18" fill="#FFFFFF"/>
+    <polygon points="31,18 49,18 40,3" fill="#FFFFFF"/>
+  </g>
+</svg>

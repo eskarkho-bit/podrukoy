@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" width="420" height="120" role="img" aria-label="domio — логотип">
+  <title>domio — логотип</title>
+  <g transform="translate(-19.82,-3.30) scale(1.1009)">
+    <polygon points="18,112 62,112 54,42 26,42" fill="#5E7A56"/>
+    <polygon points="23,42 57,42 57,33 23,33" fill="#5E7A56"/>
+    <polygon points="27,33 53,33 53,25 27,25" fill="#5E7A56"/>
+    <polygon points="31,25 49,25 49,18 31,18" fill="#5E7A56"/>
+    <polygon points="31,18 49,18 40,3" fill="#5E7A56"/>
+  </g>
+  <text x="78.4" y="92.1" font-family="Oswald, 'Segoe UI', sans-serif" font-size="88" font-weight="400" letter-spacing="12.32" fill="#2E3A2A">DOMIO</text>
+</svg>

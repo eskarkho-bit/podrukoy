@@ -3,6 +3,7 @@ rules_version = '2';
 // Правила доступа к Firestore проекта domio-7ad1c.
 // Базовый принцип: запрещено всё, что не разрешено явно ниже.
 // Деплой: firebase deploy --only firestore:rules
+// Тесты: npm run test:rules (см. tests/firestore.rules.test.mjs)
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -15,17 +16,82 @@ service cloud.firestore {
       return authed() && request.auth.uid == uid;
     }
 
-    // Мастер — тот, у кого есть анкета в коллекции masters
-    function isMaster() {
+    // Модератор. Документ заводится вручную в консоли Firebase — из
+    // приложения его создать нельзя ни при каких условиях, иначе роль
+    // администратора выдавал бы себе кто угодно.
+    function isAdmin() {
       return authed()
-        && exists(/databases/$(database)/documents/masters/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    // Профиль клиента: имя, адреса, настройки. Виден только владельцу.
+    // Мастер, прошедший проверку. Одной анкеты мало: до неё документ
+    // masters/{uid} может завести любой, а вместе с ним получить имена,
+    // адреса и фотографии квартир всех клиентов города. Доступ к заявкам
+    // даёт только флаг verified, который ставит модератор.
+    function isVerifiedMaster() {
+      return authed()
+        && exists(/databases/$(database)/documents/masters/$(request.auth.uid))
+        && get(/databases/$(database)/documents/masters/$(request.auth.uid))
+             .data.get('verified', false) == true;
+    }
+
+    // Список модераторов: человек может проверить, что он в нём, но менять
+    // его из приложения нельзя
+    match /admins/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // Заявка на удаление аккаунта.
+    //
+    // Единственная запись, которую делает клиент, — сама просьба. Дальше
+    // работает функция: она обходит данные этапами, отмечая прогресс, и
+    // переживает обрыв на любом шаге. Раньше всё удаление шло с телефона
+    // семью подряд идущими операциями без транзакции: сбой посередине
+    // оставлял наполовину удалённый аккаунт, а подписка на профиль тут же
+    // создавала удалённый документ заново.
+    match /deletions/{uid} {
+      allow read: if isOwner(uid);
+      // status нужен сверке: она ищет застрявшие удаления запросом по нему,
+      // и без него незапустившийся триггер остался бы незамеченным
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['requestedAt', 'status'])
+        && request.resource.data.requestedAt == request.time
+        && request.resource.data.status == 'pending';
+      // Этап, статус и отметку о завершении пишет только сервер
+      allow update, delete: if false;
+    }
+
+    // Журнал действий.
+    //
+    // Append-only в самом строгом смысле: писать не может никто, включая
+    // модератора, — записи создаёт только Admin SDK из функций. Читать может
+    // модератор: журнал существует ради разбора спорных ситуаций.
+    //
+    // Персональных данных здесь нет по построению: только идентификаторы и
+    // перечисления. Иначе журнал пережил бы удаление аккаунта и обошёл бы
+    // собственное же удаление данных.
+    match /audit/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    function validCategory(c) {
+      return c in [
+        'электрика', 'сантехника', 'бытовая техника', 'окна',
+        'участок', 'ворота', 'инструмент', 'разное',
+      ];
+    }
+
+    function validPrice(p) {
+      return p is number && p > 0 && p <= 10000000;
+    }
+
+    // Профиль клиента: имя, адреса, город, настройки. Виден только владельцу.
     match /users/{uid} {
       allow read, write: if isOwner(uid);
 
-      // Личные подколлекции пользователя — переписка с мастером и поддержкой
+      // Личные подколлекции пользователя — переписка с поддержкой
       // (users/{uid}/threads/{id}/messages). Правила не наследуются вглубь
       // автоматически, поэтому поддерево описано явно.
       match /{document=**} {
@@ -33,16 +99,160 @@ service cloud.firestore {
       }
     }
 
-    // Анкета мастера. Читать может любой авторизованный (клиент видит, кто взял
-    // заявку), править — только сам мастер. Удаление закрыто.
+    // Анкета мастера. Читать может любой авторизованный: клиент выбирает из
+    // предложений и должен видеть, кто их прислал и с каким рейтингом.
     match /masters/{uid} {
+
+      // Поля, которые считает сервер, а не их владелец: rating и reviewsCount
+      // пересчитывает Cloud Function по отзывам, completedOrders — по
+      // завершённым заявкам, verified проставляет модерация. Иначе мастер
+      // нарисовал бы себе пятёрки и сотню заказов сам.
+      function keepsServerField(field, fallback) {
+        return request.resource.data.get(field, fallback) == resource.data.get(field, fallback);
+      }
+
       allow read: if authed();
-      allow create, update: if isOwner(uid);
-      allow delete: if false;
+
+      allow create: if isOwner(uid)
+        && !request.resource.data.keys().hasAny([
+          'verified', 'rating', 'reviewsCount', 'completedOrders',
+        ]);
+
+      // Отказаться от собственного допуска можно самому — понижение прав ничем
+      // не грозит. Нужно при отзыве согласия на фотографию: без неё личность
+      // не подтверждена, и доступ к заявкам сохраняться не должен.
+      function verifiedKeptOrDropped() {
+        return keepsServerField('verified', false)
+          || (resource.data.get('verified', false) == true
+            && request.resource.data.get('verified', false) == false);
+      }
+
+      allow update: if isOwner(uid)
+        && verifiedKeptOrDropped()
+        && keepsServerField('rating', 0)
+        && keepsServerField('reviewsCount', 0)
+        && keepsServerField('completedOrders', 0);
+
+      // Модератор трогает ровно один флаг — тот, что открывает доступ к заявкам
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verified']);
+
+      // Удаление нужно, чтобы человек мог удалить свой аккаунт целиком
+      allow delete: if isOwner(uid);
+
+      // ---------- заявка на проверку ----------
+      //
+      // Лежит в подколлекции, а не в самой анкете, потому что анкету читает
+      // любой авторизованный: телефон, селфи и данные карты в ней оказались бы
+      // открыты всему приложению. Здесь их видят только владелец и модератор.
+      match /verification/{docId} {
+
+        // Поля, которые заполняет сам мастер
+        function ownFields() {
+          return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'phone', 'about', 'photoUrl', 'status', 'appliedAt', 'biometricConsent',
+          ]);
+        }
+
+        // Фотография лица — отдельное согласие, а не часть общего: без него
+        // её нельзя ни снять, ни хранить. Правило держит связку, чтобы
+        // снимок не остался при отозванном согласии.
+        function photoHasConsent() {
+          return request.resource.data.get('photoUrl', null) == null
+            || request.resource.data.get('biometricConsent', null) != null;
+        }
+
+        // Отправить на проверку можно только с фотографией: без неё модератору
+        // нечего смотреть.
+        //
+        // Привязанную карту здесь намеренно не требуем, хотя она обязательна.
+        // Проверка на этом шаге делала заявку неотправляемой, пока не настроен
+        // платёжный провайдер, и отбирала решение у модератора — а он и есть
+        // тот, кто решает. Статус карты он видит в очереди.
+        function readyToApply() {
+          return request.resource.data.photoUrl is string
+            && request.resource.data.photoUrl.size() > 0;
+        }
+
+        function statusWas(s) { return resource.data.get('status', 'draft') == s; }
+        function statusNow(s) { return request.resource.data.get('status', 'draft') == s; }
+
+        allow read: if isOwner(uid) || isAdmin();
+
+        // Черновик заводит сам мастер.
+        // Ни привязку карты, ни счётчик попыток, ни решение модератора
+        // подсунуть при создании нельзя — всё это пишет только сервер
+        allow create: if isOwner(uid)
+          && request.resource.data.status == 'draft'
+          && !request.resource.data.keys().hasAny([
+            'cardLast4', 'cardBrand', 'cardBindingId', 'cardBoundAt',
+            'bindingAttempts', 'lastBindingAt', 'refundedPaymentId',
+            'rejectionReason', 'reviewedAt', 'reviewedBy',
+          ]);
+
+        // Мастер правит анкету, пока она черновик или отклонена, и сам
+        // отправляет её на проверку
+        allow update: if isOwner(uid) && ownFields() && photoHasConsent()
+          && (statusWas('draft') || statusWas('rejected'))
+          && (
+            (statusNow('draft') || statusNow('rejected'))
+            || (statusNow('pending') && readyToApply())
+          );
+
+        // Решение модератора. Данные анкеты он не переписывает — только
+        // выносит вердикт.
+        allow update: if isAdmin()
+          && statusWas('pending')
+          && (statusNow('approved') || statusNow('rejected'))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'rejectionReason', 'reviewedAt', 'reviewedBy',
+          ]);
+
+        // Часть удаления аккаунта
+        allow delete: if isOwner(uid);
+      }
+
+      // Отзыв клиента о работе мастера. Идентификатор — id заявки: так на одну
+      // заявку приходится ровно один отзыв, без всяких проверок на дубли.
+      match /reviews/{orderId} {
+
+        function order() {
+          return get(/databases/$(database)/documents/orders/$(orderId)).data;
+        }
+
+        allow read: if authed();
+
+        // Оставить отзыв может только клиент завершённой заявки и только тому
+        // мастеру, который её делал
+        allow create: if authed()
+          && order().clientId == request.auth.uid
+          && order().get('masterId', null) == uid
+          && order().status == 'Завершена'
+          && request.resource.data.orderId == orderId
+          && request.resource.data.clientId == request.auth.uid
+          && request.resource.data.stars is int
+          && request.resource.data.stars >= 1
+          && request.resource.data.stars <= 5
+          && request.resource.data.text is string
+          && request.resource.data.text.size() <= 1000;
+
+        // Отзыв не переписывается и не удаляется: иначе рейтинг можно было бы
+        // менять задним числом, договорившись с мастером
+        allow update, delete: if false;
+      }
     }
 
-    // Заявки. Клиент видит свои; мастер видит свои взятые и те, что ещё в поиске
-    // исполнителя. Поле clientId переписать нельзя — владелец заявки неизменен.
+    // Заявки.
+    //
+    // Жизненный цикл:
+    //   Поиск мастера ──(клиент выбрал предложение)──> В работе
+    //   В работе ──(мастер закончил)──> Ждёт подтверждения
+    //   Ждёт подтверждения ──(клиент подтвердил)──> Завершена
+    //   любой незакрытый статус ──(клиент)──> Отменена
+    //
+    // Цену предлагают в подколлекции offers, по документу на мастера, — там же
+    // объяснено, почему заявка не «достаётся» мастеру и почему статус
+    // «Есть предложения» остался только у старых заявок.
     match /orders/{orderId} {
 
       function isClient() {
@@ -50,25 +260,206 @@ service cloud.firestore {
       }
 
       function isAssignedMaster() {
-        return authed() && resource.data.get('masterId', '') == request.auth.uid;
+        return authed() && resource.data.get('masterId', null) == request.auth.uid;
       }
 
-      function isOpenForMasters() {
-        return isMaster() && resource.data.status == 'Поиск мастера';
+      // Открыта: ищет исполнителя, предложения принимаются
+      function isOpen() {
+        return resource.data.status == 'Поиск мастера';
+      }
+
+      function changed() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+
+      function statusIs(from, to) {
+        return resource.data.status == from && request.resource.data.status == to;
+      }
+
+      function unchanged(field) {
+        return request.resource.data.get(field, null) == resource.data.get(field, null);
       }
 
       allow create: if authed()
-        && request.resource.data.clientId == request.auth.uid;
+        && request.resource.data.clientId == request.auth.uid
+        && request.resource.data.status == 'Поиск мастера'
+        && request.resource.data.masterId == null
+        && request.resource.data.agreedPrice == null
+        && request.resource.data.reviewed == false
+        && request.resource.data.city is string
+        && validCategory(request.resource.data.category);
 
-      allow read: if isClient() || isAssignedMaster() || isOpenForMasters();
-
-      allow update: if (isClient() || isAssignedMaster() || isOpenForMasters())
-        && request.resource.data.clientId == resource.data.clientId;
+      // Свободную заявку видит любой проверенный мастер — иначе он не сможет
+      // предложить цену. Как только клиент кого-то выбрал, статус меняется и
+      // заявка остаётся видна только своим.
+      //
+      // Именно здесь проверка verified важнее всего: в заявке лежат имя,
+      // адрес и фотография жилья. Незаполненная анкета доступа не даёт.
+      allow read: if isClient() || isAssignedMaster() || (isVerifiedMaster() && isOpen());
 
       // Заявки не удаляются, а переводятся в статус «Отменена»
       allow delete: if false;
 
-      // Переписка по заявке — только между её участниками
+      // ---------- что вправе изменить клиент ----------
+
+      function clientFields() {
+        return changed().hasOnly([
+          'status', 'masterId', 'masterName', 'agreedPrice', 'agreedAt',
+          'reviewed', 'priceStatus', 'priceHistory', 'photoUrl',
+        ]);
+      }
+
+      // Фото прикладывается сразу после создания: сначала заявка, потом
+      // загрузка в Storage, потом ссылка. Один раз и только пока заявку
+      // никто не взял — подменить снимок у мастера в работе нельзя.
+      function clientAttachesPhoto() {
+        return isOpen()
+          && resource.data.get('photoUrl', null) == null
+          && request.resource.data.photoUrl is string
+          && unchanged('status') && unchanged('masterId') && unchanged('agreedPrice');
+      }
+
+      // Выбранное предложение. Читается по masterId, который клиент записывает
+      // в заявку, — так цену нельзя придумать: она сверяется с документом,
+      // который прислал сам мастер.
+      function pickedOffer() {
+        return get(/databases/$(database)/documents/orders/$(orderId)/offers/$(request.resource.data.masterId)).data;
+      }
+
+      function clientPicksOffer() {
+        return isOpen()
+          && resource.data.get('masterId', null) == null
+          && request.resource.data.masterId is string
+          && request.resource.data.status == 'В работе'
+          && request.resource.data.agreedPrice == pickedOffer().price
+          && request.resource.data.masterName == pickedOffer().masterName;
+      }
+
+      function clientConfirms() {
+        return statusIs('Ждёт подтверждения', 'Завершена')
+          && unchanged('masterId') && unchanged('agreedPrice');
+      }
+
+      function clientCancels() {
+        return request.resource.data.status == 'Отменена'
+          && resource.data.status in ['Поиск мастера', 'Есть предложения', 'В работе']
+          && unchanged('masterId') && unchanged('agreedPrice');
+      }
+
+      // Отметка «отзыв оставлен» — чтобы не просить его повторно. Ставится
+      // вместе с самим отзывом и только один раз.
+      function clientMarksReviewed() {
+        return resource.data.status == 'Завершена'
+          && resource.data.get('reviewed', false) == false
+          && request.resource.data.reviewed == true
+          && unchanged('status') && unchanged('masterId') && unchanged('agreedPrice');
+      }
+
+      // ---------- согласование цены у заявок до появления offers ----------
+      // У них предложение лежит в самой заявке (price/priceStatus). Новые
+      // заявки этим путём не ходят; когда старые закроются, всё это уйдёт.
+
+      function legacyOffered() {
+        return resource.data.get('priceStatus', 'none') == 'offered';
+      }
+
+      function clientAcceptsLegacy() {
+        return legacyOffered()
+          && request.resource.data.priceStatus == 'accepted'
+          && request.resource.data.agreedPrice == resource.data.price
+          && resource.data.status in ['Поиск мастера', 'Есть предложения']
+          && request.resource.data.status == 'В работе'
+          && unchanged('masterId');
+      }
+
+      function clientDeclinesLegacy() {
+        return legacyOffered()
+          && request.resource.data.priceStatus == 'declined'
+          && unchanged('status') && unchanged('masterId') && unchanged('agreedPrice');
+      }
+
+      allow update: if isClient() && clientFields()
+        && (clientPicksOffer() || clientConfirms() || clientCancels()
+          || clientMarksReviewed() || clientAttachesPhoto()
+          || clientAcceptsLegacy() || clientDeclinesLegacy());
+
+      // ---------- что вправе изменить мастер ----------
+      // В новой схеме почти ничего: цену он называет в offers, заявку ему
+      // отдаёт клиент. Остаётся отметка о выполненной работе.
+
+      function masterFields() {
+        return changed().hasOnly([
+          'status', 'price', 'priceStatus', 'priceHistory', 'masterName',
+        ]);
+      }
+
+      function masterFinishes() {
+        return isAssignedMaster()
+          && statusIs('В работе', 'Ждёт подтверждения')
+          && unchanged('agreedPrice') && unchanged('masterId');
+      }
+
+      // Пересмотр цены у старой заявки, где предложение лежит в ней самой
+      function masterReoffersLegacy() {
+        return isAssignedMaster()
+          && resource.data.status in ['Поиск мастера', 'Есть предложения']
+          && request.resource.data.priceStatus == 'offered'
+          && validPrice(request.resource.data.price)
+          && unchanged('agreedPrice') && unchanged('masterId');
+      }
+
+      allow update: if masterFields() && (masterFinishes() || masterReoffersLegacy());
+
+      // ---------- предложения мастеров ----------
+      //
+      // Документ на мастера, идентификатор равен его uid. Из этого следует
+      // главное: перебить чужое предложение нельзя технически — каждый пишет
+      // только в свой документ, а masterId в самой заявке проставляет клиент,
+      // когда выбирает. Отдельный статус «заявка занята» для этого больше
+      // не нужен, и заявка остаётся открытой, пока клиент не выбрал, —
+      // именно это и даёт конкуренцию по цене.
+      match /offers/{masterId} {
+
+        function order() {
+          return get(/databases/$(database)/documents/orders/$(orderId)).data;
+        }
+
+        function orderIsOpen() {
+          return order().status == 'Поиск мастера'
+            && order().get('masterId', null) == null;
+        }
+
+        // Видят клиент заявки и сам мастер. Другие мастера — нет: знать чужие
+        // цены до собственного предложения им не нужно.
+        allow read: if authed()
+          && (request.auth.uid == masterId || order().clientId == request.auth.uid);
+
+        allow create, update: if isVerifiedMaster()
+          && request.auth.uid == masterId
+          && orderIsOpen()
+          && request.resource.data.masterId == masterId
+          && request.resource.data.status == 'pending'
+          && validPrice(request.resource.data.price)
+          && request.resource.data.comment is string
+          && request.resource.data.comment.size() <= 300;
+
+        // Клиент принимает предложение — тем же пакетом, что и запись
+        // masterId в заявку
+        allow update: if authed()
+          && order().clientId == request.auth.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.price == resource.data.price
+          && request.resource.data.masterId == resource.data.masterId;
+
+        // Мастер может отозвать своё предложение, пока его не приняли
+        allow delete: if request.auth.uid == masterId
+          && resource.data.status == 'pending'
+          && orderIsOpen();
+      }
+
+      // ---------- переписка по заявке ----------
+      // Только между её участниками
       match /messages/{messageId} {
 
         function order() {
@@ -78,17 +469,44 @@ service cloud.firestore {
         function isParty() {
           return authed() && (
             order().clientId == request.auth.uid
-            || order().get('masterId', '') == request.auth.uid
+            || order().get('masterId', null) == request.auth.uid
           );
         }
 
         allow read: if isParty();
         allow create: if isParty()
-          && request.resource.data.senderId == request.auth.uid;
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
 
         // Отправленное сообщение не редактируется и не удаляется
         allow update, delete: if false;
       }
+    }
+
+    // Свои предложения по всем заявкам сразу: мастеру нужен их список, а
+    // заявки, где он ещё только предложил цену, ему не принадлежат.
+    // Запрос — collectionGroup('offers').where('masterId','==',uid).
+    match /{path=**}/offers/{masterId} {
+      allow read: if request.auth.uid == masterId;
+    }
+
+    // Очередь модерации: collectionGroup('verification').where('status','==','pending')
+    match /{path=**}/verification/{docId} {
+      allow read: if isAdmin();
+    }
+
+    // Сводные числа по заявкам: медиана чека и разброс.
+    //
+    // Модератору они нужны, а сами заявки ему не видны и видеть их он не
+    // должен — там адрес, комментарий и фото. Гистограмму считает функция,
+    // и по ней восстановить чью-то конкретную заявку нельзя.
+    match /stats/{docId} {
+      allow read: if isAdmin();
+      // Пишет только Admin SDK, а он правила не спрашивает. Из приложения —
+      // никто: иначе медиану можно было бы накрутить.
+      allow write: if false;
     }
 
     // Всё, что не описано выше, закрыто наглухо

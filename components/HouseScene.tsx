@@ -3,11 +3,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   Extrapolation,
-  FadeIn,
   FadeInDown,
   FadeOut,
+  cancelAnimation,
   interpolate,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withSpring,
@@ -44,31 +45,49 @@ export type Room = {
 // План этажа: верхняя грань дома, разделённая на четыре комнаты
 export const ROOMS: Room[] = [
   {
-    id: 'kitchen', title: 'Кухня', icon: '🍳', x: 200, y: 118,
-    points: '200,100 255,127.5 200,155 145,127.5', fill: '#F5E9D2',
+    id: 'kitchen',
+    title: 'Кухня',
+    icon: '🍳',
+    x: 200,
+    y: 118,
+    points: '200,100 255,127.5 200,155 145,127.5',
+    fill: '#F5E9D2',
     objects: [
       { id: 'sink', title: 'Мойка', icon: '🚰', place: 'Кухня', x: 170, y: 120 },
       { id: 'stove', title: 'Плита', icon: '🔥', place: 'Кухня', x: 228, y: 140 },
     ],
   },
   {
-    id: 'living', title: 'Гостиная', icon: '🛋️', x: 255, y: 153,
-    points: '255,127.5 310,155 255,182.5 200,155', fill: '#E3ECDB',
-    objects: [
-      { id: 'light', title: 'Свет', icon: '💡', place: 'Гостиная', x: 255, y: 155 },
-    ],
+    id: 'living',
+    title: 'Гостиная',
+    icon: '🛋️',
+    x: 255,
+    y: 153,
+    points: '255,127.5 310,155 255,182.5 200,155',
+    fill: '#E3ECDB',
+    objects: [{ id: 'light', title: 'Свет', icon: '💡', place: 'Гостиная', x: 255, y: 155 }],
   },
   {
-    id: 'bath', title: 'Ванная', icon: '🛁', x: 200, y: 188,
-    points: '200,155 255,182.5 200,210 145,182.5', fill: '#D9E7E9',
+    id: 'bath',
+    title: 'Ванная',
+    icon: '🛁',
+    x: 200,
+    y: 188,
+    points: '200,155 255,182.5 200,210 145,182.5',
+    fill: '#D9E7E9',
     objects: [
       { id: 'shower', title: 'Душ', icon: '🚿', place: 'Ванная', x: 174, y: 170 },
       { id: 'pipe', title: 'Труба', icon: '🔧', place: 'Ванная', x: 230, y: 192 },
     ],
   },
   {
-    id: 'bedroom', title: 'Спальня', icon: '🛏️', x: 145, y: 153,
-    points: '145,127.5 200,155 145,182.5 90,155', fill: '#EFE4EE',
+    id: 'bedroom',
+    title: 'Спальня',
+    icon: '🛏️',
+    x: 145,
+    y: 153,
+    points: '145,127.5 200,155 145,182.5 90,155',
+    fill: '#EFE4EE',
     objects: [
       { id: 'socket', title: 'Розетка', icon: '🔌', place: 'Спальня', x: 119, y: 143 },
       { id: 'window', title: 'Окно', icon: '🪟', place: 'Спальня', x: 175, y: 167 },
@@ -101,6 +120,18 @@ function cameraTarget(area: AreaId, stage: Stage, room: Room | null, hasObject: 
   return { s: hasObject ? 2.0 : 1.8, x: room.x, y: room.y };
 }
 
+// Вдох-выдох: 0 в начале и в конце периода, 1 в середине
+function wave(phase: number) {
+  'worklet';
+  return (1 - Math.cos(2 * Math.PI * phase)) / 2;
+}
+
+// Качание: 0 в покое, ±1 по краям размаха
+function swing(phase: number) {
+  'worklet';
+  return Math.sin(2 * Math.PI * phase);
+}
+
 type Props = {
   area: AreaId;
   stage: Stage;
@@ -110,11 +141,21 @@ type Props = {
   onSelectRoom: (room: Room) => void;
   onSelectObject: (obj: SceneObject) => void;
   onBack: () => void;
+  // Сцену не видно: другая вкладка, открытая шторка, режим мастера.
+  // Фоновые циклы на это время останавливаются.
+  paused?: boolean;
 };
 
 export function HouseScene({
-  area, stage, roomId, focusedObjectId,
-  onOpenHouse, onSelectRoom, onSelectObject, onBack,
+  area,
+  stage,
+  roomId,
+  focusedObjectId,
+  onOpenHouse,
+  onSelectRoom,
+  onSelectObject,
+  onBack,
+  paused,
 }: Props) {
   const [w, setW] = useState(0);
   const k = w / 400; // масштаб: координаты сцены → пиксели экрана
@@ -125,25 +166,60 @@ export function HouseScene({
   const cy = useSharedValue(0);
   // Прогресс «открытия» дома: 0 — крыша на месте, 1 — виден план комнат
   const openP = useSharedValue(0);
-  // Дыхание дома и его плавное отключение при входе внутрь
+  // Фазы бесконечных циклов: 0…1 по кругу, а само значение берётся синусом от
+  // фазы. Поэтому ноль — это состояние покоя, и цикл можно оборвать в любой
+  // момент, вернув фазу в ноль, а не доигрывая период до конца.
   const breath = useSharedValue(0);
+  // Амплитуда дыхания отдельно от фазы: при входе в дом она гаснет плавно
   const breathOn = useSharedValue(1);
   const sway = useSharedValue(0);
   const drift = useSharedValue(0);
   const prevStage = useRef<Stage>('exterior');
 
-  // Бесконечные, почти незаметные циклы: дыхание, покачивание деревьев, облака
+  const reduceMotion = useReducedMotion();
+  // Циклы живут на UI-потоке и сами не заканчиваются. Без этого дом дышал, а
+  // облака плыли и под другой вкладкой, и под открытой шторкой: работа, которой
+  // никто не видит, но за которую платит батарея.
+  const idle = !!paused || reduceMotion;
+
+  // Деревья и облака двигаются, только пока сцену видно
   useEffect(() => {
-    breath.value = withRepeat(
-      withTiming(1, { duration: 4200, easing: Easing.inOut(Easing.sin) }), -1, true,
-    );
-    sway.value = withRepeat(
-      withTiming(1, { duration: 5600, easing: Easing.inOut(Easing.sin) }), -1, true,
-    );
-    drift.value = withRepeat(
-      withTiming(1, { duration: 80000, easing: Easing.linear }), -1, false,
-    );
-  }, []);
+    if (idle) {
+      // При фазе 0 первое облако стоит за краем кадра — в покое сдвигаем их так,
+      // чтобы небо не выглядело пустым
+      drift.value = reduceMotion ? 0.25 : 0;
+      return;
+    }
+    sway.value = 0;
+    drift.value = 0;
+    sway.value = withRepeat(withTiming(1, { duration: 11200, easing: Easing.linear }), -1, false);
+    drift.value = withRepeat(withTiming(1, { duration: 80000, easing: Easing.linear }), -1, false);
+    return () => {
+      cancelAnimation(sway);
+      cancelAnimation(drift);
+      sway.value = 0;
+    };
+  }, [idle, reduceMotion, drift, sway]);
+
+  // Дыхание дома: замирает внутри дома и полностью останавливается, когда
+  // сцены не видно
+  useEffect(() => {
+    if (idle || stage !== 'exterior') {
+      // Сперва гаснет амплитуда — оборвать цикл сразу значило бы бросить дом
+      // на полувдохе, — и только по её окончании останавливается сама фаза
+      breathOn.value = withTiming(0, { duration: 600 }, (done) => {
+        if (done) {
+          cancelAnimation(breath);
+          breath.value = 0;
+        }
+      });
+      return;
+    }
+    breath.value = 0;
+    breath.value = withRepeat(withTiming(1, { duration: 8400, easing: Easing.linear }), -1, false);
+    breathOn.value = withTiming(1, { duration: 600 });
+    return () => cancelAnimation(breath);
+  }, [idle, stage, breath, breathOn]);
 
   // Камера плавно едет к цели при каждой смене состояния
   useEffect(() => {
@@ -156,26 +232,26 @@ export function HouseScene({
     cs.value = withSpring(t.s, cfg);
     cx.value = withSpring((CX - t.x) * t.s * k, cfg);
     cy.value = withSpring((CY - t.y) * t.s * k, cfg);
-  }, [area, stage, roomId, focusedObjectId, k]);
+  }, [area, stage, roomId, focusedObjectId, k, cs, cx, cy]);
 
   // Крыша поднимается, стены становятся полупрозрачными, дыхание замирает
   useEffect(() => {
     const open = stage !== 'exterior';
     openP.value = withSpring(open ? 1 : 0, springs.hero);
     breathOn.value = withTiming(open ? 0 : 1, { duration: 600 });
-  }, [stage]);
+  }, [stage, breathOn, openP]);
 
   const cameraStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: cx.value }, { translateY: cy.value }, { scale: cs.value }],
   }));
 
   const houseStyle = useAnimatedStyle(() => {
-    const b = breath.value * breathOn.value;
+    const b = wave(breath.value) * breathOn.value;
     return { transform: [{ translateY: -2.6 * b * k }, { scale: 1 + 0.005 * b }] };
   });
 
   const shadowStyle = useAnimatedStyle(() => {
-    const b = breath.value * breathOn.value;
+    const b = wave(breath.value) * breathOn.value;
     return { opacity: 0.09 - 0.02 * b, transform: [{ scale: 1 - 0.02 * b }] };
   });
 
@@ -194,10 +270,12 @@ export function HouseScene({
   }));
 
   const tree1Style = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${interpolate(sway.value, [0, 1], [-1.2, 1.2])}deg` }],
+    transform: [{ rotate: `${1.2 * swing(sway.value)}deg` }],
   }));
+  // Второе дерево качается в противоход первому и слабее — иначе лужайка
+  // выглядит как один механизм
   const tree2Style = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${interpolate(sway.value, [0, 1], [0.9, -0.9])}deg` }],
+    transform: [{ rotate: `${-0.9 * swing(sway.value)}deg` }],
   }));
 
   // Внутри дома облака гаснут, чтобы не отвлекать от плана комнат
@@ -220,21 +298,58 @@ export function HouseScene({
           <Animated.View style={[StyleSheet.absoluteFill, cameraStyle]}>
             {/* Земля: лужайка, дорожка, гараж */}
             <Layer>
-              <Rect x={18} y={150} width={364} height={172} rx={56} fill="#E4EDDC" stroke="#D8E4CC" strokeWidth={1.5} />
+              <Rect
+                x={18}
+                y={150}
+                width={364}
+                height={172}
+                rx={56}
+                fill="#E4EDDC"
+                stroke="#D8E4CC"
+                strokeWidth={1.5}
+              />
               <Polygon points="244,252 294,277 320,264 270,239" fill="#ECEAE0" />
-              <Polygon points="80,238 124,260 84,280 40,258" fill="#DCE6D2" stroke="#FFFFFF" strokeWidth={2} strokeOpacity={0.6} />
+              <Polygon
+                points="80,238 124,260 84,280 40,258"
+                fill="#DCE6D2"
+                stroke="#FFFFFF"
+                strokeWidth={2}
+                strokeOpacity={0.6}
+              />
               <Polygon points="124,260 84,280 84,306 124,286" fill="#F6F4EC" />
               <Polygon points="40,258 84,280 84,306 40,284" fill="#EAE7DD" />
               <Polygon points="92,302 116,290 116,272 92,284" fill="#D5DCCB" />
-              <Line x1={92} y1={296} x2={116} y2={284} stroke="#FFFFFF" strokeWidth={1.5} strokeOpacity={0.55} />
-              <Line x1={92} y1={290} x2={116} y2={278} stroke="#FFFFFF" strokeWidth={1.5} strokeOpacity={0.55} />
+              <Line
+                x1={92}
+                y1={296}
+                x2={116}
+                y2={284}
+                stroke="#FFFFFF"
+                strokeWidth={1.5}
+                strokeOpacity={0.55}
+              />
+              <Line
+                x1={92}
+                y1={290}
+                x2={116}
+                y2={278}
+                stroke="#FFFFFF"
+                strokeWidth={1.5}
+                strokeOpacity={0.55}
+              />
             </Layer>
 
             {/* Тень дома: дышит в противофазе с ним */}
             <Animated.View
               pointerEvents="none"
               style={[
-                { position: 'absolute', left: 80 * k, top: 250 * k, width: 240 * k, height: 44 * k },
+                {
+                  position: 'absolute',
+                  left: 80 * k,
+                  top: 250 * k,
+                  width: 240 * k,
+                  height: 44 * k,
+                },
                 shadowStyle,
               ]}
             >
@@ -251,21 +366,38 @@ export function HouseScene({
                   <Polygon points="310,155 200,210 200,268 310,213" fill="#F8F6EF" />
                   <Polygon points="238,249 264,236 264,200 238,213" fill="#6E8A64" />
                   <Circle cx={259} cy={222} r={1.6} fill="#F2F5F0" />
-                  <Polygon points="110,223 136,236 136,210 110,197" fill="#C7D6E0" stroke="#FFFFFF" strokeWidth={2} />
-                  <Line x1={123} y1={203.5} x2={123} y2={229.5} stroke="#FFFFFF" strokeWidth={1.5} />
+                  <Polygon
+                    points="110,223 136,236 136,210 110,197"
+                    fill="#C7D6E0"
+                    stroke="#FFFFFF"
+                    strokeWidth={2}
+                  />
+                  <Line
+                    x1={123}
+                    y1={203.5}
+                    x2={123}
+                    y2={229.5}
+                    stroke="#FFFFFF"
+                    strokeWidth={1.5}
+                  />
                 </Layer>
               </Animated.View>
 
               {/* План этажа: появляется, когда крыша уходит */}
               <Animated.View style={[StyleSheet.absoluteFill, floorStyle]} pointerEvents="none">
                 <Layer>
-                  <Polygon points="200,100 310,155 200,210 90,155" fill="#FBF9F3" stroke="#E8E5DA" strokeWidth={1} />
+                  <Polygon
+                    points="200,100 310,155 200,210 90,155"
+                    fill="#FBF9F3"
+                    stroke="#E8E5DA"
+                    strokeWidth={1}
+                  />
                 </Layer>
                 {ROOMS.map((room) => (
                   <RoomLayer
                     key={room.id}
                     room={room}
-                    dimmed={stage === 'room' && roomId !== room.id}
+                    hidden={stage === 'room' && roomId !== room.id}
                   />
                 ))}
               </Animated.View>
@@ -277,7 +409,15 @@ export function HouseScene({
                   <Polygon points="200,100 310,155 255,144.5 145,89.5" fill="#7E9873" />
                   <Polygon points="90,155 200,210 255,144.5 145,89.5" fill="#9CB48E" />
                   <Polygon points="310,155 200,210 255,144.5" fill="#F3F1E8" />
-                  <Line x1={145} y1={89.5} x2={255} y2={144.5} stroke="#FFFFFF" strokeWidth={1.5} strokeOpacity={0.25} />
+                  <Line
+                    x1={145}
+                    y1={89.5}
+                    x2={255}
+                    y2={144.5}
+                    stroke="#FFFFFF"
+                    strokeWidth={1.5}
+                    strokeOpacity={0.25}
+                  />
                   <Polygon points="222,98 234,104 222,110 210,104" fill="#F0ECE0" />
                   <Polygon points="210,104 222,110 222,124 210,118" fill="#E8E4D6" />
                   <Polygon points="222,110 234,104 234,118 222,124" fill="#DDD8C8" />
@@ -301,13 +441,13 @@ export function HouseScene({
                   room={room}
                   k={k}
                   index={i}
-                  mode={stage === 'room' ? (roomId === room.id ? 'hidden' : 'dim') : 'normal'}
+                  visible={stage !== 'room'}
                   onPress={() => onSelectRoom(room)}
                 />
               ))}
 
             {/* Объекты выбранной комнаты (или двора/гаража) */}
-            {(stage === 'room' && focusedRoom ? focusedRoom.objects : areaObjects ?? []).map(
+            {(stage === 'room' && focusedRoom ? focusedRoom.objects : (areaObjects ?? [])).map(
               (obj, i) => (
                 <ObjectChip
                   key={obj.id}
@@ -334,7 +474,7 @@ export function HouseScene({
               style={styles.backWrap}
             >
               <PressableScale style={styles.backChip} onPress={onBack}>
-                <Text style={styles.backText}>‹  Назад</Text>
+                <Text style={styles.backText}>‹ Назад</Text>
               </PressableScale>
             </Animated.View>
           )}
@@ -355,11 +495,17 @@ function Layer({ children }: { children: ReactNode }) {
   );
 }
 
-// Комната на плане: гаснет до 25%, когда выбрана другая
-function RoomLayer({ room, dimmed }: { room: Room; dimmed: boolean }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: withTiming(dimmed ? 0.25 : 1, { duration: 320 }),
-  }));
+// Комната на плане. Когда выбрана другая, эта уходит совсем, а не бледнеет:
+// полупрозрачные соседние комнаты просвечивали сквозь объекты выбранной и
+// читались как часть неё.
+function RoomLayer({ room, hidden }: { room: Room; hidden: boolean }) {
+  // Анимация запускается из эффекта, а не изнутри useAnimatedStyle: там она
+  // пересоздавалась бы на каждой перерисовке и могла оборваться на полпути
+  const opacity = useSharedValue(hidden ? 0 : 1);
+  useEffect(() => {
+    opacity.value = withTiming(hidden ? 0 : 1, { duration: 320 });
+  }, [hidden, opacity]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, style]} pointerEvents="none">
       <Layer>
@@ -375,22 +521,40 @@ function RoomLayer({ room, dimmed }: { room: Room; dimmed: boolean }) {
   );
 }
 
+// Подпись комнаты на плане.
+//
+// Внутри комнаты не показывается ни одна: раньше соседние гасли до 25% и
+// оставались читаемыми — «Спальня» и «Гостиная» просвечивали сквозь мойку
+// и плиту, и было непонятно, где ты находишься. Промежуточного состояния
+// больше нет, поэтому и видимость теперь одним флагом.
 function RoomChip({
-  room, k, index, mode, onPress,
+  room,
+  k,
+  index,
+  visible,
+  onPress,
 }: {
-  room: Room; k: number; index: number;
-  mode: 'normal' | 'dim' | 'hidden';
+  room: Room;
+  k: number;
+  index: number;
+  visible: boolean;
   onPress: () => void;
 }) {
-  const style = useAnimatedStyle(() => ({
-    opacity: withTiming(mode === 'normal' ? 1 : mode === 'dim' ? 0.25 : 0, { duration: 320 }),
-  }));
+  const target = visible ? 1 : 0;
+  const opacity = useSharedValue(target);
+  useEffect(() => {
+    opacity.value = withTiming(target, { duration: 320 });
+  }, [target, opacity]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
     <Animated.View
       entering={FadeInDown.delay(140 + index * 65).duration(340)}
       exiting={FadeOut.duration(220)}
-      style={[{ position: 'absolute', left: room.x * k - 40, top: room.y * k - 26, width: 80 }, style]}
-      pointerEvents={mode === 'normal' ? 'auto' : 'none'}
+      style={[
+        { position: 'absolute', left: room.x * k - 40, top: room.y * k - 26, width: 80 },
+        style,
+      ]}
+      pointerEvents={visible ? 'auto' : 'none'}
     >
       <PressableScale style={styles.roomChipInner} onPress={onPress}>
         <View style={styles.roomCircle}>
@@ -403,19 +567,35 @@ function RoomChip({
 }
 
 function ObjectChip({
-  obj, k, index, focused, onPress,
+  obj,
+  k,
+  index,
+  focused,
+  onPress,
 }: {
-  obj: SceneObject; k: number; index: number; focused: boolean; onPress: () => void;
+  obj: SceneObject;
+  k: number;
+  index: number;
+  focused: boolean;
+  onPress: () => void;
 }) {
-  const style = useAnimatedStyle(() => ({
-    transform: [{ scale: withSpring(focused ? 1.08 : 1, springs.micro) }],
-  }));
+  const scale = useSharedValue(focused ? 1.08 : 1);
+  useEffect(() => {
+    scale.value = withSpring(focused ? 1.08 : 1, springs.micro);
+  }, [focused, scale]);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
     <Animated.View
       entering={FadeInDown.delay(160 + index * 70).duration(320)}
       exiting={FadeOut.duration(200)}
       style={[
-        { position: 'absolute', left: obj.x * k - 45, top: obj.y * k - 17, width: 90, alignItems: 'center' },
+        {
+          position: 'absolute',
+          left: obj.x * k - 45,
+          top: obj.y * k - 17,
+          width: 90,
+          alignItems: 'center',
+        },
         style,
       ]}
     >
@@ -430,15 +610,32 @@ function ObjectChip({
 }
 
 function Tree({
-  k, x, y, w, h, style,
+  k,
+  x,
+  y,
+  w,
+  h,
+  style,
 }: {
-  k: number; x: number; y: number; w: number; h: number; style: object;
+  k: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  style: object;
 }) {
   return (
     <Animated.View
       pointerEvents="none"
       style={[
-        { position: 'absolute', left: x * k, top: y * k, width: w * k, height: h * k, transformOrigin: '50% 100%' },
+        {
+          position: 'absolute',
+          left: x * k,
+          top: y * k,
+          width: w * k,
+          height: h * k,
+          transformOrigin: '50% 100%',
+        },
         style,
       ]}
     >
@@ -453,17 +650,22 @@ function Tree({
 }
 
 function Cloud({
-  k, y, w, h, style,
+  k,
+  y,
+  w,
+  h,
+  style,
 }: {
-  k: number; y: number; w: number; h: number; style: object;
+  k: number;
+  y: number;
+  w: number;
+  h: number;
+  style: object;
 }) {
   return (
     <Animated.View
       pointerEvents="none"
-      style={[
-        { position: 'absolute', left: 0, top: y * k, width: w * k, height: h * k },
-        style,
-      ]}
+      style={[{ position: 'absolute', left: 0, top: y * k, width: w * k, height: h * k }, style]}
     >
       <Svg width="100%" height="100%" viewBox="0 0 68 30">
         <Ellipse cx={20} cy={18} rx={11} ry={8} fill="#FFFFFF" />
