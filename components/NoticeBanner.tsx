@@ -38,6 +38,9 @@ const makeStyles = (t: Palette) =>
       top: Platform.OS === 'ios' ? 56 : 36,
       left: 16,
       right: 16,
+      // Выше сплэша (zIndex 10): сбой при холодном старте важнее заставки,
+      // иначе баннер успел бы погаснуть под ней непрочитанным
+      zIndex: 20,
     },
     banner: {
       backgroundColor: t.danger,

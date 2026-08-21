@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ReduceMotion, ReducedMotionConfig } from 'react-native-reanimated';
@@ -12,7 +12,14 @@ import { consentsCurrent } from '../components/legal';
 import { NoticeBanner } from '../components/NoticeBanner';
 import { AdminScreen } from '../screens/AdminScreen';
 import { MasterScreen } from '../screens/MasterScreen';
+import { SplashScreen } from '../components/SplashScreen';
 import { useTheme } from '../theme';
+
+// Роуты, доступные без входа (кроме самого экрана входа). Новый публичный
+// роут — это одна строка здесь, а не новая ветка в условии редиректа.
+// Сейчас это только dev-витрина /demo: она живёт на подставных данных,
+// базу не трогает, а в прод-сборке сама уводит на вход.
+const PUBLIC_SEGMENTS = new Set(['demo']);
 
 export default function RootLayout() {
   return (
@@ -44,13 +51,17 @@ function RootShell() {
   // требование принять документы значит мигать им у тех, кто их уже принял
   const needsConsent = !!user && consents !== null && !consentsCurrent(consents);
   const segments = useSegments();
+  // Заставка запуска. Показывается один раз за холодный старт и накрывает
+  // момент, когда сессия ещё определяется и роутер решает, вход или главная.
+  const [splashDone, setSplashDone] = useState(false);
 
   // Без сессии данные всё равно не сохранить — правила Firestore требуют
   // авторизации. Поэтому неавторизованного уводим на вход, а вошедшего — с него.
   useEffect(() => {
     if (initializing) return;
     const onLogin = segments[0] === 'login';
-    if (!user && !onLogin) router.replace('/login');
+    const isPublic = onLogin || PUBLIC_SEGMENTS.has(segments[0] ?? '');
+    if (!user && !isPublic) router.replace('/login');
     else if (user && onLogin) router.replace('/');
   }, [user, initializing, segments]);
 
@@ -106,6 +117,11 @@ function RootShell() {
       {/* Поверх всего, кроме сообщения о сбое: без действующего согласия
           пользоваться сервисом нельзя вообще */}
       {needsConsent && <ConsentGate onAccept={acceptConsents} onLogout={logout} />}
+
+      {/* Заставка — поверх экранов и оверлеев: раскрытие в конце должно
+          открывать то, что человек реально увидит. Готовность = сессия
+          определена, роутер уже увёл на вход либо на главную. */}
+      {!splashDone && <SplashScreen ready={!initializing} onDone={() => setSplashDone(true)} />}
 
       {/* Поверх всего, включая режим мастера: сбой важнее того, что открыто */}
       {notice && <NoticeBanner text={notice} onDismiss={dismissNotice} />}
