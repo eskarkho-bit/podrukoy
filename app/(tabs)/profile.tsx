@@ -9,6 +9,7 @@ export default function ProfileRoute() {
       name={s.userName}
       onChangeName={s.setUserName}
       email={s.userEmail}
+      phone={s.userPhone}
       address={s.activeAddress}
       city={s.city}
       onChangeCity={s.setCity}
@@ -19,6 +20,9 @@ export default function ProfileRoute() {
       isAdmin={s.isAdmin}
       onOpenAdmin={() => s.setAdminOpen(true)}
       onLogout={s.logout}
+      authMethod={s.authMethod}
+      onChangePassword={s.changePassword}
+      onRequestDeleteCode={s.requestDeleteCode}
       onDeleteAccount={s.deleteAccount}
     />
   );

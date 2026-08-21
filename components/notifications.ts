@@ -3,8 +3,9 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-// Уведомления сервиса заказов. Пока нет серверной части, события генерирует
-// само приложение (локальные уведомления) — они работают везде, включая Expo Go.
+// Уведомления сервиса заказов. Все события присылает сервер (Cloud Functions
+// в functions/) — локальных уведомлений не осталось: последним был поддельный
+// ответ поддержки, теперь и она отвечает по-настоящему.
 // Удалённые пуши требуют dev build: в Expo Go на Android их нет начиная с SDK 53.
 
 // Показываем баннер даже когда приложение открыто: смена статуса заявки —
@@ -17,9 +18,6 @@ Notifications.setNotificationHandler({
     shouldShowList: true,
   }),
 });
-
-// Куда вести по нажатию на уведомление
-export type NotificationTarget = { href: string };
 
 const CHANNEL_ID = 'default';
 
@@ -75,26 +73,5 @@ export async function getPushToken(): Promise<string | null> {
   } catch (e) {
     console.warn('Не удалось получить push-токен:', e);
     return null;
-  }
-}
-
-/** Локальное уведомление — показывается сразу. */
-export async function notifyLocal(
-  title: string,
-  body: string,
-  target?: NotificationTarget,
-): Promise<void> {
-  // На вебе для этого нужен отдельный service worker — молча пропускаем,
-  // чтобы не сыпать ошибками в браузере
-  if (Platform.OS === 'web') return;
-  if (!(await ensureNotificationPermission())) return;
-
-  try {
-    await Notifications.scheduleNotificationAsync({
-      content: { title, body, data: target ?? {}, sound: true },
-      trigger: null, // немедленно
-    });
-  } catch (e) {
-    console.warn('Не удалось показать уведомление:', e);
   }
 }

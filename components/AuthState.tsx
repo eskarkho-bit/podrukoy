@@ -5,13 +5,16 @@ import {
   onAuthStateChanged,
   reauthenticateWithCredential,
   sendPasswordResetEmail,
+  signInWithCustomToken,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
   updateProfile,
   User,
 } from 'firebase/auth';
 import { ReactNode, createContext, useContext, useEffect, useState } from 'react';
 import { auth } from '../firebaseConfig';
+import { requestSmsCode, verifySmsCode, type SmsRequestResult } from './phoneAuth';
 
 // Сессия пользователя. Один аккаунт на человека: клиент и мастер — это один
 // и тот же вход, роль мастера добавляется отдельной анкетой masters/{uid}.
@@ -21,9 +24,19 @@ type AuthState = {
   // true, пока Firebase восстанавливает сохранённую сессию — в это время
   // нельзя показывать экран входа, иначе он мигнёт у вошедшего пользователя
   initializing: boolean;
+  // У аккаунта, заведённого по телефону, пароля нет: подтверждение личности
+  // для него — код из СМС, а не пароль. От этого зависит и смена пароля,
+  // и то, чем подтверждается удаление аккаунта.
+  hasPassword: boolean;
+  phone: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  changePassword: (current: string, next: string) => Promise<void>;
+  // Вход по телефону: сначала код на номер, потом вход по нему.
+  // register=true разрешает завести аккаунт, если номера ещё нет.
+  requestPhoneCode: (phone: string) => Promise<SmsRequestResult>;
+  signInWithPhone: (phone: string, code: string, register: boolean) => Promise<void>;
   logout: () => Promise<void>;
   // Firebase не даёт удалить аккаунт по старой сессии — сначала повторный
   // вход. Заодно это проверка, что телефон в руках у владельца.
@@ -105,6 +118,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sendPasswordResetEmail(auth, email.trim().toLowerCase());
   };
 
+  // Смена пароля начинается с текущего пароля, а не просто с открытой сессии:
+  // телефон в чужих руках не должен позволять отрезать владельца от аккаунта
+  const changePassword = async (current: string, next: string) => {
+    const authUser = auth.currentUser;
+    if (!authUser?.email) throw new Error('Сессия не найдена — войдите заново');
+    await reauthenticateWithCredential(
+      authUser,
+      EmailAuthProvider.credential(authUser.email, current),
+    );
+    await updatePassword(authUser, next);
+  };
+
+  const requestPhoneCode = (phone: string) => requestSmsCode(phone);
+
+  const signInWithPhone = async (phone: string, code: string, register: boolean) => {
+    // Код проверяет сервер; сюда возвращается custom-токен. Повторный вход
+    // уже вошедшего безвреден: uid тот же, а свежая сессия заодно открывает
+    // операции, требующие недавнего входа, — удаление аккаунта.
+    const token = await verifySmsCode(phone, code, register);
+    await signInWithCustomToken(auth, token);
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
@@ -131,9 +166,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         initializing,
+        // providerData, а не наличие email: у телефонного аккаунта email пуст,
+        // но и у парольного он мог бы опустеть при будущих способах входа
+        hasPassword: !!user?.providerData?.some((p) => p.providerId === 'password'),
+        phone: user?.phoneNumber ?? null,
         signIn,
         register,
         resetPassword,
+        changePassword,
+        requestPhoneCode,
+        signInWithPhone,
         logout,
         reauthenticate,
         deleteAccount,

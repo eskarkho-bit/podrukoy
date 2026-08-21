@@ -12,6 +12,11 @@ export type SignupDraft = {
   city: string;
   /** Улица и дом. Показывается мастеру, когда он берётся за заявку. */
   address: string;
+  /**
+   * Имя — только при регистрации по телефону: у такого аккаунта нет
+   * displayName, и взять имя при создании профиля больше неоткуда.
+   */
+  name?: string;
 };
 
 let pending: SignupDraft | null = null;

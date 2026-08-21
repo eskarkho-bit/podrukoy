@@ -9,7 +9,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.domio.app"
+      "bundleIdentifier": "com.domio.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.domio.app",
@@ -39,6 +42,19 @@
         {
           "photosPermission": "Фотографии нужны, чтобы приложить снимок поломки к заявке.",
           "cameraPermission": "Камера нужна для снимка поломки и для фотографии лица при проверке мастера."
+        }
+      ],
+      "expo-font",
+      "@sentry/react-native",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "backgroundColor": "#F2F5F0",
+          "dark": {
+            "backgroundColor": "#141A13"
+          }
         }
       ]
     ],
