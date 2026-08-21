@@ -25,6 +25,8 @@ expo-env.d.ts
 firestore-debug.log
 firebase-debug.log
 ui-debug.log
+# Страницы документов собираются из components/legal.ts перед деплоем
+legal-site/
 # Отпечаток последней выкатки правил — у каждого свой, в общей истории не нужен
 .rules-deployed.json
 

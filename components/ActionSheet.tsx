@@ -293,6 +293,13 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                     <PressableScale style={[styles.option, styles.submit]} onPress={submit}>
                       <Text style={styles.submitText}>Отправить заявку</Text>
                     </PressableScale>
+                    {/* Информированность по 152-ФЗ: человек должен видеть,
+                        кому уйдут адрес и фото, в момент действия, а не
+                        только в политике конфиденциальности */}
+                    <Text style={styles.privacyHint}>
+                      Адрес, описание и фото увидят проверенные мастера вашего города — так они
+                      смогут назвать цену
+                    </Text>
                   </Animated.View>
                 </>
               )}
@@ -414,6 +421,15 @@ const makeStyles = (t: Palette) =>
       color: t.onAccent,
       textAlign: 'center',
       flex: 1,
+    },
+    privacyHint: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: t.textMuted,
+      textAlign: 'center',
+      lineHeight: 15,
+      marginTop: 8,
+      paddingHorizontal: 6,
     },
     doneWrap: { alignItems: 'center', paddingVertical: 18 },
     checkCircle: {
