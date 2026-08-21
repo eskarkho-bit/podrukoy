@@ -1,20 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
   FadeOut,
   LinearTransition,
+  SlideInRight,
+  SlideOutRight,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import {
+  collection,
   collectionGroup,
   doc,
   getDoc,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   where,
@@ -59,6 +74,29 @@ type Props = {
 // Сутки — граница, после которой заявка считается залежавшейся: человек
 // ждёт допуска и не может работать
 const STALE_MS = 24 * 60 * 60 * 1000;
+
+// Обращение в поддержку. Живёт в поддереве пользователя; модератору правила
+// открывают ровно его — превью лежит в самом треде, чтобы список не читал
+// сообщения каждого обращения.
+type SupportThread = {
+  uid: string;
+  lastText: string;
+  /** 'user' — клиент ждёт ответа, 'master' — последним отвечала поддержка */
+  lastFrom: 'user' | 'master';
+  updatedMs: number | null;
+};
+
+type SupportMessage = { id: string; from: 'user' | 'master'; text: string; time: string };
+
+// Сколько обращений держим в списке. Старее полусотни — уже архив,
+// а не очередь на ответ.
+const SUPPORT_LIMIT = 50;
+
+function now() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export function AdminScreen({ open, onClose }: Props) {
   const { mode, colors: t } = useTheme();
@@ -111,6 +149,40 @@ export function AdminScreen({ open, onClose }: Props) {
   const listShown = useRef(false);
   const firstBatch = !listShown.current;
   if (items.length) listShown.current = true;
+
+  // Обращения в поддержку: по группе коллекций, свежие сверху. Фильтр по
+  // kind обязателен — без него правила отклоняют запрос целиком.
+  const [supportThreads, setSupportThreads] = useState<SupportThread[]>([]);
+  const [openSupportUid, setOpenSupportUid] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || !isAdmin) return;
+    return onSnapshot(
+      query(
+        collectionGroup(db, 'threads'),
+        where('kind', '==', 'support'),
+        orderBy('updatedAt', 'desc'),
+        limit(SUPPORT_LIMIT),
+      ),
+      (snap) => {
+        setSupportThreads(
+          snap.docs.flatMap((d) => {
+            const uid = d.ref.parent.parent?.id;
+            if (!uid) return [];
+            const v = d.data();
+            return [
+              {
+                uid,
+                lastText: String(v.lastText ?? ''),
+                lastFrom: v.lastFrom === 'master' ? ('master' as const) : ('user' as const),
+                updatedMs: v.updatedAt?.toMillis?.() ?? null,
+              },
+            ];
+          }),
+        );
+      },
+      (e) => console.warn('Обращения в поддержку недоступны:', e),
+    );
+  }, [open, isAdmin]);
 
   // Очередь: заявки во всех анкетах сразу, поэтому запрос по группе коллекций
   useEffect(() => {
@@ -234,8 +306,175 @@ export function AdminScreen({ open, onClose }: Props) {
             <Text style={styles.emptyTitle}>Очередь пуста</Text>
           </Animated.View>
         )}
+
+        {/* Обращения в поддержку. Имени клиента здесь нет намеренно: профиль
+            пользователя модератору не открыт, только сам тред. */}
+        {supportThreads.length > 0 && (
+          <>
+            <Animated.Text entering={FadeInDown.duration(360)} style={styles.sectionTitle}>
+              Поддержка
+              {supportThreads.some((s) => s.lastFrom === 'user')
+                ? ` · ${counted(
+                    supportThreads.filter((s) => s.lastFrom === 'user').length,
+                    'обращение ждёт',
+                    'обращения ждут',
+                    'обращений ждут',
+                  )} ответа`
+                : ''}
+            </Animated.Text>
+            {supportThreads.map((s) => (
+              <Animated.View
+                key={s.uid}
+                entering={FadeIn.duration(280)}
+                layout={LinearTransition.springify().damping(20).stiffness(170)}
+              >
+                <PressableScale style={styles.supportRow} onPress={() => setOpenSupportUid(s.uid)}>
+                  <View style={styles.supportBody}>
+                    <Text style={styles.supportWho}>Клиент {s.uid.slice(0, 6)}…</Text>
+                    <Text style={styles.supportPreview} numberOfLines={1}>
+                      {s.lastFrom === 'master' ? 'Вы: ' : ''}
+                      {s.lastText || 'Без текста'}
+                    </Text>
+                  </View>
+                  {s.lastFrom === 'user' && <Text style={styles.supportBadge}>ждёт ответа</Text>}
+                </PressableScale>
+              </Animated.View>
+            ))}
+          </>
+        )}
       </ScrollView>
+
+      {openSupportUid && (
+        <Animated.View
+          entering={SlideInRight.springify().damping(20).stiffness(160)}
+          exiting={SlideOutRight.duration(280)}
+          style={StyleSheet.absoluteFill}
+        >
+          <SupportChat uid={openSupportUid} onBack={() => setOpenSupportUid(null)} />
+        </Animated.View>
+      )}
     </Animated.View>
+  );
+}
+
+// ---------- Переписка с клиентом ----------
+
+// Ответ уходит от лица «Поддержки», а не от имени модератора: клиенту
+// важен ответ сервиса, а не то, кто из людей дежурил.
+function SupportChat({ uid, onBack }: { uid: string; onBack: () => void }) {
+  const { mode, colors: t } = useTheme();
+  const styles = themed[mode];
+  const { showNotice } = useAppState();
+  const [messages, setMessages] = useState<SupportMessage[]>([]);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    return onSnapshot(
+      query(collection(db, 'users', uid, 'threads', 'support', 'messages'), orderBy('createdAt')),
+      (snap) => {
+        setMessages(
+          snap.docs.map((m) => {
+            const v = m.data();
+            return {
+              id: m.id,
+              from: v.from === 'user' ? ('user' as const) : ('master' as const),
+              text: String(v.text ?? ''),
+              time: String(v.time ?? ''),
+            };
+          }),
+        );
+      },
+      (e) => console.warn('Переписка поддержки недоступна:', e),
+    );
+  }, [uid]);
+
+  const send = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    try {
+      // Сообщение и превью в треде — одним пакетом: порознь список обращений
+      // мог бы показывать не то, что лежит в переписке
+      const batch = writeBatch(db);
+      batch.set(doc(collection(db, 'users', uid, 'threads', 'support', 'messages')), {
+        from: 'master',
+        text: trimmed,
+        time: now(),
+        createdAt: serverTimestamp(),
+      });
+      batch.update(doc(db, 'users', uid, 'threads', 'support'), {
+        unread: true,
+        lastText: trimmed,
+        lastFrom: 'master',
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      setText('');
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+    } catch (e) {
+      console.warn('Ответ не отправлен:', e);
+      showNotice(firestoreErrorText(e, 'Ответ не отправлен. Проверьте связь'));
+    }
+    setSending(false);
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={[styles.fill, styles.root]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <View style={styles.topBar}>
+        <PressableScale style={styles.backChip} onPress={onBack}>
+          <Text style={styles.backText}>‹ Обращения</Text>
+        </PressableScale>
+        <Text style={styles.chatTitle}>Клиент {uid.slice(0, 6)}…</Text>
+        <View style={styles.backChipGhost} />
+      </View>
+
+      <ScrollView
+        ref={scrollRef}
+        style={styles.fill}
+        contentContainerStyle={styles.chatContent}
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+      >
+        {messages.map((m) => (
+          <View
+            key={m.id}
+            style={[styles.bubble, m.from === 'master' ? styles.bubbleMine : styles.bubbleTheirs]}
+          >
+            <Text style={m.from === 'master' ? styles.bubbleMineText : styles.bubbleTheirsText}>
+              {m.text}
+            </Text>
+            <Text
+              style={[styles.bubbleTime, m.from === 'master' ? styles.bubbleMineTime : undefined]}
+            >
+              {m.time}
+            </Text>
+          </View>
+        ))}
+      </ScrollView>
+
+      <View style={styles.chatInputRow}>
+        <TextInput
+          style={styles.chatInput}
+          value={text}
+          onChangeText={setText}
+          placeholder="Ответ клиенту…"
+          placeholderTextColor={t.textMuted}
+          multiline
+          maxLength={2000}
+        />
+        <PressableScale
+          style={[styles.chatSend, (!text.trim() || sending) && styles.btnDim]}
+          onPress={send}
+          disabled={!text.trim() || sending}
+        >
+          <Text style={styles.chatSendText}>➤</Text>
+        </PressableScale>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -602,6 +841,74 @@ const makeStyles = (t: Palette) =>
     emptyWrap: { alignItems: 'center', paddingVertical: 50 },
     emptyIcon: { fontSize: 36, marginBottom: 10 },
     emptyTitle: { fontSize: 14, fontWeight: '800', color: t.textMuted },
+
+    // ---------- поддержка ----------
+    sectionTitle: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: t.textMuted,
+      marginTop: 20,
+      marginBottom: 8,
+    },
+    supportRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 13,
+      marginBottom: 8,
+    },
+    supportBody: { flex: 1 },
+    supportWho: { fontSize: 13, fontWeight: '800', color: t.text },
+    supportPreview: { fontSize: 12, fontWeight: '600', color: t.textMuted, marginTop: 3 },
+    supportBadge: { fontSize: 11, fontWeight: '800', color: t.warn },
+    chatTitle: { fontSize: 13, fontWeight: '800', color: t.text },
+    chatContent: { padding: 16, paddingBottom: 20, gap: 8 },
+    bubble: { maxWidth: '82%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 9 },
+    bubbleMine: { alignSelf: 'flex-end', backgroundColor: t.accent },
+    bubbleTheirs: {
+      alignSelf: 'flex-start',
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    bubbleMineText: { color: t.onAccent, fontSize: 13.5, fontWeight: '600', lineHeight: 19 },
+    bubbleTheirsText: { color: t.text, fontSize: 13.5, fontWeight: '600', lineHeight: 19 },
+    bubbleTime: { fontSize: 10, fontWeight: '600', color: t.textMuted, marginTop: 3 },
+    bubbleMineTime: { color: t.onAccent, opacity: 0.75 },
+    chatInputRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 8,
+      paddingHorizontal: 14,
+      paddingTop: 8,
+      paddingBottom: 26,
+    },
+    chatInput: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 16,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 13,
+      paddingVertical: 10,
+      fontSize: 13.5,
+      fontWeight: '600',
+      color: t.text,
+      maxHeight: 120,
+    },
+    chatSend: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: t.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    chatSendText: { color: t.onAccent, fontSize: 16, fontWeight: '800' },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

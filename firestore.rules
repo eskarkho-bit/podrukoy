@@ -97,6 +97,42 @@ service cloud.firestore {
       match /{document=**} {
         allow read, write: if isOwner(uid);
       }
+
+      // ---------- обращение в поддержку ----------
+      //
+      // Единственная часть поддерева пользователя, открытая кому-то кроме
+      // владельца: тред поддержки читает модератор — иначе отвечать некому.
+      // Замок держит threadId: остальные треды и весь профиль закрыты как были.
+      match /threads/{threadId} {
+
+        // Пометки при ответе: непрочитанность у клиента и превью для списка
+        // обращений. Имя и иконку треда модератор не переписывает.
+        allow update: if isAdmin() && threadId == 'support'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'unread', 'updatedAt', 'lastText', 'lastFrom',
+          ]);
+
+        match /messages/{messageId} {
+          allow read: if isAdmin() && threadId == 'support';
+
+          // Ответ — только от лица поддержки. Править и удалять написанное
+          // модератор не может: у него нет allow на это, а правило владельца
+          // сюда не дотягивается.
+          allow create: if isAdmin() && threadId == 'support'
+            && request.resource.data.from == 'master'
+            && request.resource.data.text is string
+            && request.resource.data.text.size() >= 1
+            && request.resource.data.text.size() <= 2000;
+        }
+      }
+    }
+
+    // Обращения в поддержку одним списком — запрос по группе коллекций
+    // threads. Шаблон совпадает с любым путём */threads/*, поэтому условие
+    // держит два замка: только модератор и только треды с kind == 'support' —
+    // запрос без такого фильтра отклоняется целиком.
+    match /{path=**}/threads/{threadId} {
+      allow read: if isAdmin() && resource.data.get('kind', '') == 'support';
     }
 
     // Анкета мастера. Читать может любой авторизованный: клиент выбирает из
@@ -507,6 +543,15 @@ service cloud.firestore {
       // Пишет только Admin SDK, а он правила не спрашивает. Из приложения —
       // никто: иначе медиану можно было бы накрутить.
       allow write: if false;
+    }
+
+    // Одноразовые коды входа по СМС. Пишут и читают их только функции через
+    // Admin SDK — он правила не спрашивает. Из приложения — никто: код
+    // приходит в СМС, а не из базы, иначе войти мог бы любой, кто умеет
+    // читать чужие документы. Явный запрет, а не надежда на общий, — чтобы
+    // тест на это был возможен и заметен.
+    match /phoneCodes/{codeId} {
+      allow read, write: if false;
     }
 
     // Всё, что не описано выше, закрыто наглухо

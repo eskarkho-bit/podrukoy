@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -6,10 +6,14 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  View,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { Oswald_400Regular, useFonts } from '@expo-google-fonts/oswald';
 import { PressableScale } from '../components/PressableScale';
+import { DomioLogo } from '../components/DomioLogo';
 import { authErrorText, useAuth } from '../components/AuthState';
+import { formatRuPhone, normalizeRuPhone, phoneAuthErrorText } from '../components/phoneAuth';
 import { currentConsents, rememberConsent, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { rememberSignup } from '../components/signupDraft';
@@ -22,13 +26,25 @@ import { Palette, palettes, useTheme } from '../theme';
 export function AuthScreen() {
   const { mode: themeMode, colors: t } = useTheme();
   const styles = themed[themeMode];
-  const { signIn, register, resetPassword } = useAuth();
+  const { signIn, register, resetPassword, requestPhoneCode, signInWithPhone } = useAuth();
+  // Фирменный Oswald — только для слова «domio». Пока файл не загрузился,
+  // слово стоит системным шрифтом: неизвестное семейство уронило бы iOS
+  const [brandFontLoaded] = useFonts({ Oswald_400Regular });
 
   // Один экран — два режима: вход и регистрация
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  // И два способа: по почте с паролем или по телефону с кодом из СМС
+  const [method, setMethod] = useState<'email' | 'phone'>('email');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  // Код запрошен — дальше поле кода и кнопка входа вместо «Получить код»
+  const [codeSent, setCodeSent] = useState(false);
+  // До этого момента повторная отправка выключена — сервер всё равно откажет
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [, bump] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -43,11 +59,119 @@ export function AuthScreen() {
   const [pickingCity, setPickingCity] = useState(false);
 
   const isRegister = mode === 'register';
+  const isPhone = method === 'phone';
+
+  // Тикает раз в секунду, пока идёт обратный отсчёт до повторной отправки
+  useEffect(() => {
+    if (!cooldownUntil) return;
+    const id = setInterval(() => {
+      if (Date.now() >= cooldownUntil) setCooldownUntil(0);
+      else bump((n) => n + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [cooldownUntil]);
+  const cooldownLeft = cooldownUntil
+    ? Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000))
+    : 0;
 
   const switchMode = () => {
     setMode(isRegister ? 'login' : 'register');
     setError(null);
     setNotice(null);
+    // Код был запрошен для другого действия: у входа и регистрации разные
+    // проверки на сервере, начатый путь не переносится
+    setCodeSent(false);
+    setCode('');
+  };
+
+  const switchMethod = (next: 'email' | 'phone') => {
+    if (next === method) return;
+    setMethod(next);
+    setError(null);
+    setNotice(null);
+    setCodeSent(false);
+    setCode('');
+  };
+
+  // Проверки полей регистрации, общие для обоих способов входа. Возвращает
+  // текст ошибки — согласие проверяется до любых обращений к серверу:
+  // отправка СМС на номер — это уже обработка персональных данных.
+  const registerFieldsError = (): string | null => {
+    if (name.trim().length < 2) return 'Напишите, как вас зовут';
+    if (!cityKey) return 'Выберите населённый пункт — без него заявку не увидят мастера';
+    if (address.trim().length < 5) return 'Укажите адрес: улицу и дом';
+    if (!accepted) return 'Чтобы зарегистрироваться, примите соглашение и политику';
+    return null;
+  };
+
+  // Шаг первый телефонного входа: отправить код на номер
+  const sendCode = async () => {
+    const normalized = normalizeRuPhone(phone);
+    if (!normalized) {
+      setError('Нужен мобильный номер РФ — на него придёт код');
+      return;
+    }
+    if (isRegister) {
+      const fieldsError = registerFieldsError();
+      if (fieldsError) {
+        setError(fieldsError);
+        return;
+      }
+    }
+    setError(null);
+    setNotice(null);
+    setLoading(true);
+    try {
+      const result = await requestPhoneCode(normalized);
+      if (result === 'not-configured') {
+        setError('Вход по телефону пока недоступен — войдите по почте');
+        return;
+      }
+      setCodeSent(true);
+      setCooldownUntil(Date.now() + 60_000);
+      setNotice(`Код отправлен на ${formatRuPhone(normalized)}`);
+    } catch (e) {
+      setError(phoneAuthErrorText(e, 'Не удалось отправить код. Попробуйте ещё раз'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Шаг второй: вход по коду. При регистрации согласие и профиль передаются
+  // тем же путём, что и у почтовой, — через модули-хранилища.
+  const submitPhone = async () => {
+    const normalized = normalizeRuPhone(phone);
+    if (!normalized) {
+      setError('Нужен мобильный номер РФ — на него придёт код');
+      return;
+    }
+    if (!/^\d{6}$/.test(code.trim())) {
+      setError('Код — шесть цифр из СМС');
+      return;
+    }
+    if (isRegister) {
+      const fieldsError = registerFieldsError();
+      if (fieldsError) {
+        setError(fieldsError);
+        return;
+      }
+    }
+    setError(null);
+    setNotice(null);
+    setLoading(true);
+    try {
+      if (isRegister) {
+        rememberConsent(currentConsents());
+        rememberSignup({ city: cityKey, address: address.trim(), name: name.trim() });
+        await signInWithPhone(normalized, code.trim(), true);
+      } else {
+        await signInWithPhone(normalized, code.trim(), false);
+      }
+      // При успехе экран пропадёт сам: сессия появится в AuthProvider
+    } catch (e) {
+      setError(phoneAuthErrorText(e));
+      setLoading(false);
+    }
   };
 
   // Восстановление пароля. Ответ одинаков независимо от того, есть такой
@@ -71,10 +195,6 @@ export function AuthScreen() {
   };
 
   const submit = async () => {
-    if (isRegister && name.trim().length < 2) {
-      setError('Напишите, как вас зовут');
-      return;
-    }
     const e = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(e)) {
       setError('Похоже, в email опечатка');
@@ -84,19 +204,14 @@ export function AuthScreen() {
       setError('Пароль — не короче 6 символов');
       return;
     }
-    if (isRegister && !cityKey) {
-      setError('Выберите населённый пункт — без него заявку не увидят мастера');
-      return;
-    }
-    if (isRegister && address.trim().length < 5) {
-      setError('Укажите адрес: улицу и дом');
-      return;
-    }
-    // Согласие должно быть получено до того, как мы начали обрабатывать
-    // данные, а регистрация — это уже обработка имени и email
-    if (isRegister && !accepted) {
-      setError('Чтобы зарегистрироваться, примите соглашение и политику');
-      return;
+    // Согласие проверяется внутри: оно должно быть получено до того, как мы
+    // начали обрабатывать данные, а регистрация — уже обработка имени и email
+    if (isRegister) {
+      const fieldsError = registerFieldsError();
+      if (fieldsError) {
+        setError(fieldsError);
+        return;
+      }
     }
 
     setError(null);
@@ -123,13 +238,14 @@ export function AuthScreen() {
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Animated.View entering={FadeInDown.duration(420)} style={styles.badge}>
-          <Text style={styles.badgeIcon}>🏠</Text>
+          {/* Окна — цветом плашки: в знаке это дырки, сквозь них виден фон */}
+          <DomioLogo height={40} color={t.accent} windowColor={t.accentSoft} />
         </Animated.View>
 
         <Animated.Text
           key={`title-${mode}`}
           entering={FadeInDown.delay(60).duration(380)}
-          style={styles.title}
+          style={isRegister ? styles.title : [styles.title, brandFontLoaded && styles.wordmark]}
         >
           {isRegister ? 'Регистрация' : 'domio'}
         </Animated.Text>
@@ -140,13 +256,35 @@ export function AuthScreen() {
         >
           {isRegister
             ? 'Создайте аккаунт — и вызывайте мастера в пару касаний.'
-            : 'Мастер, которого проверили. Войдите, чтобы продолжить.'}
+            : 'Мастер по дому — под рукой. Войдите, чтобы продолжить.'}
         </Animated.Text>
 
         <Animated.View entering={FadeInDown.delay(140).duration(360)} style={styles.card}>
+          {/* Способ входа. Не вкладки всего экрана: имя, город и согласие
+              общие, меняются только поля идентификации */}
+          <View style={styles.methodRow}>
+            {(
+              [
+                ['email', 'Почта'],
+                ['phone', 'Телефон'],
+              ] as const
+            ).map(([key, label]) => (
+              <PressableScale
+                key={key}
+                style={[styles.methodBtn, method === key && styles.methodBtnOn]}
+                onPress={() => switchMethod(key)}
+                disabled={loading}
+              >
+                <Text style={[styles.methodText, method === key && styles.methodTextOn]}>
+                  {label}
+                </Text>
+              </PressableScale>
+            ))}
+          </View>
+
           {isRegister && (
             <Animated.View entering={FadeInDown.duration(260)}>
-              <Text style={styles.fieldLabel}>Имя</Text>
+              <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Имя</Text>
               <TextInput
                 style={styles.fieldInput}
                 value={name}
@@ -158,31 +296,76 @@ export function AuthScreen() {
             </Animated.View>
           )}
 
-          <Text style={[styles.fieldLabel, isRegister && styles.fieldLabelGap]}>Email</Text>
-          <TextInput
-            style={styles.fieldInput}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@example.ru"
-            placeholderTextColor={t.textMuted}
-            autoCapitalize="none"
-            autoComplete="email"
-            keyboardType="email-address"
-            editable={!loading}
-          />
+          {!isPhone && (
+            <>
+              <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Email</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.ru"
+                placeholderTextColor={t.textMuted}
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+                editable={!loading}
+              />
 
-          <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Пароль</Text>
-          <TextInput
-            style={styles.fieldInput}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="••••••"
-            placeholderTextColor={t.textMuted}
-            secureTextEntry
-            editable={!loading}
-            onSubmitEditing={submit}
-            returnKeyType="go"
-          />
+              <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Пароль</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="••••••"
+                placeholderTextColor={t.textMuted}
+                secureTextEntry
+                editable={!loading}
+                onSubmitEditing={submit}
+                returnKeyType="go"
+              />
+            </>
+          )}
+
+          {isPhone && (
+            <Animated.View entering={FadeInDown.duration(260)}>
+              <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Телефон</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={phone}
+                // Смена номера обесценивает отправленный код — начинаем заново
+                onChangeText={(v) => {
+                  setPhone(v);
+                  setCodeSent(false);
+                  setCode('');
+                }}
+                placeholder="+7 999 123-45-67"
+                placeholderTextColor={t.textMuted}
+                keyboardType="phone-pad"
+                autoComplete="tel"
+                editable={!loading}
+              />
+
+              {codeSent && (
+                <Animated.View entering={FadeInDown.duration(260)}>
+                  <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Код из СМС</Text>
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={code}
+                    onChangeText={setCode}
+                    placeholder="••••••"
+                    placeholderTextColor={t.textMuted}
+                    keyboardType="number-pad"
+                    autoComplete="sms-otp"
+                    textContentType="oneTimeCode"
+                    maxLength={6}
+                    editable={!loading}
+                    onSubmitEditing={submitPhone}
+                    returnKeyType="go"
+                  />
+                </Animated.View>
+              )}
+            </Animated.View>
+          )}
 
           {isRegister && (
             <Animated.View entering={FadeInDown.duration(260)}>
@@ -254,22 +437,38 @@ export function AuthScreen() {
 
           <PressableScale
             style={[styles.btn, loading && styles.btnDim]}
-            onPress={submit}
+            onPress={isPhone ? (codeSent ? submitPhone : sendCode) : submit}
             disabled={loading}
           >
             <Text style={styles.btnText}>
               {loading
-                ? isRegister
-                  ? 'Создаём аккаунт…'
-                  : 'Входим…'
-                : isRegister
-                  ? 'Зарегистрироваться'
-                  : 'Войти'}
+                ? isPhone && !codeSent
+                  ? 'Отправляем код…'
+                  : isRegister
+                    ? 'Создаём аккаунт…'
+                    : 'Входим…'
+                : isPhone && !codeSent
+                  ? 'Получить код'
+                  : isRegister
+                    ? 'Зарегистрироваться'
+                    : 'Войти'}
             </Text>
           </PressableScale>
 
+          {/* Повторная отправка — с обратным отсчётом: сервер всё равно
+              не отправит раньше минуты */}
+          {isPhone && codeSent && (
+            <PressableScale onPress={sendCode} disabled={loading || cooldownLeft > 0}>
+              <Text style={styles.forgot}>
+                {cooldownLeft > 0
+                  ? `Отправить код ещё раз через ${cooldownLeft} с`
+                  : 'Отправить код ещё раз'}
+              </Text>
+            </PressableScale>
+          )}
+
           {/* Без восстановления пароля забывший его теряет доступ навсегда */}
-          {!isRegister && (
+          {!isPhone && !isRegister && (
             <PressableScale onPress={forgotPassword} disabled={loading}>
               <Text style={styles.forgot}>Забыли пароль?</Text>
             </PressableScale>
@@ -314,8 +513,18 @@ const makeStyles = (t: Palette) =>
       justifyContent: 'center',
       marginBottom: 14,
     },
-    badgeIcon: { fontSize: 32 },
     title: { fontSize: 22, fontWeight: '800', color: t.text },
+    // Начертание слова «domio» из брендбука: Oswald 400, капитель, разрядка
+    // 0.14em. Вес явно 400 — иначе Android дорисует жирность поверх файла.
+    wordmark: {
+      fontFamily: 'Oswald_400Regular',
+      fontWeight: '400',
+      fontSize: 28,
+      letterSpacing: 3.9,
+      textTransform: 'uppercase',
+      // Разрядка добавляет хвост после последней буквы — сдвигаем к центру
+      marginRight: -3.9,
+    },
     sub: {
       color: t.textSoft,
       fontSize: 12.5,
@@ -335,6 +544,24 @@ const makeStyles = (t: Palette) =>
       borderColor: t.border,
       padding: 18,
     },
+    methodRow: {
+      flexDirection: 'row',
+      backgroundColor: t.inputBg,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      padding: 3,
+      gap: 3,
+    },
+    methodBtn: {
+      flex: 1,
+      borderRadius: 9,
+      paddingVertical: 8,
+      alignItems: 'center',
+    },
+    methodBtnOn: { backgroundColor: t.card },
+    methodText: { fontWeight: '700', fontSize: 12, color: t.textMuted },
+    methodTextOn: { color: t.text, fontWeight: '800' },
     fieldLabel: { color: t.textSoft, fontWeight: '700', fontSize: 11.5, marginBottom: 6 },
     fieldLabelGap: { marginTop: 14 },
     fieldInput: {

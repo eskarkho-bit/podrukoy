@@ -13,6 +13,7 @@ import { recordCompletedOrder } from './orderStats';
 import { recountCompletedOrders } from './masterStats';
 
 export { createCardBinding, yookassaWebhook } from './payments';
+export { requestPhoneCode, verifyPhoneCode } from './phoneAuth';
 export { onDeletionRequested } from './deletion';
 export { onMasterDeleted, onMasterUnverified } from './masterExit';
 export { reconcile } from './reconcile';
@@ -207,6 +208,40 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
     await pushTo([masterId], 'Клиент отменил заявку', title, { href: '/profile' });
   }
 });
+
+// ---------- обращение в поддержку ----------
+
+// Сообщение в тредах поддержки: от клиента — модераторам, от модератора —
+// клиенту. Приветствие, которое приложение пишет при открытии чата, помечено
+// auto и пушей не рождает: человек и так смотрит на этот экран.
+export const onSupportMessageCreated = onDocumentCreated(
+  'users/{uid}/threads/{threadId}/messages/{messageId}',
+  async (event) => {
+    if (event.params.threadId !== 'support') return;
+    const message = event.data?.data();
+    if (!message || message.auto === true) return;
+
+    const text = String(message.text ?? '');
+
+    if (message.from === 'user') {
+      const db = getFirestore();
+      const admins = await db.collection('admins').get();
+      if (admins.empty) {
+        logger.warn('Обращение в поддержку, но модераторов нет — некому отвечать');
+        return;
+      }
+      await pushTo(
+        admins.docs.map((d) => d.id),
+        'Обращение в поддержку',
+        text,
+        { href: '/profile' },
+      );
+      return;
+    }
+
+    await pushTo([event.params.uid], 'Поддержка', text, { href: '/messages' });
+  },
+);
 
 // ---------- проверка мастера ----------
 

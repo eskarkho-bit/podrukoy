@@ -13,7 +13,12 @@ import { NoticeBanner } from '../components/NoticeBanner';
 import { AdminScreen } from '../screens/AdminScreen';
 import { MasterScreen } from '../screens/MasterScreen';
 import { SplashScreen } from '../components/SplashScreen';
+import { initCrashReporting } from '../components/crashReporting';
 import { useTheme } from '../theme';
+
+// До первого рендера: упавший рендер корня — тоже падение, и оно должно
+// попасть в отчёт
+initCrashReporting();
 
 // Роуты, доступные без входа (кроме самого экрана входа). Новый публичный
 // роут — это одна строка здесь, а не новая ветка в условии редиректа.

@@ -16,6 +16,14 @@
       "runtimeArgs": ["run", "web", "--", "--port", "8091"],
       "port": 8091,
       "url": "http://localhost:8091"
+    },
+    {
+      "//": "Ещё один запасной: 8090 и 8091 бывают заняты двумя параллельными сессиями сразу.",
+      "name": "domio - web (8092)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "web", "--", "--port", "8092"],
+      "port": 8092,
+      "url": "http://localhost:8092"
     }
   ]
 }

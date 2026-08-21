@@ -24,11 +24,12 @@ import { cityKey } from './serviceOptions';
 import { educationFrom } from './education';
 import { palettes, ThemeContext, ThemeMode } from '../theme';
 import { authErrorText, useAuth } from './AuthState';
+import { phoneAuthErrorText } from './phoneAuth';
 import { firestoreErrorText } from './firestoreError';
 import { currentConsents, takePendingConsent, type Consents } from './legal';
 import { takeSignupDraft } from './signupDraft';
 import { OrderDraft } from './ActionSheet';
-import { getPushToken, notifyLocal } from './notifications';
+import { getPushToken } from './notifications';
 import { deleteVerificationPhoto, uploadOrderPhoto } from './photoUpload';
 
 // Общее состояние приложения. Раньше жило в App.tsx и раздавалось пропсами —
@@ -43,14 +44,6 @@ export const SUPPORT_THREAD_ID = 'support';
 // Перечень должен совпадать с clientCancels() в firestore.rules.
 const CANCELLABLE = ['Поиск мастера', 'Есть предложения', 'В работе'];
 const CLOSED = ['Завершена', 'Отменена'];
-
-// Поддержка отвечает заготовками — живой службы поддержки пока нет.
-// С мастером переписка настоящая, там ничего не подставляется.
-const SUPPORT_REPLIES = [
-  'Спасибо за обращение! Разберёмся и ответим в течение часа.',
-  'Передали вопрос специалисту — он свяжется с вами здесь.',
-  'Приняли в работу. Что-то ещё подсказать?',
-];
 
 function today() {
   const d = new Date();
@@ -69,6 +62,10 @@ type AppState = {
   threads: Thread[];
   userName: string;
   userEmail: string;
+  userPhone: string;
+  // Чем аккаунт подтверждает владельца: паролем или кодом из СМС. От этого
+  // зависят и смена пароля (телефонному аккаунту нечего менять), и удаление.
+  authMethod: 'password' | 'phone';
   addresses: string[];
   activeAddress: string;
   city: string;
@@ -111,9 +108,13 @@ type AppState = {
   sendMessage: (threadId: string, text: string) => void;
   openChat: (threadId: string) => void;
   logout: () => Promise<void>;
-  // Пароль — подтверждение, что удаляет владелец телефона, а не тот,
-  // кому он попал в руки разблокированным
-  deleteAccount: (password: string) => Promise<void>;
+  // Смена пароля. Ошибка возвращается текстом, готовым к показу.
+  changePassword: (current: string, next: string) => Promise<void>;
+  // Код для подтверждения удаления — телефонным аккаунтам вместо пароля
+  requestDeleteCode: () => Promise<void>;
+  // Секрет — подтверждение, что удаляет владелец, а не тот, кому телефон
+  // попал в руки разблокированным: пароль либо код из СМС — по authMethod
+  deleteAccount: (secret: string) => Promise<void>;
 };
 
 /**
@@ -134,7 +135,17 @@ export function useAppState() {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const { user, logout: signOutUser, reauthenticate, deleteAccount: deleteAuthUser } = useAuth();
+  const {
+    user,
+    hasPassword,
+    phone: authPhone,
+    logout: signOutUser,
+    reauthenticate,
+    changePassword: changeAuthPassword,
+    requestPhoneCode,
+    signInWithPhone,
+    deleteAccount: deleteAuthUser,
+  } = useAuth();
   const uid = user?.uid ?? null;
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -168,7 +179,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // завести его можно лишь в консоли Firebase, правила запись запрещают.
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
-  // В каком чате сейчас «печатает» собеседник
+  // В каком чате сейчас «печатает» собеседник.
+  //
+  // ДОЛГ: разводка по интерфейсу есть, а источника нет — setTypingThreadId
+  // не вызывается нигде с тех пор, как поддержка стала настоящей. Признак
+  // «печатает» требует записи в Firestore на каждое нажатие клавиши, и это
+  // отдельное решение по стоимости, а не забытая строчка.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [typingThreadId, setTypingThreadId] = useState<string | null>(null);
   // Видимое сообщение о сбое
   const [notice, setNotice] = useState<string | null>(null);
@@ -180,15 +197,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     // Код ошибки точнее общей фразы: отказ по правам — это не «нет связи»,
     // и предлагать проверить интернет в таком случае бесполезно
     setNotice(firestoreErrorText(e, text));
-  };
-
-  // Все отложенные события (ответы мастера, смена статуса) — в одном месте,
-  // чтобы аккуратно погасить их при размонтировании
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const replyIdx = useRef(0);
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
-  const later = (ms: number, fn: () => void) => {
-    timers.current.push(setTimeout(fn, ms));
   };
 
   const userDoc = () => (uid ? doc(db, 'users', uid) : null);
@@ -222,8 +230,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           const signup = takeSignupDraft();
           const address = signup?.address || DEFAULT_ADDRESS;
           setDoc(ref, {
-            name: user?.displayName ?? 'Гость',
+            // Имя из черновика — для регистрации по телефону: у такого
+            // аккаунта displayName пуст, а имя человек уже написал
+            name: user?.displayName ?? signup?.name ?? 'Гость',
             email: user?.email ?? '',
+            phone: user?.phoneNumber ?? '',
             addresses: [address],
             activeAddress: address,
             city: signup?.city ?? '',
@@ -245,7 +256,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       },
       (e) => console.warn('Профиль недоступен:', e),
     );
-  }, [uid, user?.displayName, user?.email]);
+  }, [uid, user?.displayName, user?.email, user?.phoneNumber]);
 
   // ---------- права модератора ----------
   useEffect(() => {
@@ -569,31 +580,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   // ---------- действия ----------
 
-  // Сообщение от мастера/поддержки: дописывает в тред или создаёт его
-  const incomingMessage = async (threadId: string, name: string, icon: string, text: string) => {
-    if (!uid) return;
-    const threadRef = doc(db, 'users', uid, 'threads', threadId);
-    try {
-      await setDoc(
-        threadRef,
-        { name, icon, unread: true, updatedAt: serverTimestamp() },
-        { merge: true },
-      );
-      await addDoc(collection(threadRef, 'messages'), {
-        from: 'master',
-        text,
-        time: now(),
-        createdAt: serverTimestamp(),
-      });
-      // Поддержку изображает само приложение, поэтому и уведомление о её
-      // ответе локальное. Всё остальное — заявки, предложения, сообщения
-      // мастера — присылает сервер: Cloud Functions в functions/.
-      notifyLocal(name, text, { href: '/messages' });
-    } catch (e) {
-      console.warn('Не удалось доставить сообщение:', e);
-    }
-  };
-
   // Заявка пишется по идентификатору, выданному шторкой заранее: setDoc по
   // известному id идемпотентен, а addDoc на каждый вызов создавал новую
   // заявку — двойное нажатие давало два заказа.
@@ -815,9 +801,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const sendMessage = async (threadId: string, text: string) => {
     if (!uid) return;
 
-    // Поддержка — личный тред с заготовленными ответами. Заявка — общий чат
-    // с мастером внутри самой заявки: там отвечает живой человек, и подделывать
-    // ответ за него нельзя.
+    // Заявка — общий чат с мастером внутри самой заявки. Поддержка — личный
+    // тред: его читает модератор и отвечает из раздела модерации, ничего
+    // не подставляется.
     if (threadId !== SUPPORT_THREAD_ID) {
       try {
         await addDoc(collection(db, 'orders', threadId, 'messages'), {
@@ -834,7 +820,19 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     const threadRef = doc(db, 'users', uid, 'threads', threadId);
     try {
-      await setDoc(threadRef, { updatedAt: serverTimestamp() }, { merge: true });
+      // kind — по нему модератор собирает обращения запросом по группе
+      // коллекций; lastText и lastFrom — превью и отметка «ждёт ответа»
+      // в его списке, чтобы не читать сообщения каждого треда
+      await setDoc(
+        threadRef,
+        {
+          kind: 'support',
+          lastText: text,
+          lastFrom: 'user',
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
       await addDoc(collection(threadRef, 'messages'), {
         from: 'user',
         text,
@@ -843,16 +841,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       });
     } catch (e) {
       failed('Сообщение не отправлено. Проверьте связь')(e);
-      return;
     }
-
-    later(700, () => setTypingThreadId(threadId));
-    later(2300, () => {
-      setTypingThreadId((cur) => (cur === threadId ? null : cur));
-      const reply = SUPPORT_REPLIES[replyIdx.current % SUPPORT_REPLIES.length];
-      replyIdx.current += 1;
-      incomingMessage(SUPPORT_THREAD_ID, 'Поддержка', '🛟', reply);
-    });
   };
 
   // Открыть чат из другого экрана и перевести на вкладку «Сообщения».
@@ -867,14 +856,19 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           {
             name: 'Поддержка',
             icon: '🛟',
+            kind: 'support',
             unread: false,
             updatedAt: serverTimestamp(),
           },
           { merge: true },
         );
+        // Приветствие автоматическое и не притворяется живым человеком:
+        // отвечает модератор, когда прочитает. Отметка auto говорит серверу
+        // не слать об этом сообщении пуш — человек и так смотрит на экран.
         await addDoc(collection(threadRef, 'messages'), {
           from: 'master',
-          text: 'Здравствуйте! Чем можем помочь?',
+          text: 'Здравствуйте! Опишите вопрос — мы читаем все обращения и ответим здесь же.',
+          auto: true,
           time: now(),
           createdAt: serverTimestamp(),
         });
@@ -897,18 +891,45 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     await signOutUser();
   };
 
+  // Смена пароля. Экран про Firebase не знает — ошибки переводятся здесь.
+  const changePassword = async (current: string, next: string) => {
+    try {
+      await changeAuthPassword(current, next);
+    } catch (e) {
+      throw new Error(authErrorText(e));
+    }
+  };
+
+  // Код на собственный номер — подтверждение удаления для телефонного
+  // аккаунта: пароля у него нет, а удалять без подтверждения нельзя
+  const requestDeleteCode = async () => {
+    if (!authPhone) throw new Error('У аккаунта нет номера телефона');
+    try {
+      const result = await requestPhoneCode(authPhone);
+      if (result === 'not-configured') {
+        throw new Error('Отправка СМС сейчас недоступна. Напишите в поддержку');
+      }
+    } catch (e) {
+      throw new Error(phoneAuthErrorText(e, 'Не удалось отправить код. Попробуйте ещё раз'));
+    }
+  };
+
   // Удаление аккаунта — требование магазинов приложений и просто честность.
   // Уходит всё личное: профиль с адресами, переписка, анкета мастера.
   // Заявки остаются: они общие с мастером и служат историей расчётов, —
   // но незакрытые отменяются, чтобы никто не ехал к исчезнувшему клиенту.
-  const deleteAccount = async (password: string) => {
+  const deleteAccount = async (secret: string) => {
     if (!uid) return;
 
-    // Пароль проверяем до того, как удалено хоть что-то
+    // Владельца проверяем до того, как удалено хоть что-то: пароль — у
+    // парольного аккаунта, код из СМС — у телефонного. Вход по коду заодно
+    // освежает сессию, без чего Firebase не отдаст удаление.
     try {
-      await reauthenticate(password);
+      if (hasPassword) await reauthenticate(secret);
+      else if (authPhone) await signInWithPhone(authPhone, secret, false);
+      else throw new Error('Сессия не найдена — войдите заново');
     } catch (e) {
-      throw new Error(authErrorText(e));
+      throw new Error(hasPassword ? authErrorText(e) : phoneAuthErrorText(e));
     }
 
     deleting.current = true;
@@ -1005,6 +1026,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     threads,
     userName,
     userEmail: user?.email ?? '',
+    userPhone: authPhone ?? '',
+    authMethod: hasPassword ? 'password' : 'phone',
     addresses,
     activeAddress,
     city,
@@ -1042,6 +1065,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     sendMessage,
     openChat,
     logout,
+    changePassword,
+    requestDeleteCode,
     deleteAccount,
   };
 

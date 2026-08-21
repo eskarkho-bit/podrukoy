@@ -43,6 +43,10 @@ export type AuditAction =
   | 'binding.refund_failed'
   | 'binding.canceled'
   | 'binding.failed'
+  // вход по телефону
+  | 'phone.code_sent'
+  | 'phone.registered'
+  | 'phone.signed_in'
   // аккаунт
   | 'account.deletion_requested'
   | 'account.deletion_stage'

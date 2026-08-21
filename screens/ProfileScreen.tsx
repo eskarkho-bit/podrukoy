@@ -12,6 +12,7 @@ import Animated, {
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
+import { formatRuPhone } from '../components/phoneAuth';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { settlementLabel } from '../components/cities';
@@ -21,6 +22,7 @@ type Props = {
   name: string;
   onChangeName: (name: string) => void;
   email: string;
+  phone: string;
   address: string;
   // Город определяет, каким мастерам покажут новую заявку
   city: string;
@@ -34,15 +36,24 @@ type Props = {
   isAdmin: boolean;
   onOpenAdmin: () => void;
   onLogout: () => void;
-  // Пароль подтверждает, что удаляет владелец. Ошибку возвращаем текстом,
-  // готовым к показу: экран про Firebase ничего не знает.
-  onDeleteAccount: (password: string) => Promise<void>;
+  // Чем аккаунт подтверждает владельца: паролем или кодом из СМС. У
+  // телефонного аккаунта пароля нет — ему не показываются ни смена пароля,
+  // ни поле пароля при удалении.
+  authMethod: 'password' | 'phone';
+  // Смена пароля. Ошибку возвращает текстом, готовым к показу: экран про
+  // Firebase ничего не знает.
+  onChangePassword: (current: string, next: string) => Promise<void>;
+  // Код на собственный номер — подтверждение удаления телефонного аккаунта
+  onRequestDeleteCode: () => Promise<void>;
+  // Секрет — пароль либо код из СМС, смотря какой authMethod
+  onDeleteAccount: (secret: string) => Promise<void>;
 };
 
 export function ProfileScreen({
   name,
   onChangeName,
   email,
+  phone,
   address,
   city,
   onChangeCity,
@@ -53,6 +64,9 @@ export function ProfileScreen({
   isAdmin,
   onOpenAdmin,
   onLogout,
+  authMethod,
+  onChangePassword,
+  onRequestDeleteCode,
   onDeleteAccount,
 }: Props) {
   const { mode, colors: t, setMode } = useTheme();
@@ -64,12 +78,26 @@ export function ProfileScreen({
   const [draft, setDraft] = useState(name);
   const [pickingCity, setPickingCity] = useState(false);
   const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
+  // Смена пароля разворачивается в списке, как и удаление: без отдельного
+  // экрана, но с текущим паролем — открытая сессия сама по себе не даёт
+  // отрезать владельца от аккаунта
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordDone, setPasswordDone] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
   // Удаление аккаунта разворачивается прямо в списке: сначала предупреждение
-  // и пароль, и только потом кнопка, которую уже нельзя отменить
+  // и подтверждение владельца, и только потом кнопка, которую нельзя отменить
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [password, setPassword] = useState('');
+  // Пароль — или код из СМС у телефонного аккаунта
+  const [deleteSecret, setDeleteSecret] = useState('');
+  const [deleteCodeSent, setDeleteCodeSent] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const byPhone = authMethod === 'phone';
 
   const startEdit = () => {
     setDraft(name);
@@ -82,21 +110,72 @@ export function ProfileScreen({
     setEditing(false);
   };
 
+  const openPasswordChange = () => {
+    setChangingPassword(true);
+    setPasswordDone(false);
+    setPasswordError(null);
+    setCurrentPassword('');
+    setNewPassword('');
+  };
+
+  const submitPassword = async () => {
+    if (!currentPassword) {
+      setPasswordError('Введите текущий пароль');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError('Новый пароль — не короче 6 символов');
+      return;
+    }
+    setPasswordError(null);
+    setSavingPassword(true);
+    try {
+      await onChangePassword(currentPassword, newPassword);
+      // Пароли не задерживаются в состоянии дольше необходимого
+      setCurrentPassword('');
+      setNewPassword('');
+      setChangingPassword(false);
+      setPasswordDone(true);
+    } catch (e) {
+      setPasswordError(e instanceof Error ? e.message : 'Не удалось сменить пароль');
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
   const cancelDelete = () => {
     setConfirmingDelete(false);
-    setPassword('');
+    setDeleteSecret('');
+    setDeleteCodeSent(false);
     setDeleteError(null);
   };
 
+  const sendDeleteCode = async () => {
+    setDeleteError(null);
+    setSendingCode(true);
+    try {
+      await onRequestDeleteCode();
+      setDeleteCodeSent(true);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Не удалось отправить код');
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
   const submitDelete = async () => {
-    if (!password) {
-      setDeleteError('Введите пароль, чтобы подтвердить удаление');
+    if (!deleteSecret) {
+      setDeleteError(
+        byPhone
+          ? 'Введите код из СМС, чтобы подтвердить удаление'
+          : 'Введите пароль, чтобы подтвердить удаление',
+      );
       return;
     }
     setDeleteError(null);
     setDeleting(true);
     try {
-      await onDeleteAccount(password);
+      await onDeleteAccount(deleteSecret);
       // Дальше экран исчезнет сам: без сессии приложение уводит на вход
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : 'Не удалось удалить аккаунт');
@@ -135,7 +214,9 @@ export function ProfileScreen({
             </PressableScale>
           )}
 
-          <Text style={styles.email}>{email}</Text>
+          {/* Чем человек входит, то и показываем: у телефонного аккаунта
+            почты нет, у почтового — телефона */}
+          <Text style={styles.email}>{email || formatRuPhone(phone)}</Text>
           <Text style={styles.address}>{address}</Text>
         </Animated.View>
 
@@ -236,6 +317,74 @@ export function ProfileScreen({
           </PressableScale>
         </Animated.View>
 
+        {/* Смена пароля. У телефонного аккаунта пароля нет — его владельца
+          подтверждает код из СМС, менять нечего. */}
+        {!byPhone && (
+          <Animated.View entering={FadeInDown.delay(160 + STAGGER * 5.5).duration(340)}>
+            {changingPassword ? (
+              <Animated.View entering={FadeIn.duration(220)} style={styles.passwordCard}>
+                <Text style={styles.passwordTitle}>Смена пароля</Text>
+
+                <TextInput
+                  style={styles.deleteInput}
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                  placeholder="Текущий пароль"
+                  placeholderTextColor={t.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  editable={!savingPassword}
+                />
+                <TextInput
+                  style={[styles.deleteInput, styles.passwordInputGap]}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  placeholder="Новый пароль — не короче 6 символов"
+                  placeholderTextColor={t.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  editable={!savingPassword}
+                  onSubmitEditing={submitPassword}
+                  returnKeyType="done"
+                />
+
+                {passwordError && (
+                  <Animated.Text entering={FadeIn.duration(200)} style={styles.deleteError}>
+                    {passwordError}
+                  </Animated.Text>
+                )}
+
+                <PressableScale
+                  style={[styles.passwordBtn, savingPassword && styles.deleteBtnDim]}
+                  onPress={submitPassword}
+                  disabled={savingPassword}
+                >
+                  <Text style={styles.passwordBtnText}>
+                    {savingPassword ? 'Сохраняем…' : 'Сменить пароль'}
+                  </Text>
+                </PressableScale>
+
+                <PressableScale
+                  style={styles.deleteCancel}
+                  onPress={() => setChangingPassword(false)}
+                  disabled={savingPassword}
+                >
+                  <Text style={styles.deleteCancelText}>Отмена</Text>
+                </PressableScale>
+              </Animated.View>
+            ) : (
+              <PressableScale style={styles.row} onPress={openPasswordChange}>
+                <Text style={styles.rowLabel}>Сменить пароль</Text>
+                {passwordDone ? (
+                  <Text style={styles.passwordDone}>Пароль изменён ✓</Text>
+                ) : (
+                  <Text style={styles.rowChevron}>›</Text>
+                )}
+              </PressableScale>
+            )}
+          </Animated.View>
+        )}
+
         {/* Документы должны открываться из приложения, а не искаться на сайте:
           человек принимал их здесь, читать перечитывать тоже должен здесь */}
         {(['terms', 'privacy'] as const).map((id, i) => (
@@ -276,16 +425,48 @@ export function ProfileScreen({
                 отменены. Отменить удаление нельзя.
               </Text>
 
-              <TextInput
-                style={styles.deleteInput}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Ваш пароль"
-                placeholderTextColor={t.textMuted}
-                secureTextEntry
-                autoCapitalize="none"
-                editable={!deleting}
-              />
+              {byPhone ? (
+                // Пароля у телефонного аккаунта нет — владельца подтверждает
+                // код, отправленный на его собственный номер
+                <>
+                  <PressableScale
+                    style={[styles.deleteCodeBtn, (sendingCode || deleting) && styles.deleteBtnDim]}
+                    onPress={sendDeleteCode}
+                    disabled={sendingCode || deleting}
+                  >
+                    <Text style={styles.deleteCodeBtnText}>
+                      {sendingCode
+                        ? 'Отправляем…'
+                        : deleteCodeSent
+                          ? 'Отправить код ещё раз'
+                          : `Получить код на ${formatRuPhone(phone)}`}
+                    </Text>
+                  </PressableScale>
+                  {deleteCodeSent && (
+                    <TextInput
+                      style={[styles.deleteInput, styles.passwordInputGap]}
+                      value={deleteSecret}
+                      onChangeText={setDeleteSecret}
+                      placeholder="Код из СМС"
+                      placeholderTextColor={t.textMuted}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      editable={!deleting}
+                    />
+                  )}
+                </>
+              ) : (
+                <TextInput
+                  style={styles.deleteInput}
+                  value={deleteSecret}
+                  onChangeText={setDeleteSecret}
+                  placeholder="Ваш пароль"
+                  placeholderTextColor={t.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  editable={!deleting}
+                />
+              )}
 
               {deleteError && (
                 <Animated.Text entering={FadeIn.duration(200)} style={styles.deleteError}>
@@ -477,6 +658,34 @@ const makeStyles = (t: Palette) =>
       textAlign: 'right',
     },
     rowChevron: { fontSize: 18, color: t.textMuted, fontWeight: '700' },
+    passwordCard: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 16,
+      marginBottom: 9,
+    },
+    passwordTitle: { fontWeight: '800', fontSize: 14, color: t.text, marginBottom: 12 },
+    passwordInputGap: { marginTop: 9 },
+    passwordBtn: {
+      borderRadius: 14,
+      paddingVertical: 13,
+      alignItems: 'center',
+      backgroundColor: t.accent,
+      marginTop: 12,
+    },
+    passwordBtnText: { fontWeight: '800', fontSize: 13.5, color: t.onAccent },
+    passwordDone: { fontWeight: '700', fontSize: 12, color: t.accent },
+    deleteCodeBtn: {
+      borderRadius: 12,
+      paddingVertical: 11,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      backgroundColor: t.inputBg,
+    },
+    deleteCodeBtnText: { fontWeight: '700', fontSize: 12.5, color: t.text },
     deleteCard: {
       backgroundColor: t.card,
       borderRadius: 18,

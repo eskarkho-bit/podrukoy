@@ -17,12 +17,16 @@ import {
 import {
   addDoc,
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 
@@ -1078,6 +1082,35 @@ describe('Сводка по заявкам', () => {
   });
 });
 
+describe('Коды входа по СМС', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'phoneCodes/abc123'), {
+        codeHash: 'deadbeef',
+        attempts: 0,
+        sends: 1,
+      });
+    });
+  });
+
+  // Код приходит в СМС, а не из базы. Возможность прочитать документ означала
+  // бы вход в чужой аккаунт без телефона в руках.
+  test('коды не читает никто, включая модератора', async () => {
+    await assertFails(getDoc(doc(as('client1'), 'phoneCodes/abc123')));
+    await assertFails(getDoc(doc(as('admin1'), 'phoneCodes/abc123')));
+    await assertFails(getDoc(doc(anon(), 'phoneCodes/abc123')));
+  });
+
+  // Запись означала бы подмену кода своим: счётчики попыток и хэш пишет
+  // только сервер
+  test('писать и удалять коды не может никто', async () => {
+    await assertFails(setDoc(doc(as('client1'), 'phoneCodes/abc123'), { codeHash: 'мой' }));
+    await assertFails(updateDoc(doc(as('admin1'), 'phoneCodes/abc123'), { attempts: 0 }));
+    await assertFails(deleteDoc(doc(as('client1'), 'phoneCodes/abc123')));
+    await assertFails(setDoc(doc(anon(), 'phoneCodes/new'), { codeHash: 'x' }));
+  });
+});
+
 describe('Профиль пользователя', () => {
   test('владелец читает и пишет свой профиль', async () => {
     await assertSucceeds(setDoc(doc(as('client1'), 'users/client1'), { name: 'Дмитрий' }));
@@ -1101,5 +1134,101 @@ describe('Профиль пользователя', () => {
 
   test('чужую анкету удалить нельзя', async () => {
     await assertFails(deleteDoc(doc(as('master2'), 'masters/master1')));
+  });
+});
+
+describe('Поддержка и модератор', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'users/client1/threads/support'), {
+        name: 'Поддержка',
+        icon: '🛟',
+        kind: 'support',
+        unread: false,
+        lastText: 'Не приходит код',
+        lastFrom: 'user',
+      });
+      await setDoc(doc(db, 'users/client1/threads/support/messages/m1'), {
+        from: 'user',
+        text: 'Не приходит код',
+        time: '12:00',
+      });
+      // Личный тред без kind — модератору не принадлежит
+      await setDoc(doc(db, 'users/client1/threads/diary'), { name: 'Заметки' });
+      await setDoc(doc(db, 'users/client1/threads/diary/messages/m1'), {
+        from: 'user',
+        text: 'личное',
+        time: '12:01',
+      });
+    });
+  });
+
+  // Список обращений — запрос по группе коллекций. Фильтр по kind обязателен:
+  // без него запрос зацепил бы личные треды, и правила отклоняют его целиком.
+  test('модератор собирает обращения только с фильтром по kind', async () => {
+    await assertSucceeds(
+      getDocs(query(collectionGroup(as('admin1'), 'threads'), where('kind', '==', 'support'))),
+    );
+    await assertFails(getDocs(query(collectionGroup(as('admin1'), 'threads'))));
+  });
+
+  test('посторонним список обращений закрыт даже с фильтром', async () => {
+    await assertFails(
+      getDocs(query(collectionGroup(as('master1'), 'threads'), where('kind', '==', 'support'))),
+    );
+  });
+
+  test('модератор читает переписку поддержки и отвечает от её лица', async () => {
+    await assertSucceeds(getDoc(doc(as('admin1'), 'users/client1/threads/support/messages/m1')));
+    await assertSucceeds(
+      addDoc(collection(as('admin1'), 'users/client1/threads/support/messages'), {
+        from: 'master',
+        text: 'Проверили: код уходит, посмотрите папку «Спам».',
+        time: '12:05',
+        createdAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('ответить от лица клиента модератор не может', async () => {
+    await assertFails(
+      addDoc(collection(as('admin1'), 'users/client1/threads/support/messages'), {
+        from: 'user',
+        text: 'Сам себе напишу',
+        time: '12:06',
+      }),
+    );
+  });
+
+  test('написанное в поддержку не правится и не удаляется модератором', async () => {
+    await assertFails(
+      updateDoc(doc(as('admin1'), 'users/client1/threads/support/messages/m1'), {
+        text: 'Другой текст',
+      }),
+    );
+    await assertFails(deleteDoc(doc(as('admin1'), 'users/client1/threads/support/messages/m1')));
+  });
+
+  test('модератор помечает тред, но не переименовывает его', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('admin1'), 'users/client1/threads/support'), {
+        unread: true,
+        lastText: 'Проверили: код уходит',
+        lastFrom: 'master',
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(as('admin1'), 'users/client1/threads/support'), { name: 'Реклама' }),
+    );
+  });
+
+  // Доступ дан треду поддержки, а не поддереву пользователя: остальное
+  // закрыто от модератора так же, как от любого постороннего
+  test('личные треды пользователя модератору недоступны', async () => {
+    await assertFails(getDoc(doc(as('admin1'), 'users/client1/threads/diary')));
+    await assertFails(getDoc(doc(as('admin1'), 'users/client1/threads/diary/messages/m1')));
+    await assertFails(getDoc(doc(as('admin1'), 'users/client1')));
   });
 });

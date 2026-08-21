@@ -85,7 +85,7 @@ YOOKASSA_SECRET_KEY=
 npm run rules:deploy                      # правила Firestore и индексы
 npm run storage:deploy                    # правила Storage, отдельно (см. ниже)
 cd functions && npm install && cd ..
-firebase deploy --only functions          # 12 функций
+firebase deploy --only functions          # 15 функций
 eas update --channel production           # JS-обновление приложения
 ```
 
