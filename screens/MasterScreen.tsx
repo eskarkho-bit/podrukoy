@@ -20,6 +20,7 @@ import Animated, {
   SlideInRight,
   SlideOutRight,
   cancelAnimation,
+  interpolateColor,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -49,8 +50,18 @@ import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
 import { useAuth } from '../components/AuthState';
 import { useAppState } from '../components/AppState';
-import { counted, ratingText, rub } from '../components/format';
+import { counted, plural, ratingText, rub } from '../components/format';
 import { CATEGORIES, type Category } from '../components/serviceOptions';
+import { FOUNDER_EMAIL } from '../components/founder';
+import {
+  conversionPercent,
+  dayLabel,
+  incomeSummary,
+  monthlyIncome,
+  nextMilestone,
+  type MasterOrderStat,
+} from '../components/masterStats';
+import { priceSummary, type OrderStats } from '../components/orderStats';
 import { deleteVerificationPhoto, uploadVerificationPhoto } from '../components/photoUpload';
 import { firestoreErrorText } from '../components/firestoreError';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
@@ -88,15 +99,20 @@ const MAX_FEED_CITIES = 10;
 //   new       — открыта, цену я ещё не называл
 //   offered   — моё предложение отправлено, клиент выбирает между несколькими
 //   accepted  — клиент выбрал меня, можно работать
+//   awaiting  — работа сдана, клиент ещё не подтвердил
 //   closed    — заявка ушла: выбрали другого или клиент её закрыл
-//   done      — работа сдана
+//   done      — клиент подтвердил завершение
 //   cancelled — клиент отменил заявку, которая уже была моей
 //   declined  — старая схема: клиент отклонил цену, можно назвать другую
-type JobStatus = 'new' | 'offered' | 'accepted' | 'declined' | 'done' | 'cancelled' | 'closed';
+// Типы и компоненты вкладок экспортируются ради dev-витрины
+// (MasterDemoScreen): она собирает раздел из тех же деталей, но на
+// подставных данных и без Firestore.
+export type JobStatus =
+  'new' | 'offered' | 'accepted' | 'awaiting' | 'declined' | 'done' | 'cancelled' | 'closed';
 
-type JobMessage = { id: string; from: 'me' | 'client'; text: string; time: string };
+export type JobMessage = { id: string; from: 'me' | 'client'; text: string; time: string };
 
-type Job = {
+export type Job = {
   id: string;
   title: string;
   client: string;
@@ -108,16 +124,37 @@ type Job = {
   price?: number;
   // Сколько предложил я. Живёт в orders/{id}/offers/{myUid}.
   myOffer?: number;
+  // Даты для истории: когда создана и когда клиент подтвердил завершение.
+  // У заявок до появления completedAt второй нет.
+  createdMs: number | null;
+  completedMs: number | null;
   // Заявка со старой схемой согласования — цена лежит в ней самой
   legacy: boolean;
   unread: boolean;
   messages: JobMessage[];
 };
 
+// Вкладки раздела мастера. Активные заявки отдельно от истории: лента —
+// про «что делать сейчас», история — про «что уже было».
+export type MasterTab = 'jobs' | 'stats' | 'history' | 'profile';
+
+// Сданная, но не подтверждённая работа остаётся в ленте: заказ ещё жив,
+// хотя действий от мастера уже не требует
+export const ACTIVE_STATUSES: JobStatus[] = ['new', 'offered', 'accepted', 'awaiting', 'declined'];
+
+export type MasterReview = {
+  id: string;
+  clientName: string;
+  stars: number;
+  text: string;
+  createdMs: number | null;
+};
+
 const STATUS_LABEL: Record<JobStatus, string> = {
   new: 'Новая',
   offered: 'Клиент выбирает',
   accepted: 'Вас выбрали',
+  awaiting: 'Ждёт подтверждения',
   declined: 'Цена отклонена',
   done: 'Завершена',
   cancelled: 'Отменена',
@@ -129,6 +166,7 @@ const statusColorFor = (status: JobStatus, t: Palette): string =>
     new: t.warn,
     offered: t.blue,
     accepted: t.accent,
+    awaiting: t.blue,
     declined: t.danger,
     done: t.textMuted,
     cancelled: t.textMuted,
@@ -140,10 +178,11 @@ const STATUS_RANK: Record<JobStatus, number> = {
   new: 0,
   declined: 1,
   accepted: 2,
-  offered: 3,
-  done: 4,
-  cancelled: 5,
-  closed: 6,
+  awaiting: 3,
+  offered: 4,
+  done: 5,
+  cancelled: 6,
+  closed: 7,
 };
 
 function now() {
@@ -152,12 +191,35 @@ function now() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// «12 500 ₽» на подписи столбика не помещается — сокращаем до «12,5к»
+const kRub = (n: number) =>
+  n >= 1000 ? `${(Math.round(n / 100) / 10).toLocaleString('ru-RU')}к` : String(n);
+
+// Иконка объекта по заголовку заявки: он начинается с объекта дома
+// («Свет · Замена · Люстра»), и набор совпадает со сценой дома клиента.
+// Незнакомый объект получает молоток.
+const OBJECT_EMOJI: Record<string, string> = {
+  Свет: '💡',
+  Розетка: '🔌',
+  Мойка: '🚰',
+  Плита: '🔥',
+  Душ: '🚿',
+  Труба: '🔧',
+  Окно: '🪟',
+  Газон: '🌿',
+  Деревья: '🌳',
+  Ворота: '🚪',
+  Инструменты: '🧰',
+};
+
+const jobEmoji = (title: string) => OBJECT_EMOJI[title.split(' · ')[0]] ?? '🛠️';
+
 type Props = {
   open: boolean;
   onClose: () => void;
 };
 
-type MasterProfile = {
+export type MasterProfile = {
   name: string;
   // Фамилия отдельно от имени: вместе они подписывают профиль, который клиент
   // видит у предложения. У старых анкет её нет.
@@ -197,6 +259,15 @@ export function MasterScreen({ open, onClose }: Props) {
   const [editingProfile, setEditingProfile] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [openJobId, setOpenJobId] = useState<string | null>(null);
+  const [tab, setTab] = useState<MasterTab>('jobs');
+  // Сырые статусы и даты своих заказов — для доходов и истории: Job
+  // сплющивает «Ждёт подтверждения» и «Завершена» в одно done, а
+  // статистике эта разница как раз важна
+  const [myOrders, setMyOrders] = useState<MasterOrderStat[]>([]);
+  const [offersCount, setOffersCount] = useState(0);
+  // Сводка цен по республике — сравнить свой средний чек с медианой
+  const [market, setMarket] = useState<OrderStats | null>(null);
+  const [reviews, setReviews] = useState<MasterReview[]>([]);
   // В какой заявке клиент сейчас «печатает».
   //
   // ДОЛГ: разводка по интерфейсу есть, а источника нет — setTypingJobId не
@@ -289,6 +360,8 @@ export function MasterScreen({ open, onClose }: Props) {
     // а консоль засыплет permission-denied
     if (!master?.verified || !myUid) {
       setJobs([]);
+      setMyOrders([]);
+      setOffersCount(0);
       buckets.current = { open: new Map(), mine: [], offers: [] };
       return;
     }
@@ -301,15 +374,17 @@ export function MasterScreen({ open, onClose }: Props) {
       const status: JobStatus =
         v.status === 'Отменена'
           ? 'cancelled'
-          : v.status === 'Завершена' || v.status === 'Ждёт подтверждения'
+          : v.status === 'Завершена'
             ? 'done'
-            : v.status === 'В работе'
-              ? 'accepted'
-              : v.priceStatus === 'offered'
-                ? 'offered'
-                : v.priceStatus === 'declined'
-                  ? 'declined'
-                  : 'new';
+            : v.status === 'Ждёт подтверждения'
+              ? 'awaiting'
+              : v.status === 'В работе'
+                ? 'accepted'
+                : v.priceStatus === 'offered'
+                  ? 'offered'
+                  : v.priceStatus === 'declined'
+                    ? 'declined'
+                    : 'new';
       return {
         id: d.id,
         title: v.title ?? 'Заявка',
@@ -319,6 +394,8 @@ export function MasterScreen({ open, onClose }: Props) {
         desc: v.comment || 'Клиент не оставил комментарий.',
         status,
         price: v.agreedPrice ?? v.price ?? undefined,
+        createdMs: v.createdAt?.toMillis?.() ?? null,
+        completedMs: v.completedAt?.toMillis?.() ?? null,
         legacy,
         unread: false,
         messages: [],
@@ -356,6 +433,8 @@ export function MasterScreen({ open, onClose }: Props) {
           desc: '',
           status: 'closed',
           myOffer: offer.price,
+          createdMs: null,
+          completedMs: null,
           legacy: false,
           unread: false,
           messages: [],
@@ -420,6 +499,17 @@ export function MasterScreen({ open, onClose }: Props) {
       query(collection(db, 'orders'), where('masterId', '==', myUid)),
       (snap) => {
         buckets.current.mine = snap.docs.map(toJob);
+        setMyOrders(
+          snap.docs.map((d) => {
+            const v = d.data();
+            return {
+              status: String(v.status ?? ''),
+              price: (v.agreedPrice ?? v.price ?? null) as number | null,
+              createdMs: v.createdAt?.toMillis?.() ?? null,
+              completedMs: v.completedAt?.toMillis?.() ?? null,
+            };
+          }),
+        );
         merge();
       },
       (e) => console.warn('Свои заявки недоступны:', e),
@@ -430,6 +520,7 @@ export function MasterScreen({ open, onClose }: Props) {
     const unsubOffers = onSnapshot(
       query(collectionGroup(db, 'offers'), where('masterId', '==', myUid)),
       (snap) => {
+        setOffersCount(snap.size);
         buckets.current.offers = snap.docs.map((d) => {
           const v = d.data();
           return {
@@ -449,6 +540,47 @@ export function MasterScreen({ open, onClose }: Props) {
       unsubOffers();
     };
   }, [master, myUid, citiesKey, skillsKey]);
+
+  // Сводка цен по заявкам республики. Правила открывают её только
+  // проверенным мастерам; персональных данных там нет — гистограмма и счётчики.
+  useEffect(() => {
+    if (!open || !master?.verified) {
+      setMarket(null);
+      return;
+    }
+    return onSnapshot(
+      doc(db, 'stats', 'orders'),
+      (snap) => setMarket((snap.data() as OrderStats | undefined) ?? null),
+      (e) => console.warn('Сводка цен недоступна:', e),
+    );
+  }, [open, master?.verified]);
+
+  // Отзывы нужны только на вкладке профиля — постоянная подписка ни к чему
+  useEffect(() => {
+    if (!open || tab !== 'profile' || !myUid || !master?.verified) return;
+    return onSnapshot(
+      query(collection(db, 'masters', myUid, 'reviews'), orderBy('createdAt', 'desc'), limit(30)),
+      (snap) =>
+        setReviews(
+          snap.docs.map((d) => {
+            const v = d.data();
+            return {
+              id: d.id,
+              clientName: String(v.clientName ?? 'Клиент'),
+              stars: typeof v.stars === 'number' ? v.stars : 0,
+              text: String(v.text ?? ''),
+              createdMs: v.createdAt?.toMillis?.() ?? null,
+            };
+          }),
+        ),
+      (e) => console.warn('Отзывы недоступны:', e),
+    );
+  }, [open, tab, myUid, master?.verified]);
+
+  // Закрытый раздел в следующий раз открывается с ленты — как с чистого листа
+  useEffect(() => {
+    if (!open) setTab('jobs');
+  }, [open]);
 
   // «Выйти» в режиме мастера теперь означает выход из раздела: сам аккаунт
   // остаётся тем же, анкета никуда не девается
@@ -608,15 +740,50 @@ export function MasterScreen({ open, onClose }: Props) {
         />
       ) : (
         <View style={styles.fill}>
-          <JobList
-            email={user?.email ?? ''}
-            profile={master}
-            jobs={jobs}
-            typingJobId={typingJobId}
-            onOpenJob={handleOpenJob}
-            onClose={onClose}
-            onLogout={handleLogout}
-            onEditProfile={() => setEditingProfile(true)}
+          {tab === 'jobs' && (
+            <JobList
+              email={user?.email ?? ''}
+              profile={master}
+              jobs={jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))}
+              typingJobId={typingJobId}
+              onOpenJob={handleOpenJob}
+              onClose={onClose}
+              onEditProfile={() => setEditingProfile(true)}
+            />
+          )}
+          {tab === 'stats' && (
+            <StatsTab
+              profile={master}
+              orders={myOrders}
+              offersSent={offersCount}
+              ordersWon={myOrders.length}
+              market={market}
+              onClose={onClose}
+            />
+          )}
+          {tab === 'history' && (
+            <HistoryTab
+              jobs={jobs.filter((j) => !ACTIVE_STATUSES.includes(j.status))}
+              onOpenJob={handleOpenJob}
+              onClose={onClose}
+            />
+          )}
+          {tab === 'profile' && (
+            <ProfileTab
+              email={user?.email ?? ''}
+              profile={master}
+              reviews={reviews}
+              onEdit={() => setEditingProfile(true)}
+              onLogout={handleLogout}
+              onClose={onClose}
+            />
+          )}
+
+          <MasterTabs
+            active={tab}
+            onSelect={setTab}
+            hidden={!!openJob}
+            hasNew={jobs.some((j) => j.status === 'new' || j.status === 'declined')}
           />
 
           {openJob && (
@@ -1230,14 +1397,13 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 
 // ---------- Лента заявок ----------
 
-function JobList({
+export function JobList({
   email,
   profile,
   jobs,
   typingJobId,
   onOpenJob,
   onClose,
-  onLogout,
   onEditProfile,
 }: {
   email: string;
@@ -1246,7 +1412,6 @@ function JobList({
   typingJobId: string | null;
   onOpenJob: (id: string) => void;
   onClose: () => void;
-  onLogout: () => void;
   onEditProfile: () => void;
 }) {
   const { mode, colors: t } = useTheme();
@@ -1273,9 +1438,7 @@ function JobList({
         <PressableScale style={styles.backChip} onPress={onClose}>
           <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
-        <PressableScale style={styles.backChip} onPress={onLogout}>
-          <Text style={styles.logoutText}>Выйти из раздела</Text>
-        </PressableScale>
+        <View style={styles.backChipGhost} />
       </View>
 
       <ScrollView style={styles.fill} contentContainerStyle={styles.listContent}>
@@ -1346,6 +1509,9 @@ function JobList({
                 layout={LinearTransition.springify().damping(20).stiffness(170)}
               >
                 <PressableScale style={styles.jobItem} onPress={() => onOpenJob(job.id)}>
+                  <View style={styles.jobIconWrap}>
+                    <Text style={styles.jobIcon}>{jobEmoji(job.title)}</Text>
+                  </View>
                   <View style={styles.jobBody}>
                     <Text style={styles.jobTitle}>{job.title}</Text>
                     <Text style={styles.jobMeta}>
@@ -1365,9 +1531,11 @@ function JobList({
                     )}
                   </View>
                   <View style={styles.jobRight}>
-                    <Text style={[styles.jobStatus, { color: statusColorFor(job.status, t) }]}>
-                      {STATUS_LABEL[job.status]}
-                    </Text>
+                    <View style={styles.jobStatusPill}>
+                      <Text style={[styles.jobStatus, { color: statusColorFor(job.status, t) }]}>
+                        {STATUS_LABEL[job.status]}
+                      </Text>
+                    </View>
                     {(job.price ?? job.myOffer) != null && (
                       <Text style={styles.jobPrice}>
                         {rub((job.price ?? job.myOffer) as number)}
@@ -1385,9 +1553,517 @@ function JobList({
   );
 }
 
+// ---------- Статистика: доход, предложения, рынок ----------
+
+export function StatsTab({
+  profile,
+  orders,
+  offersSent,
+  ordersWon,
+  market,
+  onClose,
+}: {
+  profile: MasterProfile;
+  orders: MasterOrderStat[];
+  offersSent: number;
+  ordersWon: number;
+  market: OrderStats | null;
+  onClose: () => void;
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const income = incomeSummary(orders);
+  const bars = monthlyIncome(orders);
+  const maxBar = Math.max(...bars.map((b) => b.sum), 1);
+  const conversion = conversionPercent(offersSent, ordersWon);
+  const marketSummary = priceSummary(market);
+  // По серверному счётчику, а не по локальному: он же показан в профиле
+  const milestone = nextMilestone(profile.completedOrders);
+
+  return (
+    <View style={styles.fill}>
+      <View style={styles.topBar}>
+        <PressableScale style={styles.backChip} onPress={onClose}>
+          <Text style={styles.backText}>‹ Профиль</Text>
+        </PressableScale>
+        <View style={styles.backChipGhost} />
+      </View>
+
+      <ScrollView style={styles.fill} contentContainerStyle={styles.listContent}>
+        <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
+          Статистика
+        </Animated.Text>
+        <Animated.Text entering={FadeInDown.delay(40).duration(380)} style={styles.headerSub}>
+          Доход и цифры по вашим заказам
+        </Animated.Text>
+
+        <Animated.View entering={FadeInDown.delay(80).duration(360)} style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{rub(income.monthTotal)}</Text>
+            <Text style={styles.statLabel}>за этот месяц</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{rub(income.total)}</Text>
+            <Text style={styles.statLabel}>за всё время</Text>
+          </View>
+        </Animated.View>
+        <Animated.View entering={FadeInDown.delay(110).duration(360)} style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>
+              {income.completedCount ? rub(income.avgCheck) : '—'}
+            </Text>
+            <Text style={styles.statLabel}>средний чек</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{income.completedCount}</Text>
+            <Text style={styles.statLabel}>
+              {plural(
+                income.completedCount,
+                'заказ выполнен',
+                'заказа выполнено',
+                'заказов выполнено',
+              )}
+            </Text>
+          </View>
+        </Animated.View>
+
+        {/* Прогресс к круглой отметке — маленький повод не останавливаться */}
+        {milestone && (
+          <Animated.View
+            entering={FadeInDown.delay(125).duration(340)}
+            style={styles.milestoneCard}
+          >
+            <Text style={styles.milestoneText}>
+              🎯 До {milestone.target} заказов{' '}
+              {plural(milestone.left, 'остался', 'осталось', 'осталось')}{' '}
+              {counted(milestone.left, 'заказ', 'заказа', 'заказов')}
+            </Text>
+            <View style={styles.milestoneTrack}>
+              <View
+                style={[
+                  styles.milestoneFill,
+                  {
+                    width: `${Math.round(((milestone.target - milestone.left) / milestone.target) * 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+          </Animated.View>
+        )}
+
+        {/* Сданное, но не подтверждённое — доход, которого ещё нет */}
+        {income.awaitingCount > 0 && (
+          <Animated.Text entering={FadeInDown.delay(130).duration(340)} style={styles.awaitingHint}>
+            Ещё {rub(income.awaitingSum)} за{' '}
+            {counted(income.awaitingCount, 'работу', 'работы', 'работ')} — ждут подтверждения
+            клиента
+          </Animated.Text>
+        )}
+
+        <Animated.Text entering={FadeInDown.delay(150).duration(360)} style={styles.sectionTitle}>
+          Доход по месяцам
+        </Animated.Text>
+        <Animated.View entering={FadeInDown.delay(170).duration(360)} style={styles.chartCard}>
+          <View style={styles.chartRow}>
+            {bars.map((b) => (
+              <View key={b.label} style={styles.chartCol}>
+                <Text style={styles.chartValue}>{b.sum > 0 ? kRub(b.sum) : ' '}</Text>
+                <View
+                  style={[
+                    styles.chartBar,
+                    { height: 8 + Math.round((b.sum / maxBar) * 88) },
+                    b.sum > 0 && styles.chartBarOn,
+                  ]}
+                />
+                <Text style={styles.chartMonth}>{b.label}</Text>
+              </View>
+            ))}
+          </View>
+        </Animated.View>
+
+        <Animated.Text entering={FadeInDown.delay(190).duration(360)} style={styles.sectionTitle}>
+          Предложения
+        </Animated.Text>
+        <Animated.View entering={FadeInDown.delay(210).duration(360)} style={styles.sectionCard}>
+          <SummaryRow label="Отправлено" value={String(offersSent)} />
+          <SummaryRow label="Клиент выбрал вас" value={String(ordersWon)} />
+          <SummaryRow label="Доля выигранных" value={conversion != null ? `${conversion}%` : '—'} />
+        </Animated.View>
+
+        <Animated.Text entering={FadeInDown.delay(230).duration(360)} style={styles.sectionTitle}>
+          Репутация
+        </Animated.Text>
+        <Animated.View entering={FadeInDown.delay(250).duration(360)} style={styles.sectionCard}>
+          <SummaryRow
+            label="Рейтинг"
+            value={profile.rating != null ? `★ ${ratingText(profile.rating)}` : 'пока нет'}
+          />
+          <SummaryRow label="Отзывы" value={String(profile.reviewsCount)} />
+          <SummaryRow label="Выполнено заказов" value={String(profile.completedOrders)} />
+        </Animated.View>
+
+        {/* Сводка обезличена: гистограмма цен, без адресов и имён */}
+        {marketSummary && (
+          <>
+            <Animated.Text
+              entering={FadeInDown.delay(270).duration(360)}
+              style={styles.sectionTitle}
+            >
+              Цены по республике
+            </Animated.Text>
+            <Animated.View
+              entering={FadeInDown.delay(290).duration(360)}
+              style={styles.sectionCard}
+            >
+              <SummaryRow
+                label="Медиана"
+                value={
+                  marketSummary.medianAtCap
+                    ? `больше ${rub(marketSummary.median)}`
+                    : rub(marketSummary.median)
+                }
+              />
+              <SummaryRow
+                label="Половина заказов"
+                value={`${rub(marketSummary.p25)} – ${rub(marketSummary.p75)}`}
+              />
+              <SummaryRow
+                label="Ваш средний чек"
+                value={income.completedCount ? rub(income.avgCheck) : '—'}
+              />
+            </Animated.View>
+            <Animated.Text entering={FadeInDown.delay(310).duration(340)} style={styles.marketHint}>
+              Считается по завершённым заказам всех мастеров республики
+            </Animated.Text>
+          </>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ---------- История заказов ----------
+
+export function HistoryTab({
+  jobs,
+  onOpenJob,
+  onClose,
+}: {
+  jobs: Job[];
+  onOpenJob: (id: string) => void;
+  onClose: () => void;
+}) {
+  const { mode, colors: t } = useTheme();
+  const styles = themed[mode];
+  // Свежее сверху: по дате подтверждения, у старых заказов — по дате создания
+  const sorted = [...jobs].sort(
+    (a, b) =>
+      (b.completedMs ?? b.createdMs ?? 0) - (a.completedMs ?? a.createdMs ?? 0) ||
+      b.id.localeCompare(a.id),
+  );
+
+  return (
+    <View style={styles.fill}>
+      <View style={styles.topBar}>
+        <PressableScale style={styles.backChip} onPress={onClose}>
+          <Text style={styles.backText}>‹ Профиль</Text>
+        </PressableScale>
+        <View style={styles.backChipGhost} />
+      </View>
+
+      <ScrollView style={styles.fill} contentContainerStyle={styles.listContent}>
+        <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
+          История
+        </Animated.Text>
+        <Animated.Text entering={FadeInDown.delay(40).duration(380)} style={styles.headerSub}>
+          Завершённые, отменённые и закрытые заказы
+        </Animated.Text>
+
+        {sorted.length === 0 ? (
+          <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.emptyWrap}>
+            <Text style={styles.emptyIcon}>🗂️</Text>
+            <Text style={styles.emptyTitle}>История пуста</Text>
+            <Text style={styles.emptySub}>
+              Завершённые и отменённые заказы будут собираться здесь
+            </Text>
+          </Animated.View>
+        ) : (
+          sorted.map((job, i) => (
+            <Animated.View
+              key={job.id}
+              entering={FadeInDown.delay(100 + Math.min(i, 8) * STAGGER).duration(340)}
+              layout={LinearTransition.springify().damping(20).stiffness(170)}
+            >
+              <PressableScale style={styles.jobItem} onPress={() => onOpenJob(job.id)}>
+                <View style={styles.jobIconWrap}>
+                  <Text style={styles.jobIcon}>{jobEmoji(job.title)}</Text>
+                </View>
+                <View style={styles.jobBody}>
+                  <Text style={styles.jobTitle}>{job.title}</Text>
+                  <Text style={styles.jobMeta}>
+                    {[job.completedMs ? dayLabel(job.completedMs) : job.date, job.client]
+                      .filter(Boolean)
+                      .join(' · ') || 'Заявка закрыта'}
+                  </Text>
+                </View>
+                <View style={styles.jobRight}>
+                  <View style={styles.jobStatusPill}>
+                    <Text style={[styles.jobStatus, { color: statusColorFor(job.status, t) }]}>
+                      {STATUS_LABEL[job.status]}
+                    </Text>
+                  </View>
+                  {(job.price ?? job.myOffer) != null && (
+                    <Text style={styles.jobPrice}>{rub((job.price ?? job.myOffer) as number)}</Text>
+                  )}
+                </View>
+              </PressableScale>
+            </Animated.View>
+          ))
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ---------- Профиль мастера: как его видит клиент ----------
+
+export function ProfileTab({
+  email,
+  profile,
+  reviews,
+  onEdit,
+  onLogout,
+  onClose,
+}: {
+  email: string;
+  profile: MasterProfile;
+  reviews: MasterReview[];
+  onEdit: () => void;
+  onLogout: () => void;
+  onClose: () => void;
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const fullName = [profile.name, profile.lastName].filter(Boolean).join(' ');
+  const initials =
+    [profile.name, profile.lastName]
+      .filter(Boolean)
+      .map((s) => s[0].toUpperCase())
+      .join('') || '🙂';
+
+  return (
+    <View style={styles.fill}>
+      <View style={styles.topBar}>
+        <PressableScale style={styles.backChip} onPress={onClose}>
+          <Text style={styles.backText}>‹ Профиль</Text>
+        </PressableScale>
+        <PressableScale style={styles.backChip} onPress={onLogout}>
+          <Text style={styles.logoutText}>Выйти из раздела</Text>
+        </PressableScale>
+      </View>
+
+      <ScrollView style={styles.fill} contentContainerStyle={styles.listContent}>
+        <Animated.View entering={FadeInDown.duration(420)} style={styles.profileCard}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+          <Text style={styles.profileName}>{fullName || email}</Text>
+          <View style={styles.chipRow}>
+            <View style={styles.verifiedChip}>
+              <Text style={styles.verifiedText}>✓ проверенный мастер</Text>
+            </View>
+            {email === FOUNDER_EMAIL && (
+              <View style={styles.founderChip}>
+                <Text style={styles.founderText}>⭐ основатель domio</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.profileRating}>
+            {[
+              profile.rating != null ? `★ ${ratingText(profile.rating)}` : null,
+              counted(profile.reviewsCount, 'отзыв', 'отзыва', 'отзывов'),
+              counted(profile.completedOrders, 'заказ', 'заказа', 'заказов'),
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </Animated.View>
+
+        {/* То же, что видит клиент рядом с предложением цены */}
+        <Animated.View entering={FadeInDown.delay(60).duration(360)} style={styles.sectionCard}>
+          <SummaryRow
+            label="Стаж"
+            value={
+              profile.experienceYears == null
+                ? 'не указан'
+                : profile.experienceYears === 0
+                  ? 'меньше года'
+                  : counted(profile.experienceYears, 'год', 'года', 'лет')
+            }
+          />
+          <SummaryRow label="Образование" value={profile.education ?? 'не указано'} />
+          <SummaryRow
+            label="Специальности"
+            value={profile.skills.length ? profile.skills.join(', ') : 'все'}
+          />
+          <SummaryRow
+            label="Где работаете"
+            value={
+              profile.cities.length
+                ? profile.cities.map(settlementLabel).join(', ')
+                : 'вся республика'
+            }
+          />
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(90).duration(360)}>
+          <PressableScale style={styles.editBtn} onPress={onEdit}>
+            <Text style={styles.editBtnText}>Редактировать анкету</Text>
+          </PressableScale>
+        </Animated.View>
+
+        <Animated.Text entering={FadeInDown.delay(120).duration(360)} style={styles.sectionTitle}>
+          Отзывы клиентов
+        </Animated.Text>
+        {reviews.length === 0 ? (
+          <Animated.Text entering={FadeIn.delay(160).duration(360)} style={styles.reviewsEmpty}>
+            Пока нет отзывов. Клиент может оставить отзыв после завершённого заказа.
+          </Animated.Text>
+        ) : (
+          reviews.map((r, i) => (
+            <Animated.View
+              key={r.id}
+              entering={FadeInDown.delay(140 + Math.min(i, 8) * STAGGER).duration(320)}
+              style={styles.reviewCard}
+            >
+              <View style={styles.reviewTop}>
+                <Text style={styles.reviewStars}>
+                  {'★'.repeat(Math.max(1, Math.min(5, Math.round(r.stars))))}
+                </Text>
+                <Text style={styles.reviewMeta}>
+                  {[r.clientName, r.createdMs != null ? dayLabel(r.createdMs) : null]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              </View>
+              {!!r.text && <Text style={styles.reviewText}>{r.text}</Text>}
+            </Animated.View>
+          ))
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ---------- Нижние вкладки раздела ----------
+
+const MASTER_TABS: { id: MasterTab; label: string; icon: string }[] = [
+  { id: 'jobs', label: 'Заявки', icon: '🧾' },
+  { id: 'stats', label: 'Статистика', icon: '📊' },
+  { id: 'history', label: 'История', icon: '🗂️' },
+  { id: 'profile', label: 'Профиль', icon: '👤' },
+];
+
+// Та же панель, что у клиентской части (BottomTabs), но со своими вкладками.
+// Нарочно не общий компонент: клиентская панель живёт на трёх вкладках со
+// своей точкой непрочитанного, и обобщение связало бы два независимых мира.
+export function MasterTabs({
+  active,
+  onSelect,
+  hidden,
+  hasNew,
+}: {
+  active: MasterTab;
+  onSelect: (tab: MasterTab) => void;
+  hidden: boolean;
+  hasNew: boolean;
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const [barW, setBarW] = useState(0);
+  const pillW = barW > 0 ? (barW - 12) / MASTER_TABS.length : 0;
+  const idx = MASTER_TABS.findIndex((t) => t.id === active);
+
+  // Анимации из эффектов, а не из стиля: панель перерисовывается на каждом
+  // обновлении ленты, и анимация в стиле начиналась бы заново
+  const x = useSharedValue(0);
+  const measured = useRef(false);
+  useEffect(() => {
+    if (pillW <= 0) return;
+    if (measured.current) x.value = withSpring(idx * pillW, springs.card);
+    else x.value = idx * pillW;
+    measured.current = true;
+  }, [idx, pillW, x]);
+
+  const away = useSharedValue(hidden ? 1 : 0);
+  useEffect(() => {
+    away.value = withTiming(hidden ? 1 : 0, { duration: 220 });
+  }, [hidden, away]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    width: pillW,
+    transform: [{ translateX: x.value }],
+  }));
+  const wrapStyle = useAnimatedStyle(() => ({
+    opacity: 1 - away.value,
+    transform: [{ translateY: 24 * away.value }],
+  }));
+
+  return (
+    <Animated.View style={[styles.tabsWrap, wrapStyle]} pointerEvents={hidden ? 'none' : 'auto'}>
+      <View style={styles.tabsBar} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
+        {barW > 0 && <Animated.View style={[styles.tabsPill, pillStyle]} pointerEvents="none" />}
+        {MASTER_TABS.map((tabItem) => (
+          <MasterTabButton
+            key={tabItem.id}
+            tab={tabItem}
+            selected={tabItem.id === active}
+            showDot={tabItem.id === 'jobs' && hasNew && tabItem.id !== active}
+            onPress={() => onSelect(tabItem.id)}
+          />
+        ))}
+      </View>
+    </Animated.View>
+  );
+}
+
+function MasterTabButton({
+  tab,
+  selected,
+  showDot,
+  onPress,
+}: {
+  tab: { id: MasterTab; label: string; icon: string };
+  selected: boolean;
+  showDot: boolean;
+  onPress: () => void;
+}) {
+  const { mode, colors: t } = useTheme();
+  const styles = themed[mode];
+  const on = useSharedValue(selected ? 1 : 0);
+  useEffect(() => {
+    on.value = withTiming(selected ? 1 : 0, { duration: 220 });
+  }, [selected, on]);
+
+  const textStyle = useAnimatedStyle(() => ({
+    color: interpolateColor(on.value, [0, 1], [t.textMuted, t.accentStrong]),
+    opacity: 0.85 + 0.15 * on.value,
+  }));
+
+  return (
+    <PressableScale style={styles.tabsTab} onPress={onPress}>
+      <View>
+        <Text style={styles.tabsIcon}>{tab.icon}</Text>
+        {showDot && <View style={styles.tabsDot} />}
+      </View>
+      <Animated.Text style={[styles.tabsLabel, textStyle]}>{tab.label}</Animated.Text>
+    </PressableScale>
+  );
+}
+
 // ---------- Заявка: детали, цена, чат с клиентом ----------
 
-function JobDetail({
+export function JobDetail({
   job,
   typing,
   onBack,
@@ -1418,7 +2094,8 @@ function JobDetail({
 
   // Переписка открыта только выбранному мастеру: правила пускают в чат
   // участников заявки, а до выбора мастер ей не участник
-  const canChat = job.legacy || job.status === 'accepted' || job.status === 'done';
+  const canChat =
+    job.legacy || job.status === 'accepted' || job.status === 'awaiting' || job.status === 'done';
 
   const submitPrice = () => {
     if (!priceValid) return;
@@ -1446,9 +2123,14 @@ function JobDetail({
         <PressableScale style={styles.backChip} onPress={onBack}>
           <Text style={styles.backText}>‹ Заявки</Text>
         </PressableScale>
-        <View style={styles.detailTitleWrap}>
+        <Animated.View entering={FadeIn.delay(80).duration(280)} style={styles.detailTitleWrap}>
+          {!!job.client && (
+            <View style={styles.detailAvatar}>
+              <Text style={styles.detailAvatarText}>{job.client[0].toUpperCase()}</Text>
+            </View>
+          )}
           <Text style={styles.detailName}>{job.client}</Text>
-        </View>
+        </Animated.View>
         <View style={styles.backChipGhost} />
       </View>
 
@@ -1458,24 +2140,55 @@ function JobDetail({
         contentContainerStyle={styles.detailContent}
         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
       >
-        <View style={styles.detailCard}>
-          <Text style={styles.detailJobTitle}>{job.title}</Text>
-          <Text style={styles.detailMeta}>
-            {job.address} · {job.date}
-          </Text>
-          <Text style={styles.detailDesc}>{job.desc}</Text>
-        </View>
+        <Animated.View entering={FadeInDown.delay(40).duration(360)} style={styles.detailCard}>
+          <View style={styles.detailHead}>
+            <View style={styles.detailIconWrap}>
+              <Text style={styles.detailIcon}>{jobEmoji(job.title)}</Text>
+            </View>
+            <View style={styles.detailHeadBody}>
+              <Text style={styles.detailJobTitle}>{job.title}</Text>
+              {!!(job.address || job.date) && (
+                <Text style={styles.detailMeta}>
+                  {[job.address && `📍 ${job.address}`, job.date && `📅 ${job.date}`]
+                    .filter(Boolean)
+                    .join('   ')}
+                </Text>
+              )}
+            </View>
+          </View>
+          {/* Комментарий клиента — как цитата: он и есть суть заявки */}
+          {!!job.desc && (
+            <View style={styles.detailDescWrap}>
+              <Text style={styles.detailDesc}>{job.desc}</Text>
+            </View>
+          )}
+        </Animated.View>
 
         {/* Блок цены. Заявку у клиента может просить несколько мастеров, и
             выбирает он: поэтому здесь не «взять заявку», а прислать цену
-            с парой слов о себе — больше сказать до выбора негде. */}
+            с парой слов о себе — больше сказать до выбора негде.
+            key по статусу: смена состояния въезжает свежей карточкой. */}
         {job.status === 'new' || job.status === 'declined' ? (
-          <View style={styles.priceCard}>
-            <Text style={styles.priceLabel}>
-              {job.status === 'declined'
-                ? `Клиент отклонил ${rub(job.price ?? 0)} — назовите другую цену`
-                : 'Ваша цена за работу'}
-            </Text>
+          <Animated.View
+            key={job.status}
+            entering={FadeInDown.delay(90).duration(360)}
+            style={styles.priceCard}
+          >
+            <View style={styles.statusHead}>
+              <View style={styles.statusIconWrap}>
+                <Text style={styles.statusIcon}>💰</Text>
+              </View>
+              <View style={styles.statusBody}>
+                <Text style={styles.statusTitle}>
+                  {job.status === 'declined' ? 'Клиент ждёт другую цену' : 'Ваша цена за работу'}
+                </Text>
+                <Text style={styles.statusSub}>
+                  {job.status === 'declined'
+                    ? `Прошлую (${rub(job.price ?? 0)}) отклонили — предложите новую`
+                    : 'Клиент сравнит предложения мастеров и выберет одно'}
+                </Text>
+              </View>
+            </View>
             <View style={styles.priceRow}>
               <TextInput
                 style={styles.priceInput}
@@ -1507,45 +2220,91 @@ function JobDetail({
                 maxLength={300}
               />
             )}
-          </View>
+          </Animated.View>
         ) : (
-          <View
-            style={[
-              styles.priceCard,
-              (job.status === 'accepted' || job.status === 'done') && styles.priceCardAccepted,
-            ]}
-          >
-            <Text style={[styles.priceStatusText, { color: statusColorFor(job.status, t) }]}>
-              {job.status === 'offered'
-                ? `Вы предложили ${rub(job.myOffer ?? job.price ?? 0)} — клиент выбирает`
+          (() => {
+            // Иконка, заголовок и пояснение зависят от статуса — собираем
+            // здесь, чтобы разметка карточки осталась одна
+            const view =
+              job.status === 'offered'
+                ? {
+                    icon: '📨',
+                    title: 'Предложение отправлено',
+                    sub: 'Клиент сравнивает цены и выбирает мастера',
+                    price: job.myOffer ?? job.price ?? null,
+                  }
                 : job.status === 'accepted'
-                  ? `Клиент выбрал вас · ${rub(job.price ?? 0)} 🎉`
-                  : job.status === 'cancelled'
-                    ? 'Клиент отменил заявку'
-                    : job.status === 'closed'
-                      ? 'Заявку закрыли — выбрали другого мастера либо клиент её отменил'
-                      : `Работа завершена · ${rub(job.price ?? 0)}`}
-            </Text>
+                  ? {
+                      icon: '🎉',
+                      title: 'Клиент выбрал вас',
+                      sub: 'Договоритесь о времени в чате',
+                      price: job.price ?? null,
+                    }
+                  : job.status === 'awaiting'
+                    ? {
+                        icon: '⏳',
+                        title: 'Работа сдана',
+                        sub: 'Ждём, когда клиент подтвердит выполнение',
+                        price: job.price ?? null,
+                      }
+                    : job.status === 'cancelled'
+                      ? { icon: '🚫', title: 'Клиент отменил заявку', sub: null, price: null }
+                      : job.status === 'closed'
+                        ? {
+                            icon: '🔒',
+                            title: 'Заявка закрыта',
+                            sub: 'Выбрали другого мастера либо клиент её отменил',
+                            price: job.myOffer ?? null,
+                          }
+                        : {
+                            icon: '✅',
+                            title: 'Работа завершена',
+                            sub: 'Заказ лежит в истории',
+                            price: job.price ?? null,
+                          };
+            const celebratory = job.status === 'accepted' || job.status === 'done';
+            return (
+              <Animated.View
+                key={job.status}
+                entering={FadeInDown.delay(90).duration(360)}
+                style={[styles.priceCard, celebratory && styles.priceCardAccepted]}
+              >
+                <View style={styles.statusHead}>
+                  <View style={[styles.statusIconWrap, celebratory && styles.statusIconWrapOn]}>
+                    <Text style={styles.statusIcon}>{view.icon}</Text>
+                  </View>
+                  <View style={styles.statusBody}>
+                    <Text style={[styles.statusTitle, { color: statusColorFor(job.status, t) }]}>
+                      {view.title}
+                    </Text>
+                    {!!view.sub && <Text style={styles.statusSub}>{view.sub}</Text>}
+                  </View>
+                  {view.price != null && <Text style={styles.statusPrice}>{rub(view.price)}</Text>}
+                </View>
 
-            {/* Цена принята — осталось сделать работу и отметить её выполненной */}
-            {job.status === 'accepted' && (
-              <PressableScale style={styles.finishBtn} onPress={onFinish}>
-                <Text style={styles.finishBtnText}>✓ Работа выполнена</Text>
-              </PressableScale>
-            )}
+                {/* Цена принята — осталось сделать работу и отметить её выполненной */}
+                {job.status === 'accepted' && (
+                  <PressableScale style={styles.finishBtn} onPress={onFinish}>
+                    <Text style={styles.finishBtnText}>✓ Работа выполнена</Text>
+                  </PressableScale>
+                )}
 
-            {/* Пока клиент не выбрал, предложение можно забрать назад */}
-            {job.status === 'offered' && !job.legacy && (
-              <PressableScale style={styles.withdrawBtn} onPress={onWithdrawOffer}>
-                <Text style={styles.withdrawBtnText}>Отозвать предложение</Text>
-              </PressableScale>
-            )}
-          </View>
+                {/* Пока клиент не выбрал, предложение можно забрать назад */}
+                {job.status === 'offered' && !job.legacy && (
+                  <PressableScale style={styles.withdrawBtn} onPress={onWithdrawOffer}>
+                    <Text style={styles.withdrawBtnText}>Отозвать предложение</Text>
+                  </PressableScale>
+                )}
+              </Animated.View>
+            );
+          })()
         )}
 
         {/* Чат с клиентом */}
         {(job.messages.length > 0 || typing) && (
-          <Text style={styles.chatTitle}>Чат с клиентом</Text>
+          <Animated.Text entering={FadeIn.delay(150).duration(300)} style={styles.chatTitle}>
+            💬 Чат с клиентом
+          </Animated.Text>
         )}
 
         {job.messages.map((m) => (
@@ -1849,7 +2608,8 @@ const makeStyles = (t: Palette) =>
     loginSwitchText: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
 
     // Лента заявок
-    listContent: { padding: 16, paddingTop: 8, paddingBottom: 40 },
+    // Нижний отступ — под плавающую панель вкладок
+    listContent: { padding: 16, paddingTop: 8, paddingBottom: 120 },
     header: { fontSize: 20, fontWeight: '800', color: t.text },
     headerSub: {
       color: t.textMuted,
@@ -1873,6 +2633,165 @@ const makeStyles = (t: Palette) =>
     statValueActive: { color: t.accent },
     statLabel: { fontSize: 11, fontWeight: '700', color: t.textMuted, marginTop: 2 },
     sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10, color: t.text },
+
+    // ---------- статистика ----------
+    milestoneCard: {
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginTop: -6,
+      marginBottom: 16,
+    },
+    milestoneText: { fontWeight: '700', fontSize: 12.5, color: t.text, marginBottom: 9 },
+    milestoneTrack: { height: 6, borderRadius: 3, backgroundColor: t.chip, overflow: 'hidden' },
+    milestoneFill: { height: '100%', borderRadius: 3, backgroundColor: t.accent },
+    awaitingHint: {
+      color: t.textSoft,
+      fontWeight: '600',
+      fontSize: 12,
+      marginTop: -8,
+      marginBottom: 16,
+      lineHeight: 17,
+    },
+    chartCard: {
+      backgroundColor: t.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 16,
+      marginBottom: 18,
+    },
+    chartRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+    chartCol: { flex: 1, alignItems: 'center' },
+    chartValue: { fontSize: 9.5, fontWeight: '700', color: t.textSoft, marginBottom: 3 },
+    chartBar: { alignSelf: 'stretch', borderRadius: 7, backgroundColor: t.chip },
+    chartBarOn: { backgroundColor: t.accent },
+    chartMonth: { fontSize: 10, fontWeight: '700', color: t.textMuted, marginTop: 5 },
+    sectionCard: {
+      backgroundColor: t.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: t.border,
+      paddingHorizontal: 16,
+      paddingVertical: 5,
+      marginBottom: 18,
+    },
+    marketHint: {
+      color: t.textMuted,
+      fontWeight: '600',
+      fontSize: 11,
+      marginTop: -12,
+      lineHeight: 15,
+      paddingHorizontal: 4,
+    },
+
+    // ---------- профиль ----------
+    profileCard: {
+      alignItems: 'center',
+      backgroundColor: t.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 20,
+      marginBottom: 14,
+    },
+    avatar: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: t.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 10,
+    },
+    avatarText: { fontSize: 22, fontWeight: '800', color: t.accent },
+    profileName: { fontSize: 18, fontWeight: '800', color: t.text },
+    chipRow: { flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' },
+    verifiedChip: {
+      backgroundColor: t.accentSoft,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    verifiedText: { color: t.accent, fontWeight: '700', fontSize: 11.5 },
+    founderChip: {
+      backgroundColor: t.chip,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+    founderText: { color: t.warn, fontWeight: '700', fontSize: 11.5 },
+    profileRating: { color: t.textSoft, fontWeight: '600', fontSize: 12.5, marginTop: 8 },
+    editBtn: {
+      backgroundColor: t.accent,
+      borderRadius: 16,
+      paddingVertical: 13,
+      alignItems: 'center',
+      marginBottom: 18,
+    },
+    editBtnText: { color: t.onAccent, fontWeight: '700', fontSize: 14 },
+    reviewCard: {
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginBottom: 9,
+    },
+    reviewTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    reviewStars: { color: t.warn, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
+    reviewMeta: { color: t.textMuted, fontWeight: '600', fontSize: 11 },
+    reviewText: { color: t.text, fontWeight: '600', fontSize: 13, lineHeight: 18 },
+    reviewsEmpty: { color: t.textMuted, fontWeight: '600', fontSize: 12.5, lineHeight: 18 },
+
+    // ---------- нижние вкладки ----------
+    tabsWrap: {
+      position: 'absolute',
+      left: 16,
+      right: 16,
+      bottom: Platform.OS === 'ios' ? 28 : 16,
+    },
+    tabsBar: {
+      flexDirection: 'row',
+      backgroundColor: t.card,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: t.border,
+      paddingVertical: 6,
+      paddingHorizontal: 6,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.14,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 10,
+    },
+    tabsPill: {
+      position: 'absolute',
+      top: 6,
+      bottom: 6,
+      left: 6,
+      borderRadius: 16,
+      backgroundColor: t.accentSoft,
+    },
+    tabsTab: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 16 },
+    tabsIcon: { fontSize: 19 },
+    tabsDot: {
+      position: 'absolute',
+      top: -2,
+      right: -6,
+      width: 7,
+      height: 7,
+      borderRadius: 3.5,
+      backgroundColor: t.warn,
+    },
+    tabsLabel: { marginTop: 3, fontSize: 10.5, fontWeight: '700' },
     filterRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1897,6 +2816,16 @@ const makeStyles = (t: Palette) =>
       borderWidth: 1,
       borderColor: t.border,
     },
+    jobIconWrap: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: t.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 10,
+    },
+    jobIcon: { fontSize: 17 },
     jobBody: { flex: 1, marginRight: 8 },
     jobTitle: { fontWeight: '700', fontSize: 13.5, color: t.text },
     jobMeta: { color: t.textMuted, fontSize: 11, fontWeight: '600', marginTop: 2 },
@@ -1908,8 +2837,14 @@ const makeStyles = (t: Palette) =>
       fontWeight: '700',
       fontStyle: 'italic',
     },
-    jobRight: { alignItems: 'flex-end', gap: 3 },
-    jobStatus: { fontWeight: '700', fontSize: 11.5 },
+    jobRight: { alignItems: 'flex-end', gap: 4 },
+    jobStatusPill: {
+      backgroundColor: t.chip,
+      borderRadius: 9,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    jobStatus: { fontWeight: '700', fontSize: 11 },
     jobPrice: { color: t.text, fontWeight: '800', fontSize: 12 },
     unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: t.warn },
     emptyWrap: {
@@ -1934,6 +2869,15 @@ const makeStyles = (t: Palette) =>
     // Детали заявки
     detailRoot: { backgroundColor: t.bg },
     detailTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    detailAvatar: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: t.accentSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    detailAvatarText: { fontWeight: '800', fontSize: 13, color: t.accent },
     detailName: { fontWeight: '800', fontSize: 14.5, color: t.text },
     detailContent: { padding: 16, paddingTop: 4, paddingBottom: 24 },
     detailCard: {
@@ -1944,9 +2888,30 @@ const makeStyles = (t: Palette) =>
       padding: 16,
       marginBottom: 10,
     },
+    detailHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    detailIconWrap: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: t.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    detailIcon: { fontSize: 21 },
+    detailHeadBody: { flex: 1 },
     detailJobTitle: { fontWeight: '800', fontSize: 15, color: t.text },
     detailMeta: { color: t.textMuted, fontWeight: '600', fontSize: 11.5, marginTop: 3 },
-    detailDesc: { color: t.textSoft, fontSize: 13, lineHeight: 19, marginTop: 10 },
+    // Комментарий клиента отделён подложкой и «корешком» слева — как цитата
+    detailDescWrap: {
+      marginTop: 12,
+      backgroundColor: t.soft,
+      borderRadius: 12,
+      borderLeftWidth: 3,
+      borderLeftColor: t.accentBorder,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    detailDesc: { color: t.textSoft, fontSize: 13, lineHeight: 19 },
     priceCard: {
       backgroundColor: t.card,
       borderRadius: 18,
@@ -1956,8 +2921,22 @@ const makeStyles = (t: Palette) =>
       marginBottom: 16,
     },
     priceCardAccepted: { borderColor: t.accentBorder, backgroundColor: t.accentFaint },
-    priceLabel: { fontWeight: '700', fontSize: 12, color: t.textSoft, marginBottom: 8 },
-    priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    statusHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    statusIconWrap: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: t.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    statusIconWrapOn: { backgroundColor: t.accentSoft },
+    statusIcon: { fontSize: 18 },
+    statusBody: { flex: 1 },
+    statusTitle: { fontWeight: '800', fontSize: 13.5, color: t.text },
+    statusSub: { color: t.textMuted, fontWeight: '600', fontSize: 11.5, marginTop: 2 },
+    statusPrice: { fontWeight: '800', fontSize: 16, color: t.text },
+    priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
     priceInput: {
       flex: 1,
       borderWidth: 1,
@@ -1979,9 +2958,8 @@ const makeStyles = (t: Palette) =>
     },
     priceBtnDim: { backgroundColor: t.disabled },
     priceBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
-    priceStatusText: { fontWeight: '700', fontSize: 13, lineHeight: 19 },
     finishBtn: {
-      marginTop: 12,
+      marginTop: 14,
       backgroundColor: t.accent,
       borderRadius: 12,
       paddingVertical: 12,
@@ -2002,7 +2980,17 @@ const makeStyles = (t: Palette) =>
       minHeight: 58,
       textAlignVertical: 'top',
     },
-    withdrawBtn: { alignItems: 'center', paddingVertical: 11, marginTop: 6 },
+    // Настоящая кнопка, а не красная надпись в пустоте: действие редкое,
+    // но оно должно выглядеть нажимаемым
+    withdrawBtn: {
+      alignItems: 'center',
+      paddingVertical: 11,
+      marginTop: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.soft,
+    },
     withdrawBtnText: { color: t.danger, fontWeight: '800', fontSize: 12.5 },
     chatLockedRow: {
       paddingHorizontal: 16,

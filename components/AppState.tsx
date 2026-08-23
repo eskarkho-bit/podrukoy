@@ -724,9 +724,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const confirmOrderDone = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order || order.status !== 'Ждёт подтверждения') return;
-    updateDoc(doc(db, 'orders', orderId), { status: 'Завершена' }).catch(
-      failed('Не удалось подтвердить выполнение. Проверьте связь'),
-    );
+    // Дата завершения — только серверным временем: правила не пропустят
+    // другую, по ней мастер видит доход по месяцам
+    updateDoc(doc(db, 'orders', orderId), {
+      status: 'Завершена',
+      completedAt: serverTimestamp(),
+    }).catch(failed('Не удалось подтвердить выполнение. Проверьте связь'));
   };
 
   const cancelOrder = (orderId: string) => {

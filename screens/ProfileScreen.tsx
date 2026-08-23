@@ -16,6 +16,7 @@ import { formatRuPhone } from '../components/phoneAuth';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { settlementLabel } from '../components/cities';
+import { FOUNDER_EMAIL } from '../components/founder';
 import { LegalScreen } from './LegalScreen';
 
 type Props = {
@@ -218,6 +219,11 @@ export function ProfileScreen({
             почты нет, у почтового — телефона */}
           <Text style={styles.email}>{email || formatRuPhone(phone)}</Text>
           <Text style={styles.address}>{address}</Text>
+          {email === FOUNDER_EMAIL && (
+            <View style={styles.founderChip}>
+              <Text style={styles.founderText}>⭐ основатель domio</Text>
+            </View>
+          )}
         </Animated.View>
 
         {/* Живая статистика: считается по реальным заказам */}
@@ -589,6 +595,14 @@ const makeStyles = (t: Palette) =>
     },
     email: { fontWeight: '600', fontSize: 12.5, color: t.textSoft, marginTop: 5 },
     address: { color: t.textMuted, fontWeight: '600', fontSize: 12, marginTop: 3 },
+    founderChip: {
+      backgroundColor: t.chip,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      marginTop: 8,
+    },
+    founderText: { color: t.warn, fontWeight: '700', fontSize: 11.5 },
     statsRow: { flexDirection: 'row', gap: 9, marginBottom: 22 },
     statCard: {
       flex: 1,

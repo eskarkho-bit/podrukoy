@@ -482,6 +482,50 @@ describe('Завершение работы', () => {
     });
     await assertSucceeds(updateDoc(doc(as('client1'), 'orders/working'), { status: 'Завершена' }));
   });
+
+  // По completedAt мастер видит доход по месяцам. Дата пишется вместе с
+  // подтверждением и только серверным временем — иначе историю заработка
+  // можно было бы рисовать задним числом.
+  test('подтверждение может записать дату завершения серверным временем', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), { status: 'Ждёт подтверждения' });
+    });
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/working'), {
+        status: 'Завершена',
+        completedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('произвольную дату завершения подставить нельзя', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), { status: 'Ждёт подтверждения' });
+    });
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), {
+        status: 'Завершена',
+        completedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    );
+  });
+
+  test('дату завершения нельзя дописать вне подтверждения', async () => {
+    // У завершённой заявки — вместе с отметкой об отзыве
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/finished'), {
+        reviewed: true,
+        completedAt: serverTimestamp(),
+      }),
+    );
+    // И мастеру при сдаче работы — тоже
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), {
+        status: 'Ждёт подтверждения',
+        completedAt: serverTimestamp(),
+      }),
+    );
+  });
 });
 
 describe('Отзывы и рейтинг', () => {
@@ -1064,12 +1108,28 @@ describe('Сводка по заявкам', () => {
     await assertSucceeds(getDoc(doc(as('admin1'), 'stats/orders')));
   });
 
-  // Сводка нужна модератору вместо доступа к заявкам, а не в дополнение
-  // к нему. Мастеру и клиенту она не нужна вовсе.
-  test('остальные сводку не читают', async () => {
+  // Проверенный мастер сверяет с медианой свой средний чек. Персональных
+  // данных в сводке нет — только гистограмма цен и счётчики.
+  test('проверенный мастер читает сводку цен', async () => {
+    await assertSucceeds(getDoc(doc(as('master1'), 'stats/orders')));
+  });
+
+  // Клиенту сводка не нужна, а непроверенная анкета не даёт ничего —
+  // как и с лентой заявок
+  test('клиент, непроверенный мастер и аноним сводку не читают', async () => {
     await assertFails(getDoc(doc(as('client1'), 'stats/orders')));
-    await assertFails(getDoc(doc(as('master1'), 'stats/orders')));
+    await assertFails(getDoc(doc(as('newbie'), 'stats/orders')));
     await assertFails(getDoc(doc(anon(), 'stats/orders')));
+  });
+
+  // Мастеру открыт ровно один документ — сводка цен. Появись в stats
+  // что-то ещё, оно останется закрытым, как и было.
+  test('другие документы статистики мастеру не видны', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'stats/other'), { secret: 1 });
+    });
+    await assertFails(getDoc(doc(as('master1'), 'stats/other')));
+    await assertSucceeds(getDoc(doc(as('admin1'), 'stats/other')));
   });
 
   // По этим числам решают, какой брать процент. Возможность их накрутить

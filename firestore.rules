@@ -341,8 +341,18 @@ service cloud.firestore {
       function clientFields() {
         return changed().hasOnly([
           'status', 'masterId', 'masterName', 'agreedPrice', 'agreedAt',
-          'reviewed', 'priceStatus', 'priceHistory', 'photoUrl',
+          'reviewed', 'priceStatus', 'priceHistory', 'photoUrl', 'completedAt',
         ]);
+      }
+
+      // Дата завершения пишется одним способом: вместе с подтверждением и
+      // только серверным временем. По ней мастер видит доход по месяцам,
+      // и рисовать её задним числом нельзя никому. Старые версии приложения
+      // подтверждают без неё — это тоже разрешено.
+      function completedAtUntouchedOrNow() {
+        return unchanged('completedAt')
+          || (statusIs('Ждёт подтверждения', 'Завершена')
+            && request.resource.data.completedAt == request.time);
       }
 
       // Фото прикладывается сразу после создания: сначала заявка, потом
@@ -414,7 +424,7 @@ service cloud.firestore {
           && unchanged('status') && unchanged('masterId') && unchanged('agreedPrice');
       }
 
-      allow update: if isClient() && clientFields()
+      allow update: if isClient() && clientFields() && completedAtUntouchedOrNow()
         && (clientPicksOffer() || clientConfirms() || clientCancels()
           || clientMarksReviewed() || clientAttachesPhoto()
           || clientAcceptsLegacy() || clientDeclinesLegacy());
@@ -542,6 +552,16 @@ service cloud.firestore {
       allow read: if isAdmin();
       // Пишет только Admin SDK, а он правила не спрашивает. Из приложения —
       // никто: иначе медиану можно было бы накрутить.
+      allow write: if false;
+    }
+
+    // Сводка цен по заявкам — единственный документ статистики, открытый
+    // шире модератора: проверенный мастер сверяет с медианой свой средний
+    // чек. Персональных данных там нет по построению — только гистограмма
+    // и счётчики. Остальные документы stats/, если появятся, останутся
+    // закрытыми правилом выше.
+    match /stats/orders {
+      allow read: if isVerifiedMaster();
       allow write: if false;
     }
 
