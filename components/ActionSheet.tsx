@@ -24,7 +24,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
 import { SheetGrabber, useSheetDrag } from './sheetDrag';
-import { categoryFor, flowFor, ServiceType, type Category } from './serviceOptions';
+import { categoryFor, flowFor, OTHER_LABEL, ServiceType, type Category } from './serviceOptions';
 import { newOrderId } from '../firebaseConfig';
 import type { SceneObject } from './HouseScene';
 
@@ -62,6 +62,9 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   const [serviceSub, setServiceSub] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  // Фото и описание спрятаны за кнопкой «Оставить комментарий»: большинству
+  // хватает выбранных пунктов, и форма не встречает их пустыми полями
+  const [detailsOpen, setDetailsOpen] = useState(false);
   // Направление последнего перехода — от него зависит, откуда «въезжает» новый шаг
   const [dir, setDir] = useState<'forward' | 'back'>('forward');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,6 +74,13 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   const [draftId] = useState(newOrderId);
 
   const flow = flowFor(object.id);
+
+  // На пути «Другое» описание — суть заявки, без него мастер не поймёт, что
+  // случилось: там поле открыто сразу, без кнопки. И уже введённое не должно
+  // уходить в заявку невидимым, поэтому непустой комментарий или фото
+  // держат блок открытым.
+  const detailsForced = serviceType?.subs.length === 0 || serviceSub === OTHER_LABEL;
+  const showDetails = detailsForced || detailsOpen || comment.trim() !== '' || photoUri != null;
 
   // Пока показываем «Заявка создана», шторка закрывается сама — забирать её
   // из-под руки пользователя в этот момент нечестно, поэтому жест выключен
@@ -90,7 +100,12 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
 
   const goBack = () => {
     setDir('back');
-    if (step === 'form') {
+    // При уходе с формы блок сворачивается — на другом пути он не должен
+    // встречать открытым. Введённое не теряется: непустой комментарий или
+    // фото раскроют его снова, см. showDetails.
+    setDetailsOpen(false);
+    // «Другое» приходит в форму без шага уточнения — назад ведём тем же путём
+    if (step === 'form' && serviceType && serviceType.subs.length > 0) {
       setStep('sub');
     } else {
       setServiceSub(null);
@@ -100,7 +115,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
 
   const pickType = (t: ServiceType) => {
     setServiceType(t);
-    goForward('sub');
+    goForward(t.subs.length > 0 ? 'sub' : 'form');
   };
 
   const pickSub = (s: string) => {
@@ -135,7 +150,8 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
     timer.current = setTimeout(() => {
       onComplete({
         id: draftId,
-        title: `${object.title} · ${serviceType?.label} · ${serviceSub}`,
+        // У пути через «Другое» уточнения нет — пустые части не попадают в заголовок
+        title: [object.title, serviceType?.label, serviceSub].filter(Boolean).join(' · '),
         comment: comment.trim(),
         photoUri,
         category: categoryFor(object.id),
@@ -250,7 +266,16 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                   </Animated.View>
                 ))}
 
-              {step === 'form' && (
+              {step === 'form' && !showDetails && (
+                <Animated.View entering={enterAnim(1)}>
+                  <PressableScale style={styles.detailsBtn} onPress={() => setDetailsOpen(true)}>
+                    <Text style={styles.photoBtnIcon}>💬</Text>
+                    <Text style={styles.photoBtnText}>Оставить комментарий</Text>
+                  </PressableScale>
+                </Animated.View>
+              )}
+
+              {step === 'form' && showDetails && (
                 <>
                   {/* Фото: превью с возможностью убрать — или две кнопки добавления */}
                   <Animated.View entering={enterAnim(1)}>
@@ -288,20 +313,22 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                       multiline
                     />
                   </Animated.View>
-
-                  <Animated.View entering={enterAnim(3)}>
-                    <PressableScale style={[styles.option, styles.submit]} onPress={submit}>
-                      <Text style={styles.submitText}>Отправить заявку</Text>
-                    </PressableScale>
-                    {/* Информированность по 152-ФЗ: человек должен видеть,
-                        кому уйдут адрес и фото, в момент действия, а не
-                        только в политике конфиденциальности */}
-                    <Text style={styles.privacyHint}>
-                      Адрес, описание и фото увидят проверенные мастера вашего города — так они
-                      смогут назвать цену
-                    </Text>
-                  </Animated.View>
                 </>
+              )}
+
+              {step === 'form' && (
+                <Animated.View entering={enterAnim(showDetails ? 3 : 2)}>
+                  <PressableScale style={[styles.option, styles.submit]} onPress={submit}>
+                    <Text style={styles.submitText}>Отправить заявку</Text>
+                  </PressableScale>
+                  {/* Информированность по 152-ФЗ: человек должен видеть,
+                      кому уйдут адрес и фото, в момент действия, а не
+                      только в политике конфиденциальности */}
+                  <Text style={styles.privacyHint}>
+                    Адрес, описание и фото увидят проверенные мастера вашего города — так они смогут
+                    назвать цену
+                  </Text>
+                </Animated.View>
               )}
             </Animated.View>
           )}
@@ -374,6 +401,16 @@ const makeStyles = (t: Palette) =>
     optionText: { flex: 1, fontWeight: '700', fontSize: 14.5, color: t.text },
     optionTextNoIcon: { paddingVertical: 2 },
     chevron: { fontSize: 18, color: t.textMuted, fontWeight: '600' },
+    detailsBtn: {
+      alignItems: 'center',
+      borderRadius: 16,
+      paddingVertical: 14,
+      backgroundColor: t.soft,
+      borderWidth: 1,
+      borderColor: t.border,
+      borderStyle: 'dashed',
+      marginBottom: 9,
+    },
     photoRow: { flexDirection: 'row', gap: 9, marginBottom: 9 },
     photoBtn: {
       flex: 1,

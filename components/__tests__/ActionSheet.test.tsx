@@ -40,10 +40,65 @@ async function openForm(onComplete: jest.Mock): Promise<RenderResult> {
   // Шаг 1 — что случилось, шаг 2 — уточнение, шаг 3 — форма заявки
   await fireEvent.press(view.getByText('Не работает'));
   await fireEvent.press(view.getByText('Искрит'));
+  // Фото и описание спрятаны за кнопкой — тестам формы нужен открытый блок
+  await fireEvent.press(view.getByText('Оставить комментарий'));
   return view;
 }
 
 describe('ActionSheet', () => {
+  // Не доводит сценарий до «готово» — поэтому стоит до двух отправляющих
+  // тестов и не расходует их лимит на анимацию галочки (см. шапку файла)
+  test('«Другое» с любого шага ведёт сразу к описанию и фото', async () => {
+    const view = await render(
+      <ActionSheet
+        object={OBJECT}
+        address="ул. Ленина, 24"
+        onClose={() => {}}
+        onComplete={jest.fn()}
+      />,
+    );
+
+    // С первого шага: без уточнений, сразу экран заявки
+    await fireEvent.press(view.getByText('Другое'));
+    expect(view.getByText('Опишите задачу')).toBeTruthy();
+    expect(view.getByPlaceholderText(/Расскажите/i)).toBeTruthy();
+
+    // Назад ведёт на первый шаг, а не на пропущенные уточнения
+    await fireEvent.press(view.getByText('‹'));
+    expect(view.getByText('Что случилось?')).toBeTruthy();
+
+    // И внутри категории «Другое» тоже выводит к форме
+    await fireEvent.press(view.getByText('Не работает'));
+    await fireEvent.press(view.getByText('Другое'));
+    expect(view.getByText('Опишите задачу')).toBeTruthy();
+    // На пути «Другое» описание — суть заявки: поле открыто без кнопки
+    expect(view.getByPlaceholderText(/Расскажите/i)).toBeTruthy();
+    expect(view.queryByText('Оставить комментарий')).toBeNull();
+  });
+
+  // Тоже не доходит до «готово» — потому стоит до отправляющих тестов
+  test('на обычном пути фото и описание открываются кнопкой', async () => {
+    const view = await render(
+      <ActionSheet
+        object={OBJECT}
+        address="ул. Ленина, 24"
+        onClose={() => {}}
+        onComplete={jest.fn()}
+      />,
+    );
+    await fireEvent.press(view.getByText('Не работает'));
+    await fireEvent.press(view.getByText('Искрит'));
+
+    // Сначала только кнопка и отправка — полей нет
+    expect(view.queryByPlaceholderText(/Расскажите/i)).toBeNull();
+    expect(view.queryByText('Сфотографировать')).toBeNull();
+    expect(view.getByText(/Отправить заявку/)).toBeTruthy();
+
+    await fireEvent.press(view.getByText('Оставить комментарий'));
+    expect(view.getByPlaceholderText(/Расскажите/i)).toBeTruthy();
+    expect(view.getByText('Сфотографировать')).toBeTruthy();
+  });
+
   test('обычная отправка даёт одну заявку с полным содержимым', async () => {
     const onComplete = jest.fn();
     const view = await openForm(onComplete);

@@ -1,4 +1,4 @@
-import { CATEGORIES, categoryFor, cityKey, flowFor } from '../serviceOptions';
+import { CATEGORIES, categoryFor, cityKey, flowFor, OTHER_LABEL } from '../serviceOptions';
 
 // Специальность и город — единственное, по чему заявка находит мастера.
 // Ошибка здесь не падает и не логируется: заявка просто никому не видна.
@@ -83,6 +83,30 @@ describe('flowFor', () => {
   test('у незнакомого объекта — запасное дерево, а не пустой экран', () => {
     const flow = flowFor('нет-такого');
     expect(flow.length).toBeGreaterThan(0);
-    flow.forEach((type) => expect(type.subs.length).toBeGreaterThan(0));
+    // Пустые уточнения допустимы только у «Другого» — оно ведёт сразу к форме
+    flow
+      .filter((type) => type.label !== OTHER_LABEL)
+      .forEach((type) => expect(type.subs.length).toBeGreaterThan(0));
+  });
+
+  // Готовый список никогда не покроет все случаи: без запасного выхода человек
+  // с нестандартной проблемой просто закроет шторку и уйдёт
+  test('на каждом шаге любого дерева есть «Другое»', () => {
+    ['socket', 'light', 'нет-такого'].forEach((id) => {
+      const flow = flowFor(id);
+      // Последний тип — «Другое» без уточнений: шторка поведёт сразу к описанию
+      const last = flow[flow.length - 1];
+      expect(last.label).toBe(OTHER_LABEL);
+      expect(last.subs).toHaveLength(0);
+      // И внутри каждой категории «Другое» замыкает список уточнений
+      flow.slice(0, -1).forEach((type) => {
+        expect(type.subs[type.subs.length - 1]).toBe(OTHER_LABEL);
+      });
+    });
+  });
+
+  test('в «Свете» есть установка люстры', () => {
+    const install = flowFor('light').find((type) => type.label === 'Установка');
+    expect(install?.subs).toContain('Люстра');
   });
 });
