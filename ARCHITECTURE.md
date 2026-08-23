@@ -193,6 +193,7 @@ appliedAt, reviewedAt, reviewedBy
 | привязки без ответа    | `bindingState == 'pending'`, старше 10 мин | `settleBinding()`; старше суток — «заброшено» |
 | незавершённые возвраты | `refundPending == true`                    | повторяет возврат                             |
 | застрявшие удаления    | `status == 'pending'`, старше 15 мин       | `runDeletion()`                               |
+| заявки без ответа      | «Поиск мастера», 2–24 ч, нет предложений   | повторный пуш мастерам, ровно один раз        |
 
 Своей логики у неё нет — только те же функции, что вызывают события.
 
@@ -274,6 +275,7 @@ agreedPrice: number | null  // цена выбранного предложен�
 agreedAt: timestamp | null
 reviewed: boolean       // отзыв оставлен, второй раз не просим
 createdAt: timestamp
+repushedAt: timestamp   // ставит сверка: мастеров уже звали повторно; клиенту запись закрыта
 
 // только у заявок, созданных до появления offers
 price, priceStatus, priceHistory

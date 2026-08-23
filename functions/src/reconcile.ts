@@ -4,6 +4,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { audit, SYSTEM } from './audit';
 import { retryPendingRefund, settleBinding } from './payments';
 import { runDeletion } from './deletion';
+import { notifyMastersAbout } from './orderPush';
 
 // Сверка: доводит до конца то, что не доехало событиями.
 //
@@ -27,6 +28,12 @@ const BINDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 /** Удаление, не сдвинувшееся за это время, считаем застрявшим. */
 const DELETION_STUCK_MS = 15 * 60 * 1000;
 
+/** Заявка без единого предложения столько времени — мастеров зовут повторно. */
+const ORDER_SILENT_MS = 2 * 60 * 60 * 1000;
+
+/** Старше суток не будим: заявка, о которой молчали день, повтором не оживёт. */
+const ORDER_SILENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 /** Сколько документов берём за прогон: бюджет времени функции не резиновый. */
 const BATCH = 50;
 
@@ -42,6 +49,7 @@ type Counters = {
   bindingsExpired: number;
   refundsRetried: number;
   deletionsResumed: number;
+  ordersRepushed: number;
   errors: number;
 };
 
@@ -214,6 +222,57 @@ async function sweepDeletions(runId: string, counters: Counters): Promise<void> 
   }
 }
 
+/**
+ * Заявки, оставшиеся без единого предложения: мастеров зовут второй раз.
+ *
+ * Это часть борьбы с холодным стартом: молчание в первые часы — главный
+ * способ потерять клиента навсегда. Повтор ровно один: заявка, которую не
+ * взяли и со второго зова, — сигнал модератору о дыре в покрытии, а не повод
+ * бомбить мастеров каждые пятнадцать минут.
+ */
+async function repushSilentOrders(runId: string, counters: Counters): Promise<void> {
+  const db = getFirestore();
+  const now = Date.now();
+
+  const silent = await db
+    .collection('orders')
+    .where('status', '==', 'Поиск мастера')
+    .where('createdAt', '<', new Date(now - ORDER_SILENT_MS))
+    .where('createdAt', '>', new Date(now - ORDER_SILENT_MAX_AGE_MS))
+    .orderBy('createdAt', 'desc')
+    .limit(BATCH)
+    .get();
+
+  for (const d of silent.docs) {
+    // В запрос отметку не включить: у нетронутых заявок поля нет вовсе,
+    // а по отсутствию поля Firestore не фильтрует
+    if (d.get('repushedAt')) continue;
+
+    try {
+      const offers = await d.ref.collection('offers').count().get();
+      if (offers.data().count > 0) continue;
+
+      // Отметка до отправки: прогон, упавший между пушем и записью, при
+      // повторе слал бы мастерам то же уведомление ещё раз. Потерять один
+      // повторный зов дешевле, чем прослыть спамером.
+      await d.ref.update({ repushedAt: FieldValue.serverTimestamp() });
+      const notified = await notifyMastersAbout(d.data(), 'Заявка всё ещё ищет мастера');
+
+      await audit({
+        action: 'order.repushed',
+        actor: SYSTEM,
+        subject: { type: 'order', id: d.id },
+        correlationId: runId,
+        details: { mastersNotified: notified },
+      });
+      counters.ordersRepushed += 1;
+    } catch (e) {
+      counters.errors += 1;
+      logger.warn('Повторный зов мастеров не удался', { orderId: d.id, e });
+    }
+  }
+}
+
 export const reconcile = onSchedule(
   {
     schedule: 'every 15 minutes',
@@ -245,6 +304,7 @@ export const reconcile = onSchedule(
       bindingsExpired: 0,
       refundsRetried: 0,
       deletionsResumed: 0,
+      ordersRepushed: 0,
       errors: 0,
     };
 
@@ -259,6 +319,7 @@ export const reconcile = onSchedule(
       await reconcileBindings(runId, counters);
       await retryRefunds(runId, counters);
       await sweepDeletions(runId, counters);
+      await repushSilentOrders(runId, counters);
     } catch (e) {
       counters.errors += 1;
       logger.error('Прогон сверки прерван', e);

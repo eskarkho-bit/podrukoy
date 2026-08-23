@@ -26,6 +26,7 @@ export type AuditAction =
   | 'order.confirmed'
   | 'order.cancelled'
   | 'order.reopened'
+  | 'order.repushed'
   | 'order.anonymized'
   // мастера
   | 'master.applied'

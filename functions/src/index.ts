@@ -8,6 +8,7 @@ import {
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
+import { notifyMastersAbout } from './orderPush';
 import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
 import { recountCompletedOrders } from './masterStats';
@@ -34,10 +35,8 @@ const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
 
 // ---------- новая заявка → мастерам ----------
 
-// Пока мастеров сотни, выборка «кому слать» делается в памяти: у Firestore
-// нет запроса «город совпал ИЛИ город не указан». Когда мастеров станет
-// тысячи, это место надо будет переделать на запрос с индексом.
-const MASTERS_SCAN_LIMIT = 1000;
+// Выборка «кому слать» — в orderPush.ts: тот же код зовёт мастеров повторно
+// из сверки, когда заявка долго остаётся без предложений.
 
 export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event) => {
   const order = event.data?.data();
@@ -51,41 +50,7 @@ export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event
     details: { category: String(order.category ?? ''), city: String(order.city ?? '') },
   });
 
-  const db = getFirestore();
-  const snap = await db.collection('masters').limit(MASTERS_SCAN_LIMIT).get();
-  if (snap.size === MASTERS_SCAN_LIMIT) {
-    logger.warn('Мастеров больше лимита выборки — часть не получит уведомление');
-  }
-
-  const city = String(order.city ?? '');
-  const category = String(order.category ?? '');
-
-  const uids = snap.docs
-    .filter((d) => {
-      // Непроверенный мастер заявку всё равно не откроет — правила не дадут.
-      // Слать ему уведомление значит звать туда, куда не пустят.
-      if (d.get('verified') !== true) return false;
-      // Клиент не должен получать уведомление о собственной заявке, даже
-      // если он же зарегистрирован мастером
-      if (d.id === order.clientId) return false;
-      // Мастер отмечает несколько населённых пунктов; у анкет, заведённых до
-      // множественного выбора, остаётся прежнее поле city строкой
-      const cities: string[] = Array.isArray(d.get('cities'))
-        ? d.get('cities')
-        : d.get('city')
-          ? [String(d.get('city'))]
-          : [];
-      const skills: string[] = Array.isArray(d.get('skills')) ? d.get('skills') : [];
-      // Пустой список значит «без ограничения» — так же, как в ленте
-      const cityOk = !cities.length || !city || cities.includes(city);
-      const skillOk = !skills.length || !category || skills.includes(category);
-      return cityOk && skillOk;
-    })
-    .map((d) => d.id);
-
-  if (!uids.length) return;
-
-  await pushTo(uids, 'Новая заявка рядом', String(order.title ?? 'Заявка'), { href: '/profile' });
+  await notifyMastersAbout(order, 'Новая заявка рядом');
 });
 
 // ---------- предложение мастера → клиенту ----------
