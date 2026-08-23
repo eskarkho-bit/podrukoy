@@ -71,6 +71,18 @@ for (const doc of docs) {
 const escapeHtml = (s) =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
+// Ссылки установки для страницы /get. Пустая строка означает «площадки ещё
+// нет»: кнопка рисуется неактивной, а сборка не падает — QR на визитках
+// печатается раньше, чем появятся сами ссылки, и адрес страницы должен жить
+// дольше любой из них. Появилась ссылка — вписали и передеплоили хостинг,
+// визитки перепечатывать не нужно.
+const STORE_LINKS = {
+  // TestFlight-ссылка внешнего тестирования; после релиза — страница App Store
+  ios: '',
+  // Прямая ссылка на APK (артефакт EAS) либо страница RuStore
+  android: '',
+};
+
 // Палитра — светлая тема приложения (theme.ts)
 const page = (title, inner) => `<!doctype html>
 <html lang="ru">
@@ -121,4 +133,63 @@ writeFileSync(
   ),
 );
 
-console.log(`Собрано: legal-site/index.html + ${docs.map((d) => d.id + '.html').join(', ')}`);
+// Страница установки /get — единый адрес для QR-кодов на визитках мастеров.
+// Определение платформы сделано прогрессивно: без JavaScript видны обе
+// кнопки, со скриптом кнопка своей платформы поднимается наверх. Автоперехода
+// по ссылке нет нарочно: внезапно начавшаяся загрузка APK выглядит как
+// вирус, а выбор из двух больших кнопок понятен любому.
+const installButton = (href, label) =>
+  href
+    ? `<a class="btn" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
+    : `<span class="btn disabled">${escapeHtml(label)} — скоро</span>`;
+
+mkdirSync(join(outDir, 'get'), { recursive: true });
+writeFileSync(
+  join(outDir, 'get', 'index.html'),
+  `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Установить приложение — domio</title>
+<style>
+  body { margin: 0; background: #F2F5F0; color: #2E3A2A;
+         font: 17px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 420px; margin: 0 auto; padding: 48px 20px 64px; text-align: center; }
+  h1 { font-size: 28px; line-height: 1.3; margin-bottom: 4px; }
+  .tagline { color: #5E7A56; margin: 0 0 32px; }
+  .buttons { display: flex; flex-direction: column; gap: 12px; }
+  .btn { display: block; padding: 16px 20px; border-radius: 16px; text-decoration: none;
+         background: #5E7A56; color: #FFFFFF; font-size: 18px; font-weight: 600; }
+  .btn.disabled { background: #FFFFFF; color: #7A857A; border: 1px solid #E6E9E1;
+                  font-weight: 400; }
+  .note { color: #7A857A; font-size: 14px; margin-top: 32px; }
+  .note a { color: #5E7A56; }
+</style>
+</head>
+<body><main>
+<h1>domio</h1>
+<p class="tagline">Проверенные мастера — на дом</p>
+<div class="buttons">
+<div id="ios">${installButton(STORE_LINKS.ios, 'Скачать для iPhone')}</div>
+<div id="android">${installButton(STORE_LINKS.android, 'Скачать для Android')}</div>
+</div>
+<p class="note">Приложение бесплатно. Каждый мастер проходит проверку вживую.<br>
+<a href="../">Документы сервиса</a></p>
+<script>
+  // Свою платформу — первой. Распознаётся только Android: iPadOS маскируется
+  // под «Macintosh», и надёжного признака iOS нет, поэтому iPhone стоит первым
+  // по умолчанию, а перестановка нужна лишь андроиду
+  if (/Android/i.test(navigator.userAgent)) {
+    var a = document.getElementById('android');
+    a.parentNode.insertBefore(a, document.getElementById('ios'));
+  }
+</script>
+</main></body>
+</html>
+`,
+);
+
+console.log(
+  `Собрано: legal-site/index.html + ${docs.map((d) => d.id + '.html').join(', ')} + get/index.html`,
+);
