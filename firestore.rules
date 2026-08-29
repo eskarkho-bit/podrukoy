@@ -594,15 +594,26 @@ service cloud.firestore {
           );
         }
 
+        // Картинка в сообщении — ссылка на файл в chat/ той же заявки.
+        // Подлинность ссылки правила не проверят, но требуют https и
+        // разумную длину: мусор сюда класть не должно быть смысла.
+        function validImage() {
+          return request.resource.data.imageUrl is string
+            && request.resource.data.imageUrl.matches('https://.*')
+            && request.resource.data.imageUrl.size() <= 2048;
+        }
+
         // Модератор переписку читает (разбор спора — это в первую очередь
         // чтение диалога), но писать в неё не может: голос в чужой сделке
         // ему не принадлежит.
         allow read: if isParty() || isAdmin();
+        // Сообщение — это текст, картинка или и то и другое; пустым не бывает
         allow create: if isParty()
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
-          && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 2000;
+          && request.resource.data.text.size() <= 2000
+          && (request.resource.data.text.size() > 0 || validImage())
+          && (!('imageUrl' in request.resource.data) || validImage());
 
         // Отправленное сообщение не редактируется и не удаляется
         allow update, delete: if false;

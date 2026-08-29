@@ -31,7 +31,11 @@ service firebase.storage {
     // снимок чужой квартиры открывался любому зарегистрированному по прямой
     // ссылке, и продолжал открываться даже после того, как заявка уходила
     // другому мастеру.
-    match /orders/{orderId}/{allPaths=**} {
+    // Ровно photo.jpg, а не {allPaths=**}: под заявкой теперь живёт и
+    // переписка (chat/), у которой читатели другие. Общий шаблон отдавал бы
+    // фото из чата всем проверенным мастерам, пока заявка в поиске, — а при
+    // пересечении шаблонов Storage складывает разрешения, сузить нельзя.
+    match /orders/{orderId}/photo.jpg {
 
       function order() {
         return firestore.get(/databases/(default)/documents/orders/$(orderId)).data;
@@ -51,6 +55,31 @@ service firebase.storage {
         && isImage();
 
       allow delete: if request.auth != null && order().clientId == request.auth.uid;
+    }
+
+    // Фото в переписке заявки. Читают только стороны сделки и модератор
+    // (он разбирает споры по диалогу — фото часть диалога); пишут обе
+    // стороны. Файлы лежат под orders/{orderId}/, чтобы удаление аккаунта
+    // стирало их вместе с остальным одним префиксом. Удалять нельзя никому:
+    // отправленное сообщение не редактируется, и его фото тоже.
+    match /orders/{orderId}/chat/{fileName} {
+
+      function order() {
+        return firestore.get(/databases/(default)/documents/orders/$(orderId)).data;
+      }
+
+      function isParty() {
+        return request.auth != null && (
+          order().clientId == request.auth.uid
+          || order().get('masterId', null) == request.auth.uid
+        );
+      }
+
+      allow read: if isParty() || isAdmin();
+
+      allow write: if isParty()
+        && request.resource.size < 10 * 1024 * 1024
+        && isImage();
     }
 
     // Фотография лица для проверки мастера. В отличие от фото заявки это

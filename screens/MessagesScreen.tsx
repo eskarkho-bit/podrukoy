@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -8,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import Animated, {
   Easing,
   FadeIn,
@@ -33,12 +35,22 @@ import { FONTS } from '../components/typography';
 import { PulseDot } from '../components/PulseDot';
 import { EmptyScene } from '../components/illustrations';
 
-export type ChatMessage = { id: string; from: 'user' | 'master'; text: string; time: string };
+export type ChatMessage = {
+  id: string;
+  from: 'user' | 'master';
+  text: string;
+  time: string;
+  // Фото из Storage; сообщение может быть и вовсе без текста
+  imageUrl?: string;
+};
 export type Thread = {
   id: string;
   name: string;
   icon: string;
   unread: boolean;
+  // Можно ли прикладывать фото: в чате заявки — да, в поддержке — нет,
+  // её правила ждут только текст
+  canAttach: boolean;
   messages: ChatMessage[];
 };
 
@@ -51,6 +63,7 @@ type Props = {
   onOpenRequestHandled: () => void;
   onOpenThread: (threadId: string) => void;
   onSendMessage: (threadId: string, text: string) => void;
+  onSendImage: (threadId: string, localUri: string) => Promise<void>;
   // Открытая переписка — это «вложенный» экран, поэтому нижние вкладки на время прячутся
   onThreadOpenChange: (open: boolean) => void;
 };
@@ -62,6 +75,7 @@ export function MessagesScreen({
   onOpenRequestHandled,
   onOpenThread,
   onSendMessage,
+  onSendImage,
   onThreadOpenChange,
 }: Props) {
   const { mode } = useTheme();
@@ -100,7 +114,14 @@ export function MessagesScreen({
 
   return (
     <View style={styles.root}>
-      <ThreadList threads={threads} typingThreadId={typingThreadId} onOpen={handleOpen} />
+      {/* Пустые чаты в списке не показываем — выглядели бы мусором. Но в
+          данных они есть, и открыть такой по просьбе другого экрана можно:
+          заявка только что принята, сообщений ещё нет. */}
+      <ThreadList
+        threads={threads.filter((t) => t.messages.length > 0)}
+        typingThreadId={typingThreadId}
+        onOpen={handleOpen}
+      />
 
       {openThread && (
         <Animated.View
@@ -113,6 +134,7 @@ export function MessagesScreen({
             typing={typingThreadId === openThread.id}
             onBack={handleBack}
             onSend={(text) => onSendMessage(openThread.id, text)}
+            onSendImage={(uri) => onSendImage(openThread.id, uri)}
           />
         </Animated.View>
       )}
@@ -199,15 +221,18 @@ function ThreadDetail({
   typing,
   onBack,
   onSend,
+  onSendImage,
 }: {
   thread: Thread;
   typing: boolean;
   onBack: () => void;
   onSend: (text: string) => void;
+  onSendImage: (localUri: string) => Promise<void>;
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [text, setText] = useState('');
+  const [sendingImage, setSendingImage] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const send = () => {
@@ -216,6 +241,19 @@ function ThreadDetail({
     onSend(trimmed);
     setText('');
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+  };
+
+  const attachImage = async () => {
+    if (sendingImage) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 }).catch(() => null);
+    if (!result || result.canceled || !result.assets[0]) return;
+    setSendingImage(true);
+    try {
+      await onSendImage(result.assets[0].uri);
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+    } finally {
+      setSendingImage(false);
+    }
   };
 
   return (
@@ -253,9 +291,12 @@ function ThreadDetail({
             style={[styles.bubbleWrap, m.from === 'user' && styles.bubbleWrapUser]}
           >
             <View style={[styles.bubble, m.from === 'user' && styles.bubbleUser]}>
-              <Text style={[styles.bubbleText, m.from === 'user' && styles.bubbleTextUser]}>
-                {m.text}
-              </Text>
+              {!!m.imageUrl && <Image source={{ uri: m.imageUrl }} style={styles.bubbleImage} />}
+              {!!m.text && (
+                <Text style={[styles.bubbleText, m.from === 'user' && styles.bubbleTextUser]}>
+                  {m.text}
+                </Text>
+              )}
             </View>
             <Text style={styles.bubbleTime}>{m.time}</Text>
           </Animated.View>
@@ -276,6 +317,15 @@ function ThreadDetail({
       </ScrollView>
 
       <View style={styles.inputRow}>
+        {thread.canAttach && (
+          <PressableScale
+            style={[styles.attachBtn, sendingImage && styles.sendBtnDisabled]}
+            onPress={attachImage}
+            disabled={sendingImage}
+          >
+            <Glyph glyph="📎" size={16} colors={themedIconColors(t)} />
+          </PressableScale>
+        )}
         <TextInput
           value={text}
           onChangeText={setText}
@@ -484,6 +534,23 @@ const makeStyles = (t: Palette) =>
     },
     sendBtnDisabled: { backgroundColor: t.disabled },
     sendIcon: { color: t.onAccent, fontSize: 17, fontWeight: '800' },
+    attachBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    bubbleImage: {
+      width: 200,
+      height: 200,
+      borderRadius: 10,
+      marginVertical: 2,
+      backgroundColor: t.border,
+    },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

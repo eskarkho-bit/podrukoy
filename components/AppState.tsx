@@ -30,7 +30,7 @@ import { currentConsents, takePendingConsent, type Consents } from './legal';
 import { takeSignupDraft } from './signupDraft';
 import { OrderDraft } from './ActionSheet';
 import { getPushToken } from './notifications';
-import { deleteVerificationPhoto, uploadOrderPhoto } from './photoUpload';
+import { deleteVerificationPhoto, uploadChatPhoto, uploadOrderPhoto } from './photoUpload';
 
 // Общее состояние приложения. Раньше жило в App.tsx и раздавалось пропсами —
 // с переходом на роутер экраны стали отдельными маршрутами, и общий стейт
@@ -114,6 +114,8 @@ type AppState = {
   addAddress: (addr: string) => void;
   markThreadRead: (threadId: string) => void;
   sendMessage: (threadId: string, text: string) => void;
+  // Фото в чат заявки; поддержке не предлагается — её правила ждут текст
+  sendImageMessage: (threadId: string, localUri: string) => Promise<void>;
   openChat: (threadId: string) => void;
   logout: () => Promise<void>;
   // Смена пароля. Ошибка возвращается текстом, готовым к показу.
@@ -489,6 +491,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               from: v.senderId === uid ? 'user' : 'master',
               text: v.text,
               time: v.time,
+              ...(typeof v.imageUrl === 'string' ? { imageUrl: v.imageUrl } : {}),
             };
           });
           const order = ordersRef.current.find((o) => o.id === orderId);
@@ -498,11 +501,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               name: masterThreadName(order),
               icon: '🧑‍🔧',
               unread: false,
+              canAttach: true,
               messages,
             };
             const rest = prev.filter((t) => t.id !== orderId);
-            // чаты без сообщений не показываем — пустой список выглядел бы мусором
-            return messages.length ? [next, ...rest] : rest;
+            // Пустой тред тоже держим: кнопка «Сообщение» открывает чат сразу
+            // после выбора мастера, когда сообщений ещё нет, — без треда
+            // просьба открыть уходила бы в пустоту. Прятать пустые чаты —
+            // забота списка на экране, а не данных.
+            return [next, ...rest];
           });
         },
         (e) => console.warn('Переписка по заявке недоступна:', e),
@@ -553,6 +560,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               name: v.name,
               icon: v.icon,
               unread: !!v.unread,
+              canAttach: false,
               messages: old?.messages ?? [],
             };
           }),
@@ -901,6 +909,24 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Фото в чат заявки: файл уезжает в chat/ под заявкой, в сообщении остаётся
+  // ссылка. Текста в таком сообщении нет — подпись можно отправить следом.
+  const sendImageMessage = async (threadId: string, localUri: string) => {
+    if (!uid || threadId === SUPPORT_THREAD_ID) return;
+    try {
+      const imageUrl = await uploadChatPhoto(threadId, uid, localUri);
+      await addDoc(collection(db, 'orders', threadId, 'messages'), {
+        senderId: uid,
+        text: '',
+        imageUrl,
+        time: now(),
+        createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      failed('Фото не отправлено. Проверьте связь')(e);
+    }
+  };
+
   // Открыть чат из другого экрана и перевести на вкладку «Сообщения».
   // Для поддержки создаём тред с приветствием, для заявки он появится сам,
   // как только кто-то напишет первое сообщение.
@@ -1124,6 +1150,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     addAddress,
     markThreadRead,
     sendMessage,
+    sendImageMessage,
     openChat,
     logout,
     changePassword,

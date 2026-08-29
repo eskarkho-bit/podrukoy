@@ -67,7 +67,11 @@ import {
   type MasterOrderStat,
 } from '../components/masterStats';
 import { priceSummary, type OrderStats } from '../components/orderStats';
-import { deleteVerificationPhoto, uploadVerificationPhoto } from '../components/photoUpload';
+import {
+  deleteVerificationPhoto,
+  uploadChatPhoto,
+  uploadVerificationPhoto,
+} from '../components/photoUpload';
 import { firestoreErrorText } from '../components/firestoreError';
 import { fileComplaint } from '../components/complaints';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
@@ -116,7 +120,14 @@ const MAX_FEED_CITIES = 10;
 export type JobStatus =
   'new' | 'offered' | 'accepted' | 'awaiting' | 'declined' | 'done' | 'cancelled' | 'closed';
 
-export type JobMessage = { id: string; from: 'me' | 'client'; text: string; time: string };
+export type JobMessage = {
+  id: string;
+  from: 'me' | 'client';
+  text: string;
+  time: string;
+  // Фото из Storage; сообщение бывает и без текста
+  imageUrl?: string;
+};
 
 export type Job = {
   id: string;
@@ -632,6 +643,24 @@ export function MasterScreen({ open, onClose }: Props) {
     });
   };
 
+  // Фото выполненной работы или проблемы на месте — тем же чатом
+  const pushImage = async (jobId: string, localUri: string) => {
+    if (!myUid) return;
+    try {
+      const imageUrl = await uploadChatPhoto(jobId, myUid, localUri);
+      await addDoc(collection(db, 'orders', jobId, 'messages'), {
+        senderId: myUid,
+        text: '',
+        imageUrl,
+        time: now(),
+        createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Фото не отправлено:', e);
+      showNotice(firestoreErrorText(e, 'Фото не отправлено. Проверьте связь'));
+    }
+  };
+
   // Переписка открытой заявки. Подписываемся только на неё: держать живыми
   // подписки на все заявки сразу незачем.
   useEffect(() => {
@@ -646,6 +675,7 @@ export function MasterScreen({ open, onClose }: Props) {
             from: v.senderId === myUid ? 'me' : 'client',
             text: v.text,
             time: v.time,
+            ...(typeof v.imageUrl === 'string' ? { imageUrl: v.imageUrl } : {}),
           };
         });
         patchJob(openJobId, (j) => ({ ...j, messages }));
@@ -841,6 +871,7 @@ export function MasterScreen({ open, onClose }: Props) {
                 onOfferLegacy={(price) => offerPriceLegacy(openJob.id, price)}
                 onFinish={() => finishJob(openJob.id)}
                 onSend={(text) => sendMessage(openJob.id, text)}
+                onSendImage={(uri) => pushImage(openJob.id, uri)}
               />
             </Animated.View>
           )}
@@ -2274,6 +2305,7 @@ export function JobDetail({
   onOfferLegacy,
   onFinish,
   onSend,
+  onSendImage,
 }: {
   job: Job;
   typing: boolean;
@@ -2283,12 +2315,14 @@ export function JobDetail({
   onOfferLegacy: (price: number) => void;
   onFinish: () => void;
   onSend: (text: string) => void;
+  onSendImage: (localUri: string) => Promise<void>;
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [priceDraft, setPriceDraft] = useState('');
   const [offerComment, setOfferComment] = useState('');
   const [text, setText] = useState('');
+  const [sendingImage, setSendingImage] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const price = parseInt(priceDraft.replace(/\D/g, ''), 10);
@@ -2314,6 +2348,19 @@ export function JobDetail({
     onSend(trimmed);
     setText('');
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+  };
+
+  const attachImage = async () => {
+    if (sendingImage) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 }).catch(() => null);
+    if (!result || result.canceled || !result.assets[0]) return;
+    setSendingImage(true);
+    try {
+      await onSendImage(result.assets[0].uri);
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+    } finally {
+      setSendingImage(false);
+    }
   };
 
   return (
@@ -2546,9 +2593,12 @@ export function JobDetail({
             style={[styles.bubbleWrap, m.from === 'me' && styles.bubbleWrapMe]}
           >
             <View style={[styles.bubble, m.from === 'me' && styles.bubbleMe]}>
-              <Text style={[styles.bubbleText, m.from === 'me' && styles.bubbleTextMe]}>
-                {m.text}
-              </Text>
+              {!!m.imageUrl && <Image source={{ uri: m.imageUrl }} style={styles.bubbleImage} />}
+              {!!m.text && (
+                <Text style={[styles.bubbleText, m.from === 'me' && styles.bubbleTextMe]}>
+                  {m.text}
+                </Text>
+              )}
             </View>
             <Text style={styles.bubbleTime}>{m.time}</Text>
           </Animated.View>
@@ -2571,6 +2621,13 @@ export function JobDetail({
           с конкурентами, а правила пускают туда лишь участников заявки */}
       {canChat ? (
         <View style={styles.inputRow}>
+          <PressableScale
+            style={[styles.attachBtn, sendingImage && styles.sendBtnDisabled]}
+            onPress={attachImage}
+            disabled={sendingImage}
+          >
+            <Glyph glyph="📎" size={16} colors={themedIconColors(t)} />
+          </PressableScale>
           <TextInput
             value={text}
             onChangeText={setText}
@@ -3393,6 +3450,23 @@ const makeStyles = (t: Palette) =>
       backgroundColor: t.accent,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    attachBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    bubbleImage: {
+      width: 200,
+      height: 200,
+      borderRadius: 10,
+      marginVertical: 2,
+      backgroundColor: t.border,
     },
     sendBtnDisabled: { backgroundColor: t.disabled },
     sendIcon: { color: t.onAccent, fontSize: 17, fontWeight: '800' },

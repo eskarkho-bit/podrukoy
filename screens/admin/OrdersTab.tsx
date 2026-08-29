@@ -172,12 +172,16 @@ export function OrderAdminCard({
         <>
           <Text style={styles.sectionTitle}>Переписка</Text>
           {card.messages.map((m) => (
-            <Text key={m.id} style={styles.messageLine}>
-              <Text style={styles.messageWho}>
-                {m.senderId === order.clientId ? 'Клиент: ' : 'Мастер: '}
+            <View key={m.id}>
+              <Text style={styles.messageLine}>
+                <Text style={styles.messageWho}>
+                  {m.senderId === order.clientId ? 'Клиент: ' : 'Мастер: '}
+                </Text>
+                {m.text || (m.imageUrl ? 'фото' : '')}
               </Text>
-              {m.text}
-            </Text>
+              {/* Фото — часть диалога, а спор часто ровно о нём */}
+              {!!m.imageUrl && <Image source={{ uri: m.imageUrl }} style={styles.messageImage} />}
+            </View>
           ))}
         </>
       )}
@@ -505,6 +509,13 @@ const makeStyles = (t: Palette) =>
     offerPrice: { fontSize: 12.5, fontWeight: '800', color: t.text },
     messageLine: { fontSize: 12, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
     messageWho: { color: t.textMuted, fontWeight: '800' },
+    messageImage: {
+      width: 140,
+      height: 140,
+      borderRadius: 8,
+      marginTop: 4,
+      backgroundColor: t.border,
+    },
     historyRow: { marginTop: 14, paddingVertical: 6 },
     historyText: { fontSize: 12.5, fontWeight: '800', color: t.accent },
     row: { flexDirection: 'row', gap: 8, marginTop: 12 },

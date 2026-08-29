@@ -137,12 +137,14 @@ export const onMessageCreated = onDocumentCreated(
     if (!to) return;
 
     const fromClient = message.senderId === clientId;
+    // У сообщения-фотографии текста нет — пуш должен сказать хоть что-то
+    const body = String(message.text ?? '').trim() || (message.imageUrl ? 'Фото' : '');
     await pushTo(
       [to],
       fromClient
         ? String(order.get('clientName') ?? 'Клиент')
         : String(order.get('masterName') ?? 'Мастер'),
-      String(message.text ?? ''),
+      body,
       { href: fromClient ? '/profile' : '/messages' },
     );
   },

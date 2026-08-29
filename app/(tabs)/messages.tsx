@@ -12,6 +12,7 @@ export default function MessagesRoute() {
       onOpenRequestHandled={s.clearOpenThreadRequest}
       onOpenThread={s.markThreadRead}
       onSendMessage={s.sendMessage}
+      onSendImage={s.sendImageMessage}
       onThreadOpenChange={s.setChatOpen}
     />
   );

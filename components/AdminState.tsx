@@ -110,7 +110,13 @@ export type AdminOffer = {
   status: 'pending' | 'accepted';
 };
 
-export type OrderMessage = { id: string; senderId: string; text: string; time: string };
+export type OrderMessage = {
+  id: string;
+  senderId: string;
+  text: string;
+  time: string;
+  imageUrl?: string;
+};
 
 export type AdminOrderCard = {
   order: AdminOrder;
@@ -568,6 +574,7 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
               senderId: String(v.senderId ?? ''),
               text: String(v.text ?? ''),
               time: String(v.time ?? ''),
+              ...(typeof v.imageUrl === 'string' ? { imageUrl: v.imageUrl } : {}),
             };
           });
           emit();

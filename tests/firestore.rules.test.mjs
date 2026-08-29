@@ -872,6 +872,54 @@ describe('Переписка по заявке', () => {
     );
   });
 
+  const IMAGE = 'https://firebasestorage.googleapis.com/v0/b/x/o/orders%2Fworking%2Fchat%2Fa.jpg';
+
+  test('фото без текста проходит с обеих сторон', async () => {
+    await assertSucceeds(
+      addDoc(collection(as('client1'), 'orders/working/messages'), {
+        ...message('client1', ''),
+        imageUrl: IMAGE,
+      }),
+    );
+    await assertSucceeds(
+      addDoc(collection(as('master1'), 'orders/working/messages'), {
+        ...message('master1', ''),
+        imageUrl: IMAGE,
+      }),
+    );
+  });
+
+  // Не-https в imageUrl открыло бы дорогу javascript:-ссылкам в чужом чате
+  test('картинка бывает только https-ссылкой разумной длины', async () => {
+    await assertFails(
+      addDoc(collection(as('client1'), 'orders/working/messages'), {
+        ...message('client1', ''),
+        imageUrl: 'javascript:alert(1)',
+      }),
+    );
+    await assertFails(
+      addDoc(collection(as('client1'), 'orders/working/messages'), {
+        ...message('client1', 'текст есть'),
+        imageUrl: 12345,
+      }),
+    );
+    await assertFails(
+      addDoc(collection(as('client1'), 'orders/working/messages'), {
+        ...message('client1', ''),
+        imageUrl: 'https://' + 'a'.repeat(2050),
+      }),
+    );
+  });
+
+  test('посторонний не отправит фото даже с валидной ссылкой', async () => {
+    await assertFails(
+      addDoc(collection(as('master2'), 'orders/working/messages'), {
+        ...message('master2', ''),
+        imageUrl: IMAGE,
+      }),
+    );
+  });
+
   // Разбор спора — это чтение диалога; голос в чужой сделке модератору
   // не принадлежит
   test('модератор читает переписку, но не пишет в неё', async () => {

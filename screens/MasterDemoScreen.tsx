@@ -280,6 +280,17 @@ export function MasterDemoScreen() {
     }));
   };
 
+  // Фото в витрине никуда не грузится — локальный URI и так показывается
+  const pushImage = async (jobId: string, localUri: string) => {
+    patchJob(jobId, (j) => ({
+      ...j,
+      messages: [
+        ...j.messages,
+        { id: `demo-m${Date.now()}`, from: 'me', text: '', time: clock(), imageUrl: localUri },
+      ],
+    }));
+  };
+
   // Действия меняют только локальное состояние — сервера у витрины нет,
   // но пластика экранов ровно та же, что в бою
   const sendOffer = (jobId: string, price: number) => {
@@ -364,6 +375,7 @@ export function MasterDemoScreen() {
             onOfferLegacy={(price) => sendOffer(openJob.id, price)}
             onFinish={() => finishJob(openJob.id)}
             onSend={(text) => pushMessage(openJob.id, text)}
+            onSendImage={(uri) => pushImage(openJob.id, uri)}
           />
         </Animated.View>
       )}
