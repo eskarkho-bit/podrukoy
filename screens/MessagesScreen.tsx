@@ -63,7 +63,7 @@ type Props = {
   onOpenRequestHandled: () => void;
   onOpenThread: (threadId: string) => void;
   onSendMessage: (threadId: string, text: string) => void;
-  onSendImage: (threadId: string, localUri: string) => Promise<void>;
+  onSendImage: (threadId: string, localUri: string, caption: string) => Promise<void>;
   // Открытая переписка — это «вложенный» экран, поэтому нижние вкладки на время прячутся
   onThreadOpenChange: (open: boolean) => void;
 };
@@ -134,7 +134,7 @@ export function MessagesScreen({
             typing={typingThreadId === openThread.id}
             onBack={handleBack}
             onSend={(text) => onSendMessage(openThread.id, text)}
-            onSendImage={(uri) => onSendImage(openThread.id, uri)}
+            onSendImage={(uri, caption) => onSendImage(openThread.id, uri, caption)}
           />
         </Animated.View>
       )}
@@ -227,16 +227,35 @@ function ThreadDetail({
   typing: boolean;
   onBack: () => void;
   onSend: (text: string) => void;
-  onSendImage: (localUri: string) => Promise<void>;
+  onSendImage: (localUri: string, caption: string) => Promise<void>;
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [text, setText] = useState('');
+  // Выбранное фото не уходит сразу: сначала предпросмотр у поля ввода,
+  // отправка — той же кнопкой, что и текст. Случайный тап по галерее не
+  // должен ничего отправлять.
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [sendingImage, setSendingImage] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
-  const send = () => {
+  const send = async () => {
+    if (sendingImage) return;
     const trimmed = text.trim();
+    if (pendingImage) {
+      setSendingImage(true);
+      try {
+        // Текст из поля становится подписью — правила разрешают одно
+        // сообщение с фото и текстом сразу
+        await onSendImage(pendingImage, trimmed);
+        setPendingImage(null);
+        setText('');
+        requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+      } finally {
+        setSendingImage(false);
+      }
+      return;
+    }
     if (!trimmed) return;
     onSend(trimmed);
     setText('');
@@ -247,13 +266,8 @@ function ThreadDetail({
     if (sendingImage) return;
     const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 }).catch(() => null);
     if (!result || result.canceled || !result.assets[0]) return;
-    setSendingImage(true);
-    try {
-      await onSendImage(result.assets[0].uri);
-      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
-    } finally {
-      setSendingImage(false);
-    }
+    // Повторный выбор заменяет фото, а не шлёт два
+    setPendingImage(result.assets[0].uri);
   };
 
   return (
@@ -316,9 +330,25 @@ function ThreadDetail({
         )}
       </ScrollView>
 
+      {pendingImage && (
+        <View style={styles.pendingRow}>
+          <Image source={{ uri: pendingImage }} style={styles.pendingThumb} />
+          <Text style={styles.pendingHint}>Фото готово к отправке — можно добавить подпись</Text>
+          <PressableScale
+            accessibilityLabel="Убрать фото"
+            style={styles.pendingCancel}
+            onPress={() => setPendingImage(null)}
+            disabled={sendingImage}
+          >
+            <Text style={styles.pendingCancelText}>✕</Text>
+          </PressableScale>
+        </View>
+      )}
+
       <View style={styles.inputRow}>
         {thread.canAttach && (
           <PressableScale
+            accessibilityLabel="Прикрепить фото"
             style={[styles.attachBtn, sendingImage && styles.sendBtnDisabled]}
             onPress={attachImage}
             disabled={sendingImage}
@@ -329,15 +359,16 @@ function ThreadDetail({
         <TextInput
           value={text}
           onChangeText={setText}
-          placeholder="Написать сообщение…"
+          placeholder={pendingImage ? 'Подпись к фото…' : 'Написать сообщение…'}
           placeholderTextColor={t.textMuted}
           style={styles.input}
           multiline
         />
         <PressableScale
-          style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
+          accessibilityLabel="Отправить"
+          style={[styles.sendBtn, !text.trim() && !pendingImage && styles.sendBtnDisabled]}
           onPress={send}
-          disabled={!text.trim()}
+          disabled={(!text.trim() && !pendingImage) || sendingImage}
         >
           <Text style={styles.sendIcon}>↑</Text>
         </PressableScale>
@@ -544,6 +575,22 @@ const makeStyles = (t: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
+    pendingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginHorizontal: 16,
+      marginTop: 6,
+      padding: 8,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+    },
+    pendingThumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: t.border },
+    pendingHint: { flex: 1, fontSize: 12, color: t.textMuted },
+    pendingCancel: { padding: 6 },
+    pendingCancelText: { fontSize: 16, fontWeight: '800', color: t.textMuted },
     bubbleImage: {
       width: 200,
       height: 200,

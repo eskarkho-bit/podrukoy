@@ -115,7 +115,7 @@ type AppState = {
   markThreadRead: (threadId: string) => void;
   sendMessage: (threadId: string, text: string) => void;
   // Фото в чат заявки; поддержке не предлагается — её правила ждут текст
-  sendImageMessage: (threadId: string, localUri: string) => Promise<void>;
+  sendImageMessage: (threadId: string, localUri: string, caption: string) => Promise<void>;
   openChat: (threadId: string) => void;
   logout: () => Promise<void>;
   // Смена пароля. Ошибка возвращается текстом, готовым к показу.
@@ -910,14 +910,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   };
 
   // Фото в чат заявки: файл уезжает в chat/ под заявкой, в сообщении остаётся
-  // ссылка. Текста в таком сообщении нет — подпись можно отправить следом.
-  const sendImageMessage = async (threadId: string, localUri: string) => {
+  // ссылка; подпись из поля ввода едет тем же сообщением.
+  const sendImageMessage = async (threadId: string, localUri: string, caption: string) => {
     if (!uid || threadId === SUPPORT_THREAD_ID) return;
     try {
       const imageUrl = await uploadChatPhoto(threadId, uid, localUri);
       await addDoc(collection(db, 'orders', threadId, 'messages'), {
         senderId: uid,
-        text: '',
+        text: caption,
         imageUrl,
         time: now(),
         createdAt: serverTimestamp(),

@@ -1,5 +1,12 @@
-import { render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { MessagesScreen, Thread } from '../../screens/MessagesScreen';
+
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn(async () => ({
+    canceled: false,
+    assets: [{ uri: 'file://local.jpg' }],
+  })),
+}));
 
 // Экран «Сообщения». Главный сюжет — чат свежепринятой заявки: сообщений в
 // нём ещё нет, в списке ему не место, но открываться по кнопке «Сообщение»
@@ -65,5 +72,24 @@ describe('MessagesScreen', () => {
     // Текст виден дважды: превью в списке и пузырь в открытой переписке —
     // одно вхождение значило бы, что чат не открылся
     expect(view.getAllByText('Буду к шести')).toHaveLength(2);
+  });
+
+  // Случайный тап по галерее не должен ничего отправлять: сначала
+  // предпросмотр, отправка — общей кнопкой, текст из поля — подписью
+  test('фото уходит только после подтверждения и с подписью', async () => {
+    const onSendImage = jest.fn(async () => {});
+    const view = await render(screen({ openRequestId: 'order-1', onSendImage }));
+
+    await fireEvent.press(view.getByLabelText('Прикрепить фото'));
+    await waitFor(() => expect(view.getByText(/Фото готово к отправке/)).toBeTruthy());
+    expect(onSendImage).not.toHaveBeenCalled();
+
+    fireEvent.changeText(view.getByPlaceholderText('Подпись к фото…'), 'вот розетка');
+    await waitFor(() => expect(view.getByDisplayValue('вот розетка')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Отправить'));
+
+    await waitFor(() =>
+      expect(onSendImage).toHaveBeenCalledWith('order-1', 'file://local.jpg', 'вот розетка'),
+    );
   });
 });

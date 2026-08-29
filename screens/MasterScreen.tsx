@@ -643,14 +643,15 @@ export function MasterScreen({ open, onClose }: Props) {
     });
   };
 
-  // Фото выполненной работы или проблемы на месте — тем же чатом
-  const pushImage = async (jobId: string, localUri: string) => {
+  // Фото выполненной работы или проблемы на месте — тем же чатом;
+  // подпись из поля ввода едет тем же сообщением
+  const pushImage = async (jobId: string, localUri: string, caption: string) => {
     if (!myUid) return;
     try {
       const imageUrl = await uploadChatPhoto(jobId, myUid, localUri);
       await addDoc(collection(db, 'orders', jobId, 'messages'), {
         senderId: myUid,
-        text: '',
+        text: caption,
         imageUrl,
         time: now(),
         createdAt: serverTimestamp(),
@@ -871,7 +872,7 @@ export function MasterScreen({ open, onClose }: Props) {
                 onOfferLegacy={(price) => offerPriceLegacy(openJob.id, price)}
                 onFinish={() => finishJob(openJob.id)}
                 onSend={(text) => sendMessage(openJob.id, text)}
-                onSendImage={(uri) => pushImage(openJob.id, uri)}
+                onSendImage={(uri, caption) => pushImage(openJob.id, uri, caption)}
               />
             </Animated.View>
           )}
@@ -2315,13 +2316,16 @@ export function JobDetail({
   onOfferLegacy: (price: number) => void;
   onFinish: () => void;
   onSend: (text: string) => void;
-  onSendImage: (localUri: string) => Promise<void>;
+  onSendImage: (localUri: string, caption: string) => Promise<void>;
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [priceDraft, setPriceDraft] = useState('');
   const [offerComment, setOfferComment] = useState('');
   const [text, setText] = useState('');
+  // Выбранное фото не уходит сразу: предпросмотр у поля ввода, отправка —
+  // общей кнопкой, текст из поля становится подписью
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [sendingImage, setSendingImage] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -2342,8 +2346,21 @@ export function JobDetail({
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   };
 
-  const send = () => {
+  const send = async () => {
+    if (sendingImage) return;
     const trimmed = text.trim();
+    if (pendingImage) {
+      setSendingImage(true);
+      try {
+        await onSendImage(pendingImage, trimmed);
+        setPendingImage(null);
+        setText('');
+        requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+      } finally {
+        setSendingImage(false);
+      }
+      return;
+    }
     if (!trimmed) return;
     onSend(trimmed);
     setText('');
@@ -2354,13 +2371,8 @@ export function JobDetail({
     if (sendingImage) return;
     const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 }).catch(() => null);
     if (!result || result.canceled || !result.assets[0]) return;
-    setSendingImage(true);
-    try {
-      await onSendImage(result.assets[0].uri);
-      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
-    } finally {
-      setSendingImage(false);
-    }
+    // Повторный выбор заменяет фото, а не шлёт два
+    setPendingImage(result.assets[0].uri);
   };
 
   return (
@@ -2620,30 +2632,50 @@ export function JobDetail({
       {/* Писать клиенту может только выбранный мастер: до выбора чат общий
           с конкурентами, а правила пускают туда лишь участников заявки */}
       {canChat ? (
-        <View style={styles.inputRow}>
-          <PressableScale
-            style={[styles.attachBtn, sendingImage && styles.sendBtnDisabled]}
-            onPress={attachImage}
-            disabled={sendingImage}
-          >
-            <Glyph glyph="📎" size={16} colors={themedIconColors(t)} />
-          </PressableScale>
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder="Написать клиенту…"
-            placeholderTextColor={t.textMuted}
-            style={styles.input}
-            multiline
-          />
-          <PressableScale
-            style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
-            onPress={send}
-            disabled={!text.trim()}
-          >
-            <Text style={styles.sendIcon}>↑</Text>
-          </PressableScale>
-        </View>
+        <>
+          {pendingImage && (
+            <View style={styles.pendingRow}>
+              <Image source={{ uri: pendingImage }} style={styles.pendingThumb} />
+              <Text style={styles.pendingHint}>
+                Фото готово к отправке — можно добавить подпись
+              </Text>
+              <PressableScale
+                accessibilityLabel="Убрать фото"
+                style={styles.pendingCancel}
+                onPress={() => setPendingImage(null)}
+                disabled={sendingImage}
+              >
+                <Text style={styles.pendingCancelText}>✕</Text>
+              </PressableScale>
+            </View>
+          )}
+          <View style={styles.inputRow}>
+            <PressableScale
+              accessibilityLabel="Прикрепить фото"
+              style={[styles.attachBtn, sendingImage && styles.sendBtnDisabled]}
+              onPress={attachImage}
+              disabled={sendingImage}
+            >
+              <Glyph glyph="📎" size={16} colors={themedIconColors(t)} />
+            </PressableScale>
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              placeholder={pendingImage ? 'Подпись к фото…' : 'Написать клиенту…'}
+              placeholderTextColor={t.textMuted}
+              style={styles.input}
+              multiline
+            />
+            <PressableScale
+              accessibilityLabel="Отправить"
+              style={[styles.sendBtn, !text.trim() && !pendingImage && styles.sendBtnDisabled]}
+              onPress={send}
+              disabled={(!text.trim() && !pendingImage) || sendingImage}
+            >
+              <Text style={styles.sendIcon}>↑</Text>
+            </PressableScale>
+          </View>
+        </>
       ) : (
         <View style={styles.chatLockedRow}>
           <Text style={styles.chatLockedText}>Чат откроется, когда клиент выберет вас</Text>
@@ -3468,6 +3500,22 @@ const makeStyles = (t: Palette) =>
       marginVertical: 2,
       backgroundColor: t.border,
     },
+    pendingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginHorizontal: 16,
+      marginTop: 6,
+      padding: 8,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+    },
+    pendingThumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: t.border },
+    pendingHint: { flex: 1, fontSize: 12, color: t.textMuted },
+    pendingCancel: { padding: 6 },
+    pendingCancelText: { fontSize: 16, fontWeight: '800', color: t.textMuted },
     sendBtnDisabled: { backgroundColor: t.disabled },
     sendIcon: { color: t.onAccent, fontSize: 17, fontWeight: '800' },
   });
