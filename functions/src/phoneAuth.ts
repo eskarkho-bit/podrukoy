@@ -148,6 +148,15 @@ async function requestCall(apiId: string, phone: string): Promise<string> {
       providerStatusCode: json.status_code ?? null,
       providerStatusText: json.status_text ?? null,
     });
+    // У SMS.RU свой лимит звонков на номер (три подряд), и числового кода
+    // у отказа нет — узнаём по тексту. «Попробуйте ещё раз» здесь было бы
+    // ложью: помогает только подождать.
+    if (/много звонков/i.test(json.status_text ?? '')) {
+      throw new HttpsError(
+        'resource-exhausted',
+        'Слишком много звонков на этот номер. Попробуйте позже',
+      );
+    }
     throw new Error('call-provider-failed');
   }
 
@@ -235,10 +244,12 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
         { merge: true },
       );
     }
-  } catch {
+  } catch (e) {
     // Кулдаун снимается: человек не должен ждать минуту из-за сбоя провайдера.
     // Счётчик отправок остаётся — долбить лежачего провайдера тоже незачем.
     await ref.set({ lastSentAt: null }, { merge: true }).catch(() => {});
+    // Отказ с внятной причиной (лимит звонков) доходит до человека как есть
+    if (e instanceof HttpsError) throw e;
     throw new HttpsError(
       'unavailable',
       channel === 'sms'

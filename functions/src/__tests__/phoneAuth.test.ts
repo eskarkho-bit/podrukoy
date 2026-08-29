@@ -267,15 +267,16 @@ describe('журнал', () => {
 // последние четыре цифры звонящего номера — и возвращает его нам.
 
 /** Подменяет fetch к /code/call и запоминает, что назначил «провайдер». */
-function fakeCallProvider(opts: { fail?: boolean; code?: number } = {}) {
+function fakeCallProvider(opts: { fail?: boolean; failText?: string; code?: number } = {}) {
   const calls: string[] = [];
 
   global.fetch = jest.fn(async (_url: any, init: any) => {
     const params = new URLSearchParams(String(init?.body ?? ''));
     calls.push(params.get('phone') ?? '');
-    const json = opts.fail
-      ? { status: 'ERROR', status_code: 221 }
-      : { status: 'OK', code: opts.code ?? 2127, call_id: 'test-1' };
+    const json =
+      opts.fail || opts.failText
+        ? { status: 'ERROR', status_text: opts.failText ?? 'Неверный api_id' }
+        : { status: 'OK', code: opts.code ?? 2127, call_id: 'test-1' };
     return { ok: true, status: 200, json: async () => json } as any;
   }) as any;
 
@@ -316,6 +317,18 @@ describe('код звонком', () => {
     await sendLoginCode(phone);
     await expect(confirmLoginCode(phone, '0000', true)).rejects.toMatchObject({
       code: 'invalid-argument',
+    });
+  });
+
+  // У SMS.RU свой лимит звонков на номер; «попробуйте ещё раз» тут ложь —
+  // человек должен услышать «позже»
+  test('лимит звонков провайдера доходит как «попробуйте позже»', async () => {
+    const phone = freshPhone();
+    fakeCallProvider({ failText: 'Слишком много звонков на один номер (совершено: 4)' });
+
+    await expect(sendLoginCode(phone)).rejects.toMatchObject({
+      code: 'resource-exhausted',
+      message: expect.stringContaining('позже'),
     });
   });
 
