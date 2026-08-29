@@ -27,7 +27,7 @@ export function DashboardBlock({ dashboard }: { dashboard: DashboardData | null 
       <View style={styles.wrap}>
         <Text style={styles.title}>Дашборд</Text>
         <Text style={styles.hint}>
-          Появится после первого ночного пересчёта на сервере — для него нужны развёрнутые функции
+          Появится после первого ночного пересчёта — сервер считает его в три часа ночи по Москве
         </Text>
       </View>
     );
