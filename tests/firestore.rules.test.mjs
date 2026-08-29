@@ -85,12 +85,15 @@ const legacyOrder = (patch = {}) =>
   });
 
 before(async () => {
+  // Адрес эмулятора приходит от emulators:exec: тестовые прогоны живут на
+  // своих портах (firebase.tests.json) и не сталкиваются с демо-стендом
+  const [host, port] = (process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080').split(':');
   env = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: {
       rules: readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8'),
-      host: '127.0.0.1',
-      port: 8080,
+      host,
+      port: Number(port),
     },
   });
 });

@@ -10,7 +10,7 @@
     "build": "tsc",
     "watch": "tsc --watch",
     "deploy": "firebase deploy --only functions",
-    "test": "firebase emulators:exec --only firestore,auth --project demo-domio \"jest\"",
+    "test": "firebase emulators:exec --config ../firebase.tests.json --only firestore,auth --project demo-domio \"jest\"",
     "test:jest": "jest"
   },
   "dependencies": {
