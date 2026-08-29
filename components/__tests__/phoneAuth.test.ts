@@ -49,12 +49,25 @@ describe('requestSmsCode', () => {
   const withCallable = (impl: () => Promise<unknown>) =>
     callableMock.mockReturnValue(jest.fn(impl));
 
-  test('ответ сервера доходит как есть', async () => {
-    withCallable(async () => ({ data: { configured: true } }));
-    await expect(requestSmsCode('+79991234567')).resolves.toBe('sent');
+  test('ответ сервера доходит как есть, включая канал доставки', async () => {
+    withCallable(async () => ({ data: { configured: true, channel: 'call', codeLength: 4 } }));
+    await expect(requestSmsCode('+79991234567')).resolves.toEqual({
+      channel: 'call',
+      codeLength: 4,
+    });
 
     withCallable(async () => ({ data: { configured: false } }));
     await expect(requestSmsCode('+79991234567')).resolves.toBe('not-configured');
+  });
+
+  // Старый сервер канала не сообщал — считаем это СМС с шестью цифрами,
+  // а не падаем на несовпадении форм
+  test('ответ без канала означает СМС', async () => {
+    withCallable(async () => ({ data: { configured: true } }));
+    await expect(requestSmsCode('+79991234567')).resolves.toEqual({
+      channel: 'sms',
+      codeLength: 6,
+    });
   });
 
   // Пока функции не развёрнуты, их адрес отвечает 404: в браузере это

@@ -123,8 +123,9 @@ type AppState = {
   changePassword: (current: string, next: string) => Promise<void>;
   // Экспорт данных: право на переносимость из политики конфиденциальности
   exportMyData: () => Promise<void>;
-  // Код для подтверждения удаления — телефонным аккаунтам вместо пароля
-  requestDeleteCode: () => Promise<void>;
+  // Код для подтверждения удаления — телефонным аккаунтам вместо пароля.
+  // Возвращает канал: звонок или СМС — экрану нужен правильный текст
+  requestDeleteCode: () => Promise<'sms' | 'call'>;
   // Секрет — подтверждение, что удаляет владелец, а не тот, кому телефон
   // попал в руки разблокированным: пароль либо код из СМС — по authMethod
   deleteAccount: (secret: string) => Promise<void>;
@@ -999,13 +1000,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   // Код на собственный номер — подтверждение удаления для телефонного
   // аккаунта: пароля у него нет, а удалять без подтверждения нельзя
-  const requestDeleteCode = async () => {
+  const requestDeleteCode = async (): Promise<'sms' | 'call'> => {
     if (!authPhone) throw new Error('У аккаунта нет номера телефона');
     try {
       const result = await requestPhoneCode(authPhone);
       if (result === 'not-configured') {
-        throw new Error('Отправка СМС сейчас недоступна. Напишите в поддержку');
+        throw new Error('Отправка кода сейчас недоступна. Напишите в поддержку');
       }
+      return result.channel;
     } catch (e) {
       throw new Error(phoneAuthErrorText(e, 'Не удалось отправить код. Попробуйте ещё раз'));
     }

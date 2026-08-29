@@ -34,7 +34,11 @@ export function formatRuPhone(phone: string): string {
   return `+7 ${m[1]} ${m[2]}-${m[3]}-${m[4]}`;
 }
 
-export type SmsRequestResult = 'sent' | 'not-configured';
+export type CodeChannel = 'sms' | 'call';
+
+// Каналом доставки кода распоряжается сервер: звонок (код — последние четыре
+// цифры звонящего номера) или СМС. Экран подстраивает тексты и длину поля.
+export type SmsRequestResult = 'not-configured' | { channel: CodeChannel; codeLength: number };
 
 /**
  * Развёрнут ли вообще бэкенд телефонного входа.
@@ -58,13 +62,18 @@ function backendMissing(e: unknown): boolean {
  * не развёрнуты. Приложение в обоих случаях предлагает войти по почте.
  */
 export async function requestSmsCode(phone: string): Promise<SmsRequestResult> {
-  const request = httpsCallable<{ phone: string }, { configured: boolean }>(
-    functions,
-    'requestPhoneCode',
-  );
+  const request = httpsCallable<
+    { phone: string },
+    { configured: boolean; channel?: string; codeLength?: number }
+  >(functions, 'requestPhoneCode');
   try {
     const { data } = await request({ phone });
-    return data?.configured === false ? 'not-configured' : 'sent';
+    if (data?.configured === false) return 'not-configured';
+    // Старый сервер канала не сообщал — тогда это СМС с шестью цифрами
+    return {
+      channel: data?.channel === 'call' ? 'call' : 'sms',
+      codeLength: data?.codeLength === 4 ? 4 : 6,
+    };
   } catch (e) {
     if (backendMissing(e)) return 'not-configured';
     throw e;

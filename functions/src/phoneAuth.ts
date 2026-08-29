@@ -5,18 +5,24 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { createHash, randomInt } from 'node:crypto';
 import { audit } from './audit';
 
-// Вход по номеру телефона: одноразовый код в СМС, свой, а не Firebase Phone Auth.
+// Вход по номеру телефона: свой одноразовый код, а не Firebase Phone Auth.
 //
 // Почему не встроенный: во-первых, вход по телефону в веб-SDK Firebase требует
 // reCAPTCHA, а ей нужен DOM — в Expo-приложении без WebView его нет. Во-вторых,
 // СМС от Google в российские сети доставляются плохо, а российский провайдер —
 // надёжно и на порядок дешевле.
 //
-// Схема: requestPhoneCode шлёт шестизначный код по СМС и кладёт в базу его
-// хэш; verifyPhoneCode сверяет код, находит или заводит аккаунт по номеру и
-// возвращает custom-токен, которым клиент входит. Правила Firestore закрывают
-// phoneCodes наглухо: код можно получить только из СМС, то есть только держа
-// телефон в руках.
+// Каналов доставки кода два, и по умолчанию — звонок: робот звонит на номер,
+// кодом служат последние четыре цифры звонящего номера, отвечать не нужно.
+// Звонок работает на любом аккаунте SMS.RU, а вот СМС требуют буквенного
+// отправителя, которого оформляют только юрлицам и ИП по договору. Когда
+// договор появится, канал переключается переменной SMSRU_CHANNEL=sms —
+// без правки кода.
+//
+// Схема: requestPhoneCode доставляет код (звонком или СМС) и кладёт в базу
+// его хэш; verifyPhoneCode сверяет код, находит или заводит аккаунт по номеру
+// и возвращает custom-токен, которым клиент входит. Правила Firestore
+// закрывают phoneCodes наглухо: узнать код можно только держа телефон в руках.
 //
 // Сам номер и сам код в базе не хранятся: документ называется хэшем номера и
 // держит хэш кода. Утечка коллекции не даёт ни войти, ни узнать чей-то номер.
@@ -30,9 +36,18 @@ import { audit } from './audit';
 // Service Account Token Creator (iam.serviceAccountTokenCreator) на самого
 // себя. В эмуляторе токены не подписываются, роль не нужна.
 
-const API = 'https://sms.ru/sms/send';
+const SMS_API = 'https://sms.ru/sms/send';
+const CALL_API = 'https://sms.ru/code/call';
 
-// Код живёт недолго: перехватить СМС задним числом не выйдет
+export type CodeChannel = 'call' | 'sms';
+
+const codeChannel = (): CodeChannel => (process.env.SMSRU_CHANNEL === 'sms' ? 'sms' : 'call');
+
+// У звонка код назначает провайдер — четыре последние цифры номера;
+// для СМС шестизначный код выбираем сами
+const CODE_LENGTH: Record<CodeChannel, number> = { call: 4, sms: 6 };
+
+// Код живёт недолго: перехватить его задним числом не выйдет
 const CODE_TTL_MS = 5 * 60_000;
 
 // Лимиты отправки. Без них функция — бесплатная СМС-пушка по любому номеру
@@ -41,8 +56,9 @@ const RESEND_COOLDOWN_MS = 60_000;
 const MAX_SENDS_PER_WINDOW = 5;
 const SEND_WINDOW_MS = 60 * 60_000;
 
-// Попытки ввода. Шестизначный код — миллион вариантов; пять попыток делают
-// подбор бессмысленным, потом код сгорает.
+// Попытки ввода. Шестизначный код — миллион вариантов; у четырёхзначного из
+// звонка — десять тысяч, пять попыток дают шанс подбора один к двум тысячам
+// при коде, живущем пять минут. Потом код сгорает.
 const MAX_VERIFY_ATTEMPTS = 5;
 
 /** Мобильный номер РФ в том виде, в каком его шлёт клиент. */
@@ -73,7 +89,7 @@ function credentials(): { apiId: string } | null {
  */
 async function sendSms(apiId: string, phone: string, text: string): Promise<void> {
   const to = phone.replace('+', '');
-  const res = await fetch(API, {
+  const res = await fetch(SMS_API, {
     method: 'POST',
     signal: AbortSignal.timeout(15_000),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -98,7 +114,46 @@ async function sendSms(apiId: string, phone: string, text: string): Promise<void
   }
 }
 
-export type RequestCodeResult = { configured: false } | { configured: true; cooldownSec: number };
+/**
+ * Заказывает звонок с кодом. Код — последние четыре цифры звонящего номера,
+ * его назначает и возвращает провайдер, мы не выбираем. POST по той же
+ * причине, что у СМС: номер не должен оказаться в URL.
+ */
+async function requestCall(apiId: string, phone: string): Promise<string> {
+  const res = await fetch(CALL_API, {
+    method: 'POST',
+    signal: AbortSignal.timeout(15_000),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      api_id: apiId,
+      phone: phone.replace('+', ''),
+      json: '1',
+    }).toString(),
+  });
+
+  const json = (await res.json().catch(() => ({}))) as {
+    status?: string;
+    status_code?: number;
+    code?: number | string;
+  };
+
+  if (!res.ok || json.status !== 'OK' || json.code == null) {
+    // Номера в логе нет — только коды провайдера
+    logger.error('Звонок с кодом не заказан', {
+      httpStatus: res.status,
+      providerStatus: json.status ?? null,
+      providerStatusCode: json.status_code ?? null,
+    });
+    throw new Error('call-provider-failed');
+  }
+
+  // Провайдер отдаёт код числом — ведущий ноль восстанавливаем сами
+  return String(json.code).padStart(CODE_LENGTH.call, '0');
+}
+
+export type RequestCodeResult =
+  | { configured: false }
+  | { configured: true; cooldownSec: number; channel: CodeChannel; codeLength: number };
 
 /**
  * Шлёт код входа на номер.
@@ -117,7 +172,10 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
   // телефону пока недоступен», а не «что-то пошло не так»
   if (!creds) return { configured: false };
 
-  const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  const channel = codeChannel();
+  // Для СМС код выбираем сами и знаем его до записи; для звонка его назначит
+  // провайдер, и хэш ляжет в документ вторым шагом — после успешного звонка
+  const smsCode = String(randomInt(0, 1_000_000)).padStart(CODE_LENGTH.sms, '0');
   const db = getFirestore();
   const ref = db.doc(`phoneCodes/${phoneCodeDocId(phone)}`);
   const now = Date.now();
@@ -132,14 +190,23 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
     if (now - lastSentAt < RESEND_COOLDOWN_MS) return 'cooldown';
     if (sends >= MAX_SENDS_PER_WINDOW) return 'exhausted';
 
-    txn.set(ref, {
-      codeHash: codeHash(phone, code),
-      expiresAt: Timestamp.fromMillis(now + CODE_TTL_MS),
-      attempts: 0,
+    const limits = {
       sends: sends + 1,
       windowStartAt: windowActive ? Timestamp.fromMillis(windowStartAt) : Timestamp.fromMillis(now),
       lastSentAt: Timestamp.fromMillis(now),
-    });
+    };
+    if (channel === 'sms') {
+      txn.set(ref, {
+        codeHash: codeHash(phone, smsCode),
+        expiresAt: Timestamp.fromMillis(now + CODE_TTL_MS),
+        attempts: 0,
+        ...limits,
+      });
+    } else {
+      // Только бронь под лимиты: прежний код не трогаем — он действует,
+      // пока новый звонок не прозвонился
+      txn.set(ref, limits, { merge: true });
+    }
     return 'ok';
   });
 
@@ -151,12 +218,29 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
   }
 
   try {
-    await sendSms(creds.apiId, phone, `Код входа в domio: ${code}`);
+    if (channel === 'sms') {
+      await sendSms(creds.apiId, phone, `Код входа в domio: ${smsCode}`);
+    } else {
+      const callCode = await requestCall(creds.apiId, phone);
+      await ref.set(
+        {
+          codeHash: codeHash(phone, callCode),
+          expiresAt: Timestamp.fromMillis(Date.now() + CODE_TTL_MS),
+          attempts: 0,
+        },
+        { merge: true },
+      );
+    }
   } catch {
     // Кулдаун снимается: человек не должен ждать минуту из-за сбоя провайдера.
     // Счётчик отправок остаётся — долбить лежачего провайдера тоже незачем.
     await ref.set({ lastSentAt: null }, { merge: true }).catch(() => {});
-    throw new HttpsError('unavailable', 'СМС не отправилась. Попробуйте ещё раз');
+    throw new HttpsError(
+      'unavailable',
+      channel === 'sms'
+        ? 'СМС не отправилась. Попробуйте ещё раз'
+        : 'Не получилось позвонить. Попробуйте ещё раз',
+    );
   }
 
   await audit({
@@ -164,10 +248,15 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
     actor: { type: 'user', uid: phoneAuditId(phone) },
     subject: { type: 'user', id: phoneAuditId(phone) },
     correlationId: `phone-${phoneCodeDocId(phone)}-${now}`,
-    details: {},
+    details: { channel },
   });
 
-  return { configured: true, cooldownSec: Math.ceil(RESEND_COOLDOWN_MS / 1000) };
+  return {
+    configured: true,
+    cooldownSec: Math.ceil(RESEND_COOLDOWN_MS / 1000),
+    channel,
+    codeLength: CODE_LENGTH[channel],
+  };
 }
 
 export type ConfirmCodeResult = { token: string; created: boolean };
@@ -188,8 +277,9 @@ export async function confirmLoginCode(
   if (!PHONE_RE.test(phone)) {
     throw new HttpsError('invalid-argument', 'Нужен мобильный номер в формате +7 9…');
   }
-  if (!/^\d{6}$/.test(code)) {
-    throw new HttpsError('invalid-argument', 'Код — шесть цифр из СМС');
+  // Четыре цифры — код из звонка, шесть — из СМС; оба канала равноправны
+  if (!/^\d{4}$/.test(code) && !/^\d{6}$/.test(code)) {
+    throw new HttpsError('invalid-argument', 'Код — четыре или шесть цифр');
   }
 
   const db = getFirestore();

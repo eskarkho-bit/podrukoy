@@ -52,8 +52,9 @@ type Props = {
   // Смена пароля. Ошибку возвращает текстом, готовым к показу: экран про
   // Firebase ничего не знает.
   onChangePassword: (current: string, next: string) => Promise<void>;
-  // Код на собственный номер — подтверждение удаления телефонного аккаунта
-  onRequestDeleteCode: () => Promise<void>;
+  // Код на собственный номер — подтверждение удаления телефонного аккаунта.
+  // Возвращает канал доставки: звонок или СМС — от него зависят тексты
+  onRequestDeleteCode: () => Promise<'sms' | 'call'>;
   // Секрет — пароль либо код из СМС, смотря какой authMethod
   onDeleteAccount: (secret: string) => Promise<void>;
 };
@@ -107,6 +108,8 @@ export function ProfileScreen({
   // Пароль — или код из СМС у телефонного аккаунта
   const [deleteSecret, setDeleteSecret] = useState('');
   const [deleteCodeSent, setDeleteCodeSent] = useState(false);
+  // Канал кода назначает сервер: звонок или СМС — тексты подстраиваются
+  const [deleteChannel, setDeleteChannel] = useState<'sms' | 'call'>('sms');
   const [sendingCode, setSendingCode] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -180,7 +183,7 @@ export function ProfileScreen({
     setDeleteError(null);
     setSendingCode(true);
     try {
-      await onRequestDeleteCode();
+      setDeleteChannel(await onRequestDeleteCode());
       setDeleteCodeSent(true);
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : 'Не удалось отправить код');
@@ -193,7 +196,9 @@ export function ProfileScreen({
     if (!deleteSecret) {
       setDeleteError(
         byPhone
-          ? 'Введите код из СМС, чтобы подтвердить удаление'
+          ? deleteChannel === 'call'
+            ? 'Введите последние 4 цифры звонившего номера, чтобы подтвердить удаление'
+            : 'Введите код из СМС, чтобы подтвердить удаление'
           : 'Введите пароль, чтобы подтвердить удаление',
       );
       return;
@@ -512,10 +517,14 @@ export function ProfileScreen({
                       style={[styles.deleteInput, styles.passwordInputGap]}
                       value={deleteSecret}
                       onChangeText={setDeleteSecret}
-                      placeholder="Код из СМС"
+                      placeholder={
+                        deleteChannel === 'call'
+                          ? 'Последние 4 цифры звонившего номера'
+                          : 'Код из СМС'
+                      }
                       placeholderTextColor={t.textMuted}
                       keyboardType="number-pad"
-                      maxLength={6}
+                      maxLength={deleteChannel === 'call' ? 4 : 6}
                       editable={!deleting}
                     />
                   )}

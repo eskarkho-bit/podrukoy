@@ -42,6 +42,9 @@ export function AuthScreen() {
   const [code, setCode] = useState('');
   // Код запрошен — дальше поле кода и кнопка входа вместо «Получить код»
   const [codeSent, setCodeSent] = useState(false);
+  // Канал назначает сервер: звонок (четыре последние цифры номера) или СМС
+  const [codeChannel, setCodeChannel] = useState<'sms' | 'call'>('sms');
+  const codeLength = codeChannel === 'call' ? 4 : 6;
   // До этого момента повторная отправка выключена — сервер всё равно откажет
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [, bump] = useState(0);
@@ -128,8 +131,14 @@ export function AuthScreen() {
         return;
       }
       setCodeSent(true);
+      setCodeChannel(result.channel);
+      setCode('');
       setCooldownUntil(Date.now() + 60_000);
-      setNotice(`Код отправлен на ${formatRuPhone(normalized)}`);
+      setNotice(
+        result.channel === 'call'
+          ? `Сейчас на ${formatRuPhone(normalized)} позвонит робот — отвечать не нужно, код это последние 4 цифры звонящего номера`
+          : `Код отправлен на ${formatRuPhone(normalized)}`,
+      );
     } catch (e) {
       setError(phoneAuthErrorText(e, 'Не удалось отправить код. Попробуйте ещё раз'));
     } finally {
@@ -145,8 +154,12 @@ export function AuthScreen() {
       setError('Нужен мобильный номер РФ — на него придёт код');
       return;
     }
-    if (!/^\d{6}$/.test(code.trim())) {
-      setError('Код — шесть цифр из СМС');
+    if (!new RegExp(`^\\d{${codeLength}}$`).test(code.trim())) {
+      setError(
+        codeChannel === 'call'
+          ? 'Код — последние 4 цифры номера, с которого звонили'
+          : 'Код — шесть цифр из СМС',
+      );
       return;
     }
     if (isRegister) {
@@ -347,17 +360,19 @@ export function AuthScreen() {
 
               {codeSent && (
                 <Animated.View entering={FadeInDown.duration(260)}>
-                  <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Код из СМС</Text>
+                  <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>
+                    {codeChannel === 'call' ? 'Последние 4 цифры звонящего номера' : 'Код из СМС'}
+                  </Text>
                   <TextInput
                     style={styles.fieldInput}
                     value={code}
                     onChangeText={setCode}
-                    placeholder="••••••"
+                    placeholder={'•'.repeat(codeLength)}
                     placeholderTextColor={t.textMuted}
                     keyboardType="number-pad"
                     autoComplete="sms-otp"
                     textContentType="oneTimeCode"
-                    maxLength={6}
+                    maxLength={codeLength}
                     editable={!loading}
                     onSubmitEditing={submitPhone}
                     returnKeyType="go"

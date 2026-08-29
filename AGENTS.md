@@ -23,9 +23,9 @@ npx tsc --noEmit                 # типы приложения
 cd functions && npm run build    # типы функций
 npm run lint                     # eslint
 npm run format:check             # prettier
-npm test                         # 165 тестов компонентов
+npm test                         # 166 тестов компонентов
 npm run test:rules               # 154 теста правил доступа, нужен JDK 21
-npm --prefix functions test      # 133 теста функций, нужен JDK 21
+npm --prefix functions test      # 137 тестов функций, нужен JDK 21
 ```
 
 Правила Firestore — единственное, что стоит между пользователями и чужими

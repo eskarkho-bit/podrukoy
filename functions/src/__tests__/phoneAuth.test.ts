@@ -51,11 +51,14 @@ const freshPhone = () => `+7999000${String(seq++).padStart(4, '0')}`;
 
 beforeEach(async () => {
   process.env.SMSRU_API_ID = 'test-key';
+  // Основной прогон — канал СМС; звонку посвящён отдельный describe ниже
+  process.env.SMSRU_CHANNEL = 'sms';
   await wipe('phoneCodes', 'audit');
 });
 
 afterAll(() => {
   delete process.env.SMSRU_API_ID;
+  delete process.env.SMSRU_CHANNEL;
 });
 
 describe('отправка кода', () => {
@@ -65,7 +68,7 @@ describe('отправка кода', () => {
 
     const result = await sendLoginCode(phone);
 
-    expect(result).toEqual({ configured: true, cooldownSec: 60 });
+    expect(result).toEqual({ configured: true, cooldownSec: 60, channel: 'sms', codeLength: 6 });
     expect(sms.sent).toHaveLength(1);
     expect(sms.sent[0].to).toBe(phone.replace('+', ''));
     expect(sms.lastCode()).toMatch(/^\d{6}$/);
@@ -249,7 +252,87 @@ describe('журнал', () => {
     // обходом собственного же удаления данных
     const dump = JSON.stringify(entries.docs.map((d) => d.data()));
     expect(dump).not.toContain(phone.slice(1));
-    // Детали пусты по построению: код и номер туда не попадают вовсе
-    entries.docs.forEach((d) => expect(d.get('details')).toEqual({}));
+    // В деталях — самое большее канал доставки: код и номер не попадают вовсе
+    entries.docs.forEach((d) => {
+      const keys = Object.keys(d.get('details') ?? {});
+      expect(keys.every((k) => k === 'channel')).toBe(true);
+    });
+  });
+});
+
+// ---------- канал «звонок» ----------
+//
+// Буквенного отправителя для СМС оформляют только юрлицам по договору,
+// поэтому до него код доставляется звонком: провайдер сам назначает код —
+// последние четыре цифры звонящего номера — и возвращает его нам.
+
+/** Подменяет fetch к /code/call и запоминает, что назначил «провайдер». */
+function fakeCallProvider(opts: { fail?: boolean; code?: number } = {}) {
+  const calls: string[] = [];
+
+  global.fetch = jest.fn(async (_url: any, init: any) => {
+    const params = new URLSearchParams(String(init?.body ?? ''));
+    calls.push(params.get('phone') ?? '');
+    const json = opts.fail
+      ? { status: 'ERROR', status_code: 221 }
+      : { status: 'OK', code: opts.code ?? 2127, call_id: 'test-1' };
+    return { ok: true, status: 200, json: async () => json } as any;
+  }) as any;
+
+  return { calls };
+}
+
+describe('код звонком', () => {
+  beforeEach(() => {
+    delete process.env.SMSRU_CHANNEL; // звонок — канал по умолчанию
+  });
+
+  test('код от провайдера работает целиком: запрос — звонок — вход', async () => {
+    const phone = freshPhone();
+    const provider = fakeCallProvider({ code: 2127 });
+
+    const result = await sendLoginCode(phone);
+    expect(result).toEqual({ configured: true, cooldownSec: 60, channel: 'call', codeLength: 4 });
+    expect(provider.calls).toEqual([phone.replace('+', '')]);
+
+    const { token, created } = await confirmLoginCode(phone, '2127', true);
+    expect(created).toBe(true);
+    expect(uidOf(token)).toBeTruthy();
+  });
+
+  // Провайдер отдаёт код числом — ведущий ноль не должен потеряться
+  test('код с ведущим нулём восстанавливается', async () => {
+    const phone = freshPhone();
+    fakeCallProvider({ code: 127 });
+
+    await sendLoginCode(phone);
+    await expect(confirmLoginCode(phone, '0127', true)).resolves.toMatchObject({ created: true });
+  });
+
+  test('чужие четыре цифры не подходят', async () => {
+    const phone = freshPhone();
+    fakeCallProvider({ code: 2127 });
+
+    await sendLoginCode(phone);
+    await expect(confirmLoginCode(phone, '0000', true)).rejects.toMatchObject({
+      code: 'invalid-argument',
+    });
+  });
+
+  test('сбой звонка снимает кулдаун и не сжигает прежний код', async () => {
+    const phone = freshPhone();
+    fakeCallProvider({ code: 2127 });
+    await sendLoginCode(phone);
+
+    // Первый код уже на руках; повторный запрос падает на провайдере —
+    // но прежний код обязан остаться рабочим
+    await codeDoc(phone).set(
+      { lastSentAt: Timestamp.fromMillis(Date.now() - 120_000) },
+      { merge: true },
+    );
+    fakeCallProvider({ fail: true });
+    await expect(sendLoginCode(phone)).rejects.toMatchObject({ code: 'unavailable' });
+
+    await expect(confirmLoginCode(phone, '2127', true)).resolves.toMatchObject({ created: true });
   });
 });
