@@ -636,7 +636,10 @@ service cloud.firestore {
     // модерации: collectionGroup('reviews').where('clientId','==',uid).
     // Только модератору; обычные читатели ходят по прямому пути в анкете.
     match /{path=**}/reviews/{orderId} {
-      allow read: if isAdmin();
+      // Свои написанные отзывы владелец собирает и сам — это его данные,
+      // и без них не собрать экспорт (право на переносимость)
+      allow read: if isAdmin()
+        || (authed() && resource.data.clientId == request.auth.uid);
     }
 
     // Жалобы на отзывы.

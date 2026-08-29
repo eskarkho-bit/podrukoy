@@ -37,6 +37,8 @@ type Props = {
   remindersOn: boolean;
   onChangeReminders: (on: boolean) => void;
   onContactSupport: () => void;
+  // Экспорт данных: право на переносимость; файл отдаёт AppState
+  onExportData: () => Promise<void>;
   // Вход в режим мастера (перед ним — обязательная авторизация)
   onOpenMaster: () => void;
   // Модерация мастеров — только у владельцев admins/{uid}
@@ -69,6 +71,7 @@ export function ProfileScreen({
   remindersOn,
   onChangeReminders,
   onContactSupport,
+  onExportData,
   onOpenMaster,
   isAdmin,
   onOpenAdmin,
@@ -107,6 +110,18 @@ export function ProfileScreen({
   const [sendingCode, setSendingCode] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Экспорт данных: пока файл собирается, строка честно говорит об этом
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await onExportData();
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const byPhone = authMethod === 'phone';
 
@@ -444,6 +459,17 @@ export function ProfileScreen({
         >
           <Text style={styles.rowLabel}>О приложении</Text>
           <Text style={styles.rowValue}>domio · v1.0.0</Text>
+        </Animated.View>
+
+        {/* Право на переносимость из политики конфиденциальности: файл со
+          всем, что о вас хранится, — без письма в поддержку */}
+        <Animated.View entering={FadeInDown.delay(160 + STAGGER * 8).duration(340)}>
+          <PressableScale style={styles.row} onPress={handleExport} disabled={exporting}>
+            <Text style={styles.rowLabel}>
+              {exporting ? 'Готовим файл…' : 'Скачать мои данные'}
+            </Text>
+            <Text style={styles.rowChevron}>›</Text>
+          </PressableScale>
         </Animated.View>
 
         {/* Выход и удаление аккаунта. Удаление обязано быть здесь, а не письмом

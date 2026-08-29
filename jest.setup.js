@@ -72,6 +72,15 @@ jest.mock('./firebaseConfig', () => ({
   newOrderId: jest.fn(() => `order-${Math.random().toString(36).slice(2, 10)}`),
 }));
 
+jest.mock('expo-file-system', () => ({
+  File: jest.fn(() => ({ write: jest.fn(), uri: 'file://export.json' })),
+  Paths: { cache: 'cache' },
+}));
+
+jest.mock('expo-sharing', () => ({
+  shareAsync: jest.fn(async () => {}),
+}));
+
 jest.mock('expo-image-picker', () => ({
   launchCameraAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
   launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: [] })),

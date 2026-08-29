@@ -812,11 +812,15 @@ describe('Отзывы и рейтинг', () => {
     );
   });
 
-  // Карточка пользователя в модерации: его отзывы по всем мастерам сразу
-  test('отзывы клиента по всем мастерам собирает только модератор', async () => {
+  // Карточка пользователя в модерации и экспорт данных: свои отзывы по всем
+  // мастерам собирают модератор и сам автор, посторонний — нет
+  test('отзывы клиента по всем мастерам: автор и модератор — да, чужой — нет', async () => {
     await assertSucceeds(setDoc(doc(as('client1'), 'masters/master1/reviews/finished'), review()));
     await assertSucceeds(
       getDocs(query(collectionGroup(as('admin1'), 'reviews'), where('clientId', '==', 'client1'))),
+    );
+    await assertSucceeds(
+      getDocs(query(collectionGroup(as('client1'), 'reviews'), where('clientId', '==', 'client1'))),
     );
     await assertFails(
       getDocs(query(collectionGroup(as('master1'), 'reviews'), where('clientId', '==', 'client1'))),

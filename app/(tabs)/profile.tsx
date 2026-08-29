@@ -18,6 +18,7 @@ export default function ProfileRoute() {
       remindersOn={!s.remindersOff}
       onChangeReminders={(on) => s.setRemindersOff(!on)}
       onContactSupport={() => s.openChat(SUPPORT_THREAD_ID)}
+      onExportData={s.exportMyData}
       onOpenMaster={() => s.setMasterOpen(true)}
       isAdmin={s.isAdmin}
       onOpenAdmin={() => s.setAdminOpen(true)}

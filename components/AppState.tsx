@@ -30,6 +30,7 @@ import { currentConsents, takePendingConsent, type Consents } from './legal';
 import { takeSignupDraft } from './signupDraft';
 import { OrderDraft } from './ActionSheet';
 import { getPushToken } from './notifications';
+import { exportUserData } from './dataExport';
 import { deleteVerificationPhoto, uploadChatPhoto, uploadOrderPhoto } from './photoUpload';
 
 // Общее состояние приложения. Раньше жило в App.tsx и раздавалось пропсами —
@@ -120,6 +121,8 @@ type AppState = {
   logout: () => Promise<void>;
   // Смена пароля. Ошибка возвращается текстом, готовым к показу.
   changePassword: (current: string, next: string) => Promise<void>;
+  // Экспорт данных: право на переносимость из политики конфиденциальности
+  exportMyData: () => Promise<void>;
   // Код для подтверждения удаления — телефонным аккаунтам вместо пароля
   requestDeleteCode: () => Promise<void>;
   // Секрет — подтверждение, что удаляет владелец, а не тот, кому телефон
@@ -927,6 +930,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Экспорт данных: файл собирается из того, что владелец и так читает
+  // своими правами, — серверу здесь делать нечего
+  const exportMyData = async () => {
+    if (!uid) return;
+    try {
+      await exportUserData(uid, user?.email ?? '', authPhone ?? '');
+    } catch (e) {
+      failed('Не удалось собрать файл с данными. Проверьте связь')(e);
+    }
+  };
+
   // Открыть чат из другого экрана и перевести на вкладку «Сообщения».
   // Для поддержки создаём тред с приветствием, для заявки он появится сам,
   // как только кто-то напишет первое сообщение.
@@ -1151,6 +1165,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     markThreadRead,
     sendMessage,
     sendImageMessage,
+    exportMyData,
     openChat,
     logout,
     changePassword,
