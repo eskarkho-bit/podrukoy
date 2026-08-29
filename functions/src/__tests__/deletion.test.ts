@@ -36,11 +36,32 @@ async function seed() {
   await db.doc(`masters/${UID}`).set({ name: 'Дмитрий', verified: true });
   await db.doc(`masters/${UID}/verification/application`).set({ phone: '79991234567' });
 
+  // Жалобы: своя должна умереть с аккаунтом, чужая на его отзыв — остаться
+  await db.doc('complaints/mine').set({
+    byUid: UID,
+    subjectType: 'review',
+    masterId: 'кто-то',
+    orderId: 'o-x',
+    text: 'несправедливый отзыв',
+    status: 'новая',
+    createdAt: new Date(),
+  });
+  await db.doc('complaints/foreign').set({
+    byUid: 'другой-мастер',
+    subjectType: 'review',
+    masterId: 'другой-мастер',
+    orderId: 'o-y',
+    reviewClientId: UID,
+    text: 'жалоба на его отзыв',
+    status: 'новая',
+    createdAt: new Date(),
+  });
+
   await db.doc(`deletions/${UID}`).set({ status: 'pending', requestedAt: new Date() });
 }
 
 beforeEach(async () => {
-  await wipe('users', 'orders', 'masters', 'deletions', 'audit');
+  await wipe('users', 'orders', 'masters', 'deletions', 'complaints', 'audit');
   await seed();
 });
 
@@ -85,6 +106,23 @@ describe('полное удаление', () => {
     expect(request.get('status')).toBe('done');
     expect(request.get('stage')).toBe('done');
     expect(request.get('completedAt')).toBeTruthy();
+  });
+
+  // Текст жалобы — свободный текст автора, он умирает вместе с аккаунтом.
+  // Чужая жалоба принадлежит пожаловавшемуся и остаётся.
+  test('жалобы автора умирают с аккаунтом, чужие остаются', async () => {
+    await runDeletion(UID, 'test');
+
+    expect((await db.doc('complaints/mine').get()).exists).toBe(false);
+    expect((await db.doc('complaints/foreign').get()).exists).toBe(true);
+  });
+
+  test('обрыв на этапе жалоб возобновляется с него', async () => {
+    await db.doc(`deletions/${UID}`).set({ stage: 'complaints' }, { merge: true });
+    await runDeletion(UID, 'test');
+
+    expect((await db.doc('complaints/mine').get()).exists).toBe(false);
+    expect((await db.doc(`deletions/${UID}`).get()).get('status')).toBe('done');
   });
 
   test('аккаунт в Auth удаляется', async () => {

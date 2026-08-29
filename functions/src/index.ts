@@ -6,13 +6,13 @@ import {
   onDocumentWritten,
 } from 'firebase-functions/v2/firestore';
 import { initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { pushTo } from './push';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { pushTo, pushToAdmins } from './push';
 import { notifyMastersAbout } from './orderPush';
 import { shareOrderContacts } from './orderContacts';
 import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
-import { recountCompletedOrders } from './masterStats';
+import { recomputeRating, recountCompletedOrders } from './masterStats';
 
 export { createCardBinding, yookassaWebhook } from './payments';
 export { requestPhoneCode, verifyPhoneCode } from './phoneAuth';
@@ -20,6 +20,15 @@ export { onDeletionRequested } from './deletion';
 export { onMasterDeleted, onMasterUnverified } from './masterExit';
 export { reconcile } from './reconcile';
 export { serviceReminders } from './serviceReminders';
+export {
+  adminCloseOrder,
+  adminSetUserBlocked,
+  adminSetMasterBlocked,
+  adminSetReviewHidden,
+  adminResolveComplaint,
+  adminFindUserByPhone,
+} from './adminActions';
+export { dashboardDaily } from './dashboard';
 
 // Серверная часть «domio». Здесь живёт всё, чему нельзя доверять клиенту:
 // рассылка уведомлений (клиент не вправе читать чужие токены) и пересчёт
@@ -86,7 +95,18 @@ export const onOfferCreated = onDocumentCreated(
     if (!offer) return;
 
     const db = getFirestore();
-    const order = await db.doc(`orders/${event.params.orderId}`).get();
+    const orderRef = db.doc(`orders/${event.params.orderId}`);
+
+    // Штамп первого предложения — из него дашборд считает «время до
+    // отклика». Транзакция ставит его только если поля ещё нет: второе
+    // предложение не должно переписать время первого.
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(orderRef);
+      if (!snap.exists || snap.get('firstOfferAt')) return;
+      tx.update(orderRef, { firstOfferAt: FieldValue.serverTimestamp() });
+    });
+
+    const order = await orderRef.get();
     const clientId = order.get('clientId');
     if (!clientId) return;
 
@@ -179,10 +199,15 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
     return;
   }
 
+  // Закрытие модерацией должно и называться закрытием модерацией: клиент,
+  // о котором «Клиент отменил заявку», решил бы, что сходит с ума
+  const byAdmin = after.closedByAdmin === true && before.closedByAdmin !== true;
+  const adminReason = String(after.adminCloseReason ?? title);
+
   if (after.status === 'Завершена') {
-    // Цена уходит в гистограмму: модератору нужна медиана чека, а заявок он
-    // не видит. Отметка о зачёте ставится на саму заявку, поэтому повтор
-    // события второй раз её не посчитает.
+    // Цена уходит в гистограмму: медиана чека в сводке модератора считается
+    // по ней, а не по заявкам. Отметка о зачёте ставится на саму заявку,
+    // поэтому повтор события второй раз её не посчитает.
     await recordCompletedOrder(
       event.params.orderId,
       typeof after.agreedPrice === 'number' ? after.agreedPrice : 0,
@@ -190,13 +215,31 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
     if (masterId) {
       // Счётчик заказов в анкете — клиент видит его в профиле мастера
       await recountCompletedOrders(masterId);
-      await pushTo([masterId], 'Клиент подтвердил работу', title, { href: '/profile' });
+      await pushTo(
+        [masterId],
+        byAdmin ? 'Заявка закрыта модерацией' : 'Клиент подтвердил работу',
+        byAdmin ? adminReason : title,
+        { href: '/profile' },
+      );
+    }
+    if (byAdmin && clientId) {
+      await pushTo([clientId], 'Заявка закрыта модерацией', adminReason, { href: '/' });
     }
     return;
   }
 
-  if (after.status === 'Отменена' && masterId) {
-    await pushTo([masterId], 'Клиент отменил заявку', title, { href: '/profile' });
+  if (after.status === 'Отменена') {
+    if (masterId) {
+      await pushTo(
+        [masterId],
+        byAdmin ? 'Заявка отменена модерацией' : 'Клиент отменил заявку',
+        byAdmin ? adminReason : title,
+        { href: '/profile' },
+      );
+    }
+    if (byAdmin && clientId) {
+      await pushTo([clientId], 'Заявка отменена модерацией', adminReason, { href: '/' });
+    }
   }
 });
 
@@ -215,18 +258,8 @@ export const onSupportMessageCreated = onDocumentCreated(
     const text = String(message.text ?? '');
 
     if (message.from === 'user') {
-      const db = getFirestore();
-      const admins = await db.collection('admins').get();
-      if (admins.empty) {
-        logger.warn('Обращение в поддержку, но модераторов нет — некому отвечать');
-        return;
-      }
-      await pushTo(
-        admins.docs.map((d) => d.id),
-        'Обращение в поддержку',
-        text,
-        { href: '/profile' },
-      );
+      const delivered = await pushToAdmins('Обращение в поддержку', text, { href: '/profile' });
+      if (!delivered) logger.warn('Обращение в поддержку, но модераторов нет — некому отвечать');
       return;
     }
 
@@ -282,20 +315,15 @@ export const onVerificationChanged = onDocumentWritten(
     }
 
     if (status === 'pending') {
-      const admins = await db.collection('admins').get();
-      if (admins.empty) {
-        logger.warn('Заявка мастера подана, но модераторов нет — некому проверять');
-        return;
-      }
       const master = await db.doc(`masters/${masterId}`).get();
-      await pushTo(
-        admins.docs.map((d) => d.id),
+      const delivered = await pushToAdmins(
         'Заявка мастера на проверку',
         `${master.get('name') ?? 'Без имени'} · ${
           (master.get('cities') ?? []).join(', ') || master.get('city') || 'вся республика'
         }`,
         { href: '/profile' },
       );
+      if (!delivered) logger.warn('Заявка мастера подана, но модераторов нет — некому проверять');
       return;
     }
 
@@ -322,24 +350,14 @@ export const onVerificationChanged = onDocumentWritten(
 
 // ---------- рейтинг мастера ----------
 
-// Считается здесь и только здесь: правила запрещают писать rating и
-// reviewsCount кому бы то ни было, поэтому цифре можно верить.
+// Считается на сервере и только на сервере: правила запрещают писать rating
+// и reviewsCount кому бы то ни было, поэтому цифре можно верить. Сам
+// пересчёт — в masterStats.recomputeRating: его же зовёт скрытие отзыва
+// модератором, и скрытые отзывы в цифру не входят.
 export const onReviewWritten = onDocumentWritten(
   'masters/{masterId}/reviews/{orderId}',
   async (event) => {
-    const db = getFirestore();
     const masterId = event.params.masterId;
-
-    const reviews = await db.collection(`masters/${masterId}/reviews`).get();
-    if (reviews.empty) {
-      await db.doc(`masters/${masterId}`).set({ rating: null, reviewsCount: 0 }, { merge: true });
-      return;
-    }
-
-    const stars = reviews.docs
-      .map((d) => Number(d.get('stars')))
-      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 5);
-    if (!stars.length) return;
 
     if (event.data?.after.exists && !event.data.before.exists) {
       await audit({
@@ -354,14 +372,32 @@ export const onReviewWritten = onDocumentWritten(
       });
     }
 
-    const sum = stars.reduce((acc, n) => acc + n, 0);
-    await db.doc(`masters/${masterId}`).set(
-      {
-        // Округляем до десятых: показываем всё равно «4,8»
-        rating: Math.round((sum / stars.length) * 10) / 10,
-        reviewsCount: stars.length,
-      },
-      { merge: true },
-    );
+    await recomputeRating(masterId);
   },
 );
+
+// ---------- жалоба на отзыв ----------
+
+// Сама жалоба создаётся с клиента под правилами; серверу остаётся след в
+// журнале и пуш модераторам. Текст жалобы в пуш не кладём: он уходит через
+// сервис Expo, а свободному тексту пользователя там не место.
+export const onComplaintCreated = onDocumentCreated('complaints/{complaintId}', async (event) => {
+  const complaint = event.data?.data();
+  if (!complaint) return;
+
+  await audit({
+    action: 'complaint.created',
+    actor: { type: 'user', uid: String(complaint.byUid ?? '') },
+    subject: { type: 'complaint', id: event.params.complaintId },
+    correlationId: event.id,
+    details: {
+      masterId: String(complaint.masterId ?? ''),
+      orderId: String(complaint.orderId ?? ''),
+    },
+  });
+
+  const delivered = await pushToAdmins('Жалоба на отзыв', 'Мастер просит проверить отзыв', {
+    href: '/profile',
+  });
+  if (!delivered) logger.warn('Жалоба подана, но модераторов нет — некому разбирать');
+});

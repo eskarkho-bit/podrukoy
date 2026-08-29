@@ -17,8 +17,8 @@ import { audit, SYSTEM } from './audit';
 // просто он больше не проходит проверку; но висящие предложения снять надо,
 // потому что взяться за новое он уже не вправе.
 
-/** Снимает все неотвеченные предложения мастера. */
-async function dropPendingOffers(masterId: string): Promise<number> {
+/** Снимает все неотвеченные предложения мастера. Зовётся и блокировкой. */
+export async function dropPendingOffers(masterId: string): Promise<number> {
   const db = getFirestore();
   const offers = await db
     .collectionGroup('offers')

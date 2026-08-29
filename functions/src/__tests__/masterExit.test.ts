@@ -1,6 +1,6 @@
 import { getFirestore } from 'firebase-admin/firestore';
 import { initTestApp, wipe } from './helpers';
-import { detachMasterFromOrders } from '../masterExit';
+import { detachMasterFromOrders, dropPendingOffers } from '../masterExit';
 
 // Исчезновение мастера. Заявка «В работе» возвращается в поиск — и в этот
 // момент её снова читают все мастера города, поэтому телефоны обеих сторон
@@ -92,5 +92,35 @@ describe('detachMasterFromOrders', () => {
 
     const order = await db.doc('orders/in-work').get();
     expect(order.get('status')).toBe('Поиск мастера');
+  });
+});
+
+describe('dropPendingOffers', () => {
+  beforeEach(async () => {
+    await db.doc('orders/open-x').set({ clientId: 'c9', status: 'Поиск мастера' });
+    await db
+      .doc(`orders/open-x/offers/${MASTER}`)
+      .set({ masterId: MASTER, status: 'pending', price: 500 });
+    await db
+      .doc('orders/open-x/offers/other')
+      .set({ masterId: 'другой-мастер', status: 'pending', price: 700 });
+    await db
+      .doc(`orders/done/offers/${MASTER}`)
+      .set({ masterId: MASTER, status: 'accepted', price: 900 });
+  });
+
+  // Удаление, снятие допуска и блокировка зовут одно и то же: за новое
+  // браться нельзя, а принятое предложение — уже сделка, его не трогаем
+  test('снимает только неотвеченные предложения этого мастера', async () => {
+    expect(await dropPendingOffers(MASTER)).toBe(1);
+
+    expect((await db.doc(`orders/open-x/offers/${MASTER}`).get()).exists).toBe(false);
+    expect((await db.doc('orders/open-x/offers/other').get()).exists).toBe(true);
+    expect((await db.doc(`orders/done/offers/${MASTER}`).get()).exists).toBe(true);
+  });
+
+  test('повтор находит пустоту и ничего не ломает', async () => {
+    await dropPendingOffers(MASTER);
+    expect(await dropPendingOffers(MASTER)).toBe(0);
   });
 });

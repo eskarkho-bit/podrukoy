@@ -66,6 +66,28 @@ async function dropDeadTokens(owners: Map<string, string>, dead: string[]) {
   );
 }
 
+/**
+ * Пуш всем модераторам сразу — новые анкеты, обращения, жалобы.
+ *
+ * Возвращает false, если модераторов нет: что при этом логировать, решает
+ * вызывающий — у каждого события своя формулировка беды.
+ */
+export async function pushToAdmins(
+  title: string,
+  body: string,
+  target: PushTarget,
+): Promise<boolean> {
+  const admins = await getFirestore().collection('admins').get();
+  if (admins.empty) return false;
+  await pushTo(
+    admins.docs.map((d) => d.id),
+    title,
+    body,
+    target,
+  );
+  return true;
+}
+
 /** Отправляет одно уведомление всем устройствам перечисленных пользователей. */
 export async function pushTo(
   uids: string[],

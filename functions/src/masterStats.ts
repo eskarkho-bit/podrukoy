@@ -38,3 +38,42 @@ export async function recountCompletedOrders(masterId: string): Promise<number |
     return completed;
   });
 }
+
+/**
+ * Полный пересчёт рейтинга мастера по видимым отзывам.
+ *
+ * Скрытые модерацией (hidden) не входят ни в среднее, ни в счётчик: цифра
+ * у анкеты и список отзывов на экране обязаны сходиться, иначе «4,2 по трём
+ * отзывам» при двух видимых выглядит подлогом. Если видимых не осталось —
+ * рейтинга нет, как у мастера без отзывов вовсе.
+ *
+ * Пересчёт, а не приращение, по той же причине, что и completedOrders выше.
+ * Возвращает null, не трогая базу, если анкеты больше нет.
+ */
+export async function recomputeRating(
+  masterId: string,
+): Promise<{ rating: number | null; reviewsCount: number } | null> {
+  const db = getFirestore();
+  const masterRef = db.doc(`masters/${masterId}`);
+
+  const reviews = await db.collection(`masters/${masterId}/reviews`).get();
+  const stars = reviews.docs
+    .filter((d) => d.get('hidden') !== true)
+    .map((d) => Number(d.get('stars')))
+    .filter((n) => Number.isFinite(n) && n >= 1 && n <= 5);
+
+  const value = stars.length
+    ? {
+        // Округляем до десятых: показываем всё равно «4,8»
+        rating: Math.round((stars.reduce((acc, n) => acc + n, 0) / stars.length) * 10) / 10,
+        reviewsCount: stars.length,
+      }
+    : { rating: null, reviewsCount: 0 };
+
+  return db.runTransaction(async (tx) => {
+    const master = await tx.get(masterRef);
+    if (!master.exists) return null;
+    tx.set(masterRef, value, { merge: true });
+    return value;
+  });
+}

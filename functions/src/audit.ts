@@ -39,6 +39,19 @@ export type AuditAction =
   | 'master.offers_dropped'
   // отзывы
   | 'review.created'
+  | 'review.hidden'
+  | 'review.unhidden'
+  // жалобы
+  | 'complaint.created'
+  | 'complaint.resolved'
+  // решения модератора
+  | 'order.force_closed'
+  | 'order.force_cancelled'
+  | 'user.blocked'
+  | 'user.unblocked'
+  | 'master.blocked'
+  | 'master.unblocked'
+  | 'admin.user_lookup'
   // привязка карты
   | 'binding.started'
   | 'binding.settled'
@@ -58,7 +71,8 @@ export type AuditAction =
   | 'reconcile.started'
   | 'reconcile.finished'
   | 'reconcile.skipped'
-  | 'reminders.finished';
+  | 'reminders.finished'
+  | 'dashboard.updated';
 
 export type AuditActor =
   /** Действие инициировал человек из приложения */
@@ -69,7 +83,7 @@ export type AuditActor =
   | { type: 'system'; uid: null };
 
 export type AuditSubject = {
-  type: 'order' | 'master' | 'user' | 'payment' | 'system';
+  type: 'order' | 'master' | 'user' | 'payment' | 'complaint' | 'system';
   id: string;
 };
 

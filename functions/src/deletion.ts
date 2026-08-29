@@ -17,11 +17,12 @@ import { audit, SYSTEM } from './audit';
 // историей расчётов, — но имя, адрес, комментарий и фотография из них уходят.
 
 export type DeletionStage =
-  'orders' | 'threads' | 'verification' | 'master' | 'profile' | 'auth' | 'done';
+  'orders' | 'threads' | 'complaints' | 'verification' | 'master' | 'profile' | 'auth' | 'done';
 
 const ORDER: DeletionStage[] = [
   'orders',
   'threads',
+  'complaints',
   'verification',
   'master',
   'profile',
@@ -99,17 +100,26 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
       await deleteAll(t.ref.collection('messages'));
       await t.ref.delete();
     }
+    await advance('complaints');
+  }
+
+  // 3. Жалобы на отзывы: их текст — свободный текст автора и умирает вместе
+  //    с ним. Жалобы на отзывы, написанные этим человеком о других, остаются:
+  //    они принадлежат пожаловавшимся мастерам.
+  if (!reached(stage, 'complaints')) {
+    const complaints = await db.collection('complaints').where('byUid', '==', uid).get();
+    for (const d of complaints.docs) await d.ref.delete();
     await advance('verification');
   }
 
-  // 3. Заявка на проверку и снимок лица — самое чувствительное
+  // 4. Заявка на проверку и снимок лица — самое чувствительное
   if (!reached(stage, 'verification')) {
     await deleteAll(db.collection(`masters/${uid}/verification`));
     await deletePrefix(`verification/${uid}/`);
     await advance('master');
   }
 
-  // 4. Анкета мастера. Отзывы о нём остаются: они принадлежат клиентам,
+  // 5. Анкета мастера. Отзывы о нём остаются: они принадлежат клиентам,
   //    которые их написали, и к персональным данным мастера не относятся.
   if (!reached(stage, 'master')) {
     await deleteAll(db.collection(`masters/${uid}/reviews`));
@@ -117,13 +127,13 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
     await advance('profile');
   }
 
-  // 5. Профиль со всем поддеревом
+  // 6. Профиль со всем поддеревом
   if (!reached(stage, 'profile')) {
     await db.recursiveDelete(db.doc(`users/${uid}`));
     await advance('auth');
   }
 
-  // 6. Сам аккаунт — последним. Клиент мог удалить его сам, тогда его уже нет.
+  // 7. Сам аккаунт — последним. Клиент мог удалить его сам, тогда его уже нет.
   if (!reached(stage, 'auth')) {
     try {
       await getAuth().deleteUser(uid);
