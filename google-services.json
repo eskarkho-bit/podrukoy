@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "380253738862",
+    "project_id": "domio-7ad1c",
+    "storage_bucket": "domio-7ad1c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:380253738862:android:15290f57b793631075137f",
+        "android_client_info": {
+          "package_name": "com.anonymous.podrukoy2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCzfbZu6r92gruQ7r7TQG8RwtK23gm_OiA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:380253738862:android:2d0679bb1bd4e8a375137f",
+        "android_client_info": {
+          "package_name": "com.domio.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCzfbZu6r92gruQ7r7TQG8RwtK23gm_OiA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
