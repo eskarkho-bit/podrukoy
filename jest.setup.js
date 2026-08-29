@@ -9,6 +9,7 @@
 // здесь нечего. Поведение базы проверяется на эмуляторе (npm run test:rules),
 // а сюда попадают функции, которые про базу ничего не знают.
 jest.mock('firebase/functions', () => ({
+  connectFunctionsEmulator: jest.fn(),
   httpsCallable: jest.fn(() => jest.fn(async () => ({ data: {} }))),
   getFunctions: jest.fn(),
 }));
@@ -18,8 +19,10 @@ jest.mock('firebase/firestore', () => ({
   arrayUnion: jest.fn(),
   collection: jest.fn(),
   collectionGroup: jest.fn(),
+  connectFirestoreEmulator: jest.fn(),
   deleteDoc: jest.fn(),
   doc: jest.fn(() => ({ id: 'doc' })),
+  getCountFromServer: jest.fn(async () => ({ data: () => ({ count: 0 }) })),
   getDoc: jest.fn(async () => ({ exists: () => false, data: () => undefined })),
   getDocs: jest.fn(async () => ({ docs: [] })),
   getFirestore: jest.fn(),
@@ -29,6 +32,7 @@ jest.mock('firebase/firestore', () => ({
   query: jest.fn(),
   serverTimestamp: jest.fn(),
   setDoc: jest.fn(),
+  startAfter: jest.fn(),
   updateDoc: jest.fn(),
   where: jest.fn(),
   writeBatch: jest.fn(() => ({ set: jest.fn(), update: jest.fn(), commit: jest.fn() })),
@@ -36,6 +40,7 @@ jest.mock('firebase/firestore', () => ({
 
 jest.mock('firebase/auth', () => ({
   EmailAuthProvider: { credential: jest.fn() },
+  connectAuthEmulator: jest.fn(),
   createUserWithEmailAndPassword: jest.fn(),
   deleteUser: jest.fn(),
   getAuth: jest.fn(),

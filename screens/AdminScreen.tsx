@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Image,
   KeyboardAvoidingView,
@@ -22,51 +22,23 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import {
-  collection,
-  collectionGroup,
-  doc,
-  getDoc,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  where,
-  writeBatch,
-} from 'firebase/firestore';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
 import { FONTS } from '../components/typography';
 import { Glyph, themedIconColors } from '../components/glyphIcons';
-import { useAuth } from '../components/AuthState';
-import { useAppState } from '../components/AppState';
 import { counted, rub } from '../components/format';
-import { firestoreErrorText } from '../components/firestoreError';
 import { settlementLabel } from '../components/cities';
-import { loadAdminStats, MAIN_CITIES, type AdminStats } from '../components/adminStats';
-import { db } from '../firebaseConfig';
+import { MAIN_CITIES, type AdminStats } from '../components/adminStats';
+import { useAdminState, type Pending, type SupportMessage } from '../components/AdminState';
 
 // Модерация мастеров. Открыта только владельцам документа admins/{uid} —
 // завести его можно лишь в консоли Firebase, из приложения нельзя.
 //
 // Смысл экрана: к клиенту домой едет живой человек, и приложение обязано
 // знать, кто это. Пока заявка не одобрена, мастер не видит ни одной заявки.
-
-type Pending = {
-  uid: string;
-  name: string;
-  cities: string[];
-  skills: string[];
-  phone: string;
-  about: string;
-  photoUrl: string | null;
-  cardLast4: string | null;
-  cardBrand: string | null;
-  /** Когда подана — чтобы видеть, что залежалось */
-  appliedMs: number | null;
-};
+//
+// Данные и записи — только через AdminState: экран о Firestore не знает.
 
 type Props = {
   open: boolean;
@@ -77,59 +49,19 @@ type Props = {
 // ждёт допуска и не может работать
 const STALE_MS = 24 * 60 * 60 * 1000;
 
-// Обращение в поддержку. Живёт в поддереве пользователя; модератору правила
-// открывают ровно его — превью лежит в самом треде, чтобы список не читал
-// сообщения каждого обращения.
-type SupportThread = {
-  uid: string;
-  lastText: string;
-  /** 'user' — клиент ждёт ответа, 'master' — последним отвечала поддержка */
-  lastFrom: 'user' | 'master';
-  updatedMs: number | null;
-};
-
-type SupportMessage = { id: string; from: 'user' | 'master'; text: string; time: string };
-
-// Сколько обращений держим в списке. Старее полусотни — уже архив,
-// а не очередь на ответ.
-const SUPPORT_LIMIT = 50;
-
-function now() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 export function AdminScreen({ open, onClose }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
-  const { user } = useAuth();
-  const { isAdmin, showNotice } = useAppState();
-  const [items, setItems] = useState<Pending[]>([]);
+  const {
+    pending: items,
+    decide,
+    stats,
+    refreshing,
+    refreshStats,
+    supportThreads,
+  } = useAdminState();
   const [busyUid, setBusyUid] = useState<string | null>(null);
-  // Сводка не подписка, а разовый запрос: агрегатные запросы Firestore
-  // одноразовые, живого счётчика из них не выйдет. Обновляем при открытии
-  // раздела и жестом «потянуть вниз».
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  // Сводка — пять агрегирующих запросов. Функцию закрепляем, иначе она
-  // пересоздавалась бы каждую отрисовку и эффект считал бы всё заново.
-  const refreshStats = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      setStats(await loadAdminStats());
-    } catch (e) {
-      console.warn('Сводка недоступна:', e);
-      showNotice(firestoreErrorText(e, 'Не удалось посчитать сводку'));
-    }
-    setRefreshing(false);
-  }, [showNotice]);
-
-  useEffect(() => {
-    if (!open || !isAdmin) return;
-    refreshStats();
-  }, [open, isAdmin, refreshStats]);
+  const [openSupportUid, setOpenSupportUid] = useState<string | null>(null);
 
   // Оверлей выезжает справа. Значения ведём из эффекта, а не изнутри стиля:
   // экран перерисовывается на каждом изменении очереди, и анимация в стиле
@@ -152,102 +84,10 @@ export function AdminScreen({ open, onClose }: Props) {
   const firstBatch = !listShown.current;
   if (items.length) listShown.current = true;
 
-  // Обращения в поддержку: по группе коллекций, свежие сверху. Фильтр по
-  // kind обязателен — без него правила отклоняют запрос целиком.
-  const [supportThreads, setSupportThreads] = useState<SupportThread[]>([]);
-  const [openSupportUid, setOpenSupportUid] = useState<string | null>(null);
-  useEffect(() => {
-    if (!open || !isAdmin) return;
-    return onSnapshot(
-      query(
-        collectionGroup(db, 'threads'),
-        where('kind', '==', 'support'),
-        orderBy('updatedAt', 'desc'),
-        limit(SUPPORT_LIMIT),
-      ),
-      (snap) => {
-        setSupportThreads(
-          snap.docs.flatMap((d) => {
-            const uid = d.ref.parent.parent?.id;
-            if (!uid) return [];
-            const v = d.data();
-            return [
-              {
-                uid,
-                lastText: String(v.lastText ?? ''),
-                lastFrom: v.lastFrom === 'master' ? ('master' as const) : ('user' as const),
-                updatedMs: v.updatedAt?.toMillis?.() ?? null,
-              },
-            ];
-          }),
-        );
-      },
-      (e) => console.warn('Обращения в поддержку недоступны:', e),
-    );
-  }, [open, isAdmin]);
-
-  // Очередь: заявки во всех анкетах сразу, поэтому запрос по группе коллекций
-  useEffect(() => {
-    if (!open || !isAdmin) return;
-    return onSnapshot(
-      query(collectionGroup(db, 'verification'), where('status', '==', 'pending')),
-      async (snap) => {
-        // Имя, город и специальности лежат в самой анкете, а не в заявке:
-        // дублировать их незачем, а модератору они нужны
-        const rows = await Promise.all(
-          snap.docs.map(async (d) => {
-            const uid = d.ref.parent.parent?.id;
-            if (!uid) return null;
-            const v = d.data();
-            const profile = await getDoc(doc(db, 'masters', uid)).catch(() => null);
-            return {
-              uid,
-              name: String(profile?.get('name') ?? 'Без имени'),
-              cities: Array.isArray(profile?.get('cities'))
-                ? profile.get('cities')
-                : profile?.get('city')
-                  ? [String(profile.get('city'))]
-                  : [],
-              skills: Array.isArray(profile?.get('skills')) ? profile.get('skills') : [],
-              phone: String(v.phone ?? ''),
-              about: String(v.about ?? ''),
-              photoUrl: typeof v.photoUrl === 'string' ? v.photoUrl : null,
-              cardLast4: typeof v.cardLast4 === 'string' ? v.cardLast4 : null,
-              cardBrand: typeof v.cardBrand === 'string' ? v.cardBrand : null,
-              appliedMs: v.appliedAt?.toMillis?.() ?? null,
-            } as Pending;
-          }),
-        );
-        setItems(rows.filter((r): r is Pending => r !== null));
-      },
-      (e) => console.warn('Очередь модерации недоступна:', e),
-    );
-  }, [open, isAdmin]);
-
-  // Одобрение — два документа одним пакетом: флаг доступа и вердикт по заявке.
-  // Порознь они могли бы разъехаться, и мастер остался бы «одобренным» без
-  // доступа или наоборот.
-  const decide = async (uid: string, approved: boolean, reason: string) => {
-    if (!user) return;
+  const decideCard = async (uid: string, approved: boolean, reason: string) => {
     setBusyUid(uid);
-    try {
-      const batch = writeBatch(db);
-      if (approved) {
-        batch.update(doc(db, 'masters', uid), { verified: true });
-      }
-      batch.update(doc(db, 'masters', uid, 'verification', 'application'), {
-        status: approved ? 'approved' : 'rejected',
-        rejectionReason: approved ? null : reason.trim() || 'Причина не указана',
-        reviewedAt: serverTimestamp(),
-        reviewedBy: user.uid,
-      });
-      await batch.commit();
-    } catch (e) {
-      console.warn('Не удалось вынести решение:', e);
-      showNotice(firestoreErrorText(e, 'Не удалось сохранить решение'));
-    } finally {
-      setBusyUid(null);
-    }
+    await decide(uid, approved, reason);
+    setBusyUid(null);
   };
 
   return (
@@ -297,7 +137,7 @@ export function AdminScreen({ open, onClose }: Props) {
             <PendingCard
               item={item}
               busy={busyUid === item.uid}
-              onDecide={(approved, reason) => decide(item.uid, approved, reason)}
+              onDecide={(approved, reason) => decideCard(item.uid, approved, reason)}
             />
           </Animated.View>
         ))}
@@ -366,58 +206,21 @@ export function AdminScreen({ open, onClose }: Props) {
 function SupportChat({ uid, onBack }: { uid: string; onBack: () => void }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
-  const { showNotice } = useAppState();
+  const { watchSupportChat, sendSupportReply } = useAdminState();
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
-  useEffect(() => {
-    return onSnapshot(
-      query(collection(db, 'users', uid, 'threads', 'support', 'messages'), orderBy('createdAt')),
-      (snap) => {
-        setMessages(
-          snap.docs.map((m) => {
-            const v = m.data();
-            return {
-              id: m.id,
-              from: v.from === 'user' ? ('user' as const) : ('master' as const),
-              text: String(v.text ?? ''),
-              time: String(v.time ?? ''),
-            };
-          }),
-        );
-      },
-      (e) => console.warn('Переписка поддержки недоступна:', e),
-    );
-  }, [uid]);
+  useEffect(() => watchSupportChat(uid, setMessages), [uid, watchSupportChat]);
 
   const send = async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
-    try {
-      // Сообщение и превью в треде — одним пакетом: порознь список обращений
-      // мог бы показывать не то, что лежит в переписке
-      const batch = writeBatch(db);
-      batch.set(doc(collection(db, 'users', uid, 'threads', 'support', 'messages')), {
-        from: 'master',
-        text: trimmed,
-        time: now(),
-        createdAt: serverTimestamp(),
-      });
-      batch.update(doc(db, 'users', uid, 'threads', 'support'), {
-        unread: true,
-        lastText: trimmed,
-        lastFrom: 'master',
-        updatedAt: serverTimestamp(),
-      });
-      await batch.commit();
+    if (await sendSupportReply(uid, trimmed)) {
       setText('');
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
-    } catch (e) {
-      console.warn('Ответ не отправлен:', e);
-      showNotice(firestoreErrorText(e, 'Ответ не отправлен. Проверьте связь'));
     }
     setSending(false);
   };

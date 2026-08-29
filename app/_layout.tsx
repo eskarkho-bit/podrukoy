@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ReduceMotion, ReducedMotionConfig } from 'react-native-reanimated';
+import { AdminStateProvider } from '../components/AdminState';
 import { AppStateProvider, useAppState } from '../components/AppState';
 import { AuthProvider, useAuth } from '../components/AuthState';
 import { ConsentGate } from '../components/ConsentGate';
@@ -122,8 +123,14 @@ function RootShell() {
       {user && <MasterScreen open={masterOpen} onClose={() => setMasterOpen(false)} />}
 
       {/* Модерация — такой же оверлей. Монтируется только у модераторов:
-          у остальных правила всё равно не дадут прочитать очередь. */}
-      {user && isAdmin && <AdminScreen open={adminOpen} onClose={() => setAdminOpen(false)} />}
+          у остальных правила всё равно не дадут прочитать очередь. Данные
+          админки живут в собственном провайдере, а не в AppState: их код
+          не должен ездить у каждого пользователя. */}
+      {user && isAdmin && (
+        <AdminStateProvider open={adminOpen}>
+          <AdminScreen open={adminOpen} onClose={() => setAdminOpen(false)} />
+        </AdminStateProvider>
+      )}
 
       {/* Поверх всего, кроме сообщения о сбое: без действующего согласия
           пользоваться сервисом нельзя вообще */}

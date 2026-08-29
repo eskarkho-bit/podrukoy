@@ -43,3 +43,34 @@ export function firestoreErrorText(e: unknown, fallback: string): string {
       return fallback;
   }
 }
+
+/**
+ * Текст ошибки вызова Cloud Function.
+ *
+ * Наши функции бросают HttpsError с русским сообщением — его и показываем:
+ * «Укажите причину» с сервера точнее любой заготовки. Кириллица в message —
+ * признак нашего текста; всё остальное (сеть, неразвёрнутые функции,
+ * внутренние сбои) переводится по коду.
+ */
+export function callableErrorText(e: unknown, fallback: string): string {
+  const message =
+    typeof e === 'object' && e && 'message' in e ? String((e as { message: unknown }).message) : '';
+  if (/[а-яё]/i.test(message)) return message;
+
+  // Код приходит с префиксом functions/ — убираем, чтобы таблица была одна
+  switch (firestoreErrorCode(e).replace(/^functions\//, '')) {
+    case 'unauthenticated':
+      return 'Сессия истекла — войдите заново';
+    case 'permission-denied':
+      return 'Требуются права модератора';
+    case 'unavailable':
+    case 'internal':
+    case 'deadline-exceeded':
+      // Самая вероятная причина до запуска — функции ещё не развёрнуты
+      return 'Сервер не ответил. Возможно, функции ещё не развёрнуты — нужен firebase deploy';
+    case 'resource-exhausted':
+      return 'Слишком много запросов. Попробуйте через несколько минут';
+    default:
+      return fallback;
+  }
+}

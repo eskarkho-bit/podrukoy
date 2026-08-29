@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from 'firebase/app';
-import { Auth, browserLocalPersistence, initializeAuth } from 'firebase/auth';
-import { collection, doc, getFirestore } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
+import { Auth, browserLocalPersistence, connectAuthEmulator, initializeAuth } from 'firebase/auth';
+import { collection, connectFirestoreEmulator, doc, getFirestore } from 'firebase/firestore';
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
 import { Platform } from 'react-native';
 
@@ -56,3 +56,18 @@ function createAuth(): Auth {
 }
 
 export const auth = createAuth();
+
+// ---------- локальный контур ----------
+//
+// EXPO_PUBLIC_USE_EMULATOR=1 в .env переключает приложение на эмуляторы:
+// так сценарий «мастер подал анкету → админ одобрил → мастер видит ленту»
+// проходится целиком без боевого проекта. Хост задаётся отдельно
+// (EXPO_PUBLIC_EMULATOR_HOST): с телефона localhost — это сам телефон,
+// нужен адрес компьютера в сети. Запуск: firebase emulators:start
+// --only firestore,auth,functions --project demo-domio
+if (process.env.EXPO_PUBLIC_USE_EMULATOR === '1') {
+  const host = process.env.EXPO_PUBLIC_EMULATOR_HOST ?? '127.0.0.1';
+  connectFirestoreEmulator(db, host, 8080);
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, host, 5001);
+}
