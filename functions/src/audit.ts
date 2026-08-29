@@ -94,12 +94,9 @@ export type AuditDetails = Record<string, string | number | boolean | null>;
 // проверку.
 //
 // Поле expiresAt проставляется всегда, но само удаление делает Firestore по
-// TTL-политике, а она требует включённого биллинга. Пока его нет, политику не
-// выкатить (деплой падает с 403), и записи копятся. Как подключите Blaze —
-// вернуть в firestore.indexes.json:
-//
-//   { "collectionGroup": "audit", "fieldPath": "expiresAt",
-//     "ttl": true, "indexes": [] }
+// TTL-политике из firestore.indexes.json. Она требует включённого биллинга:
+// без него деплой индексов падает с 403, и на бесплатном тарифе её строку
+// пришлось бы временно убирать из fieldOverrides.
 //
 // До тех пор поле лежит без дела и ничего не ломает.
 const RETENTION_DAYS = 400;
