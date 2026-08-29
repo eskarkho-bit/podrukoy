@@ -98,17 +98,18 @@ async function sendSms(apiId: string, phone: string, text: string): Promise<void
 
   const json = (await res.json().catch(() => ({}))) as {
     status?: string;
-    sms?: Record<string, { status?: string; status_code?: number }>;
+    sms?: Record<string, { status?: string; status_code?: number; status_text?: string }>;
   };
 
   // Провайдер отвечает 200 даже на отказ — смотреть надо в статус по номеру
   const perNumber = json.sms?.[to];
   if (!res.ok || json.status !== 'OK' || perNumber?.status !== 'OK') {
-    // Номера в логе нет — только коды, по ним видно «нет денег» или «оператор отбил»
+    // Номера в логе нет — только коды и словесная причина провайдера
     logger.error('СМС не отправлена', {
       httpStatus: res.status,
       providerStatus: json.status ?? null,
       smsStatusCode: perNumber?.status_code ?? null,
+      smsStatusText: perNumber?.status_text ?? null,
     });
     throw new Error('sms-provider-failed');
   }
@@ -134,15 +135,18 @@ async function requestCall(apiId: string, phone: string): Promise<string> {
   const json = (await res.json().catch(() => ({}))) as {
     status?: string;
     status_code?: number;
+    status_text?: string;
     code?: number | string;
   };
 
   if (!res.ok || json.status !== 'OK' || json.code == null) {
-    // Номера в логе нет — только коды провайдера
+    // Номера в логе нет — только коды и словесная причина провайдера:
+    // «лимит звонков», «нет денег» и т.п. Без неё отказ анонимен.
     logger.error('Звонок с кодом не заказан', {
       httpStatus: res.status,
       providerStatus: json.status ?? null,
       providerStatusCode: json.status_code ?? null,
+      providerStatusText: json.status_text ?? null,
     });
     throw new Error('call-provider-failed');
   }
