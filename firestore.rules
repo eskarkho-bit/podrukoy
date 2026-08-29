@@ -28,11 +28,28 @@ service cloud.firestore {
     // masters/{uid} может завести любой, а вместе с ним получить имена,
     // адреса и фотографии квартир всех клиентов города. Доступ к заявкам
     // даёт только флаг verified, который ставит модератор.
+    //
+    // Блокировка сильнее допуска: заблокированный мастер теряет ленту и
+    // право предлагать цену, даже если verified остался. Оба поля лежат в
+    // одном документе, поэтому второй get бесплатен — чтение засчитывается
+    // один раз. Уже назначенная работа при этом не отнимается: за неё
+    // отвечает isAssignedMaster, бросать клиента посреди ремонта нельзя.
     function isVerifiedMaster() {
       return authed()
         && exists(/databases/$(database)/documents/masters/$(request.auth.uid))
         && get(/databases/$(database)/documents/masters/$(request.auth.uid))
-             .data.get('verified', false) == true;
+             .data.get('verified', false) == true
+        && get(/databases/$(database)/documents/masters/$(request.auth.uid))
+             .data.get('blocked', false) != true;
+    }
+
+    // Заблокированный клиент не создаёт заявок. Отсутствие профиля
+    // блокировкой не считается: заявку можно подать сразу после регистрации,
+    // пока подписка ещё не завела документ.
+    function notBlockedClient() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        || get(/databases/$(database)/documents/users/$(request.auth.uid))
+             .data.get('blocked', false) != true;
     }
 
     // Список модераторов: человек может проверить, что он в нём, но менять
@@ -91,14 +108,33 @@ service cloud.firestore {
       return p is number && p > 0 && p <= 10000000;
     }
 
-    // Профиль клиента: имя, адреса, город, настройки. Виден только владельцу.
+    // Профиль клиента: имя, адреса, город, настройки. Читают владелец и
+    // модератор: модератору профиль нужен целиком — карточка пользователя,
+    // флаг блокировки, телефон для поиска. Это сознательный разворот прежнего
+    // решения «админ не видит клиента» — см. раздел «Роль модератора»
+    // в ARCHITECTURE.md.
     match /users/{uid} {
-      allow read, write: if isOwner(uid);
+      allow read: if isOwner(uid) || isAdmin();
+
+      // Блокировку и её причину пишет только сервер. Проверяется diff, а не
+      // значения: частичный updateDoc флаг не трогает и проходит, а вот
+      // setDoc без merge, «теряющий» blocked, обязан быть отклонён — иначе
+      // владелец снял бы ограничение перезаписью профиля.
+      allow create: if isOwner(uid)
+        && !request.resource.data.keys().hasAny(['blocked', 'blockedReason']);
+      allow update: if isOwner(uid)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['blocked', 'blockedReason']);
+      allow delete: if isOwner(uid);
 
       // Личные подколлекции пользователя — переписка с поддержкой
       // (users/{uid}/threads/{id}/messages). Правила не наследуются вглубь
       // автоматически, поэтому поддерево описано явно.
-      match /{document=**} {
+      //
+      // Первый сегмент выделен нарочно: в rules v2 голый {document=**}
+      // матчит и ноль сегментов, то есть накрыл бы сам документ профиля —
+      // и владелец снял бы себе blocked через это правило.
+      match /{sub}/{document=**} {
         allow read, write: if isOwner(uid);
       }
 
@@ -111,10 +147,18 @@ service cloud.firestore {
 
         // Пометки при ответе: непрочитанность у клиента и превью для списка
         // обращений. Имя и иконку треда модератор не переписывает.
+        //
+        // supportStatus — рабочий статус обращения у модератора. Известный
+        // компромисс: владелец треда через правило своего поддерева может
+        // выставить его и сам; худший случай — клиент закрыл собственное
+        // обращение, это безобидно.
         allow update: if isAdmin() && threadId == 'support'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'unread', 'updatedAt', 'lastText', 'lastFrom',
-          ]);
+            'unread', 'updatedAt', 'lastText', 'lastFrom', 'supportStatus',
+          ])
+          && (!request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['supportStatus'])
+            || request.resource.data.supportStatus in ['новое', 'в работе', 'закрыто']);
 
         match /messages/{messageId} {
           allow read: if isAdmin() && threadId == 'support';
@@ -263,7 +307,8 @@ service cloud.firestore {
         allow read: if authed();
 
         // Оставить отзыв может только клиент завершённой заявки и только тому
-        // мастеру, который её делал
+        // мастеру, который её делал. Пометку о скрытии ставит только сервер
+        // по решению модератора — подсунуть её при создании нельзя.
         allow create: if authed()
           && order().clientId == request.auth.uid
           && order().get('masterId', null) == uid
@@ -274,7 +319,8 @@ service cloud.firestore {
           && request.resource.data.stars >= 1
           && request.resource.data.stars <= 5
           && request.resource.data.text is string
-          && request.resource.data.text.size() <= 1000;
+          && request.resource.data.text.size() <= 1000
+          && !request.resource.data.keys().hasAny(['hidden', 'hiddenAt', 'hiddenBy']);
 
         // Отзыв не переписывается и не удаляется: иначе рейтинг можно было бы
         // менять задним числом, договорившись с мастером
@@ -326,7 +372,11 @@ service cloud.firestore {
       // preferredMasterId — просьба показать заявку прошлому мастеру первым
       // (кнопка «Повторить»): ставится один раз при создании, дальше не
       // меняется — clientFields() его не пропускает.
+      // Кроме телефонов клиент не может подсунуть и другие серверные поля:
+      // firstOfferAt — метрика скорости откликов, closedByAdmin с причиной —
+      // след принудительного закрытия; их пишут только функции.
       allow create: if authed()
+        && notBlockedClient()
         && request.resource.data.clientId == request.auth.uid
         && request.resource.data.status == 'Поиск мастера'
         && request.resource.data.masterId == null
@@ -334,7 +384,10 @@ service cloud.firestore {
         && request.resource.data.reviewed == false
         && request.resource.data.city is string
         && validCategory(request.resource.data.category)
-        && !request.resource.data.keys().hasAny(['masterPhone', 'clientPhone'])
+        && !request.resource.data.keys().hasAny([
+          'masterPhone', 'clientPhone',
+          'firstOfferAt', 'closedByAdmin', 'adminCloseReason',
+        ])
         && (request.resource.data.get('preferredMasterId', null) == null
           || request.resource.data.preferredMasterId is string);
 
@@ -344,7 +397,13 @@ service cloud.firestore {
       //
       // Именно здесь проверка verified важнее всего: в заявке лежат имя,
       // адрес и фотография жилья. Незаполненная анкета доступа не даёт.
-      allow read: if isClient() || isAssignedMaster() || (isVerifiedMaster() && isOpen());
+      //
+      // Модератор читает любую заявку: он разбирает споры и принудительно
+      // закрывает зависшие сделки, для этого нужен полный контекст. Писать
+      // в заявки он при этом не может ничего — закрытие идёт только через
+      // Cloud Function с проверкой прав на сервере.
+      allow read: if isClient() || isAssignedMaster()
+        || (isVerifiedMaster() && isOpen()) || isAdmin();
 
       // Заявки не удаляются, а переводятся в статус «Отменена»
       allow delete: if false;
@@ -488,10 +547,13 @@ service cloud.firestore {
             && order().get('masterId', null) == null;
         }
 
-        // Видят клиент заявки и сам мастер. Другие мастера — нет: знать чужие
-        // цены до собственного предложения им не нужно.
+        // Видят клиент заявки, сам мастер и модератор (для разбора споров).
+        // Другие мастера — нет: знать чужие цены до собственного предложения
+        // им не нужно.
         allow read: if authed()
-          && (request.auth.uid == masterId || order().clientId == request.auth.uid);
+          && (request.auth.uid == masterId
+            || order().clientId == request.auth.uid
+            || isAdmin());
 
         allow create, update: if isVerifiedMaster()
           && request.auth.uid == masterId
@@ -532,7 +594,10 @@ service cloud.firestore {
           );
         }
 
-        allow read: if isParty();
+        // Модератор переписку читает (разбор спора — это в первую очередь
+        // чтение диалога), но писать в неё не может: голос в чужой сделке
+        // ему не принадлежит.
+        allow read: if isParty() || isAdmin();
         allow create: if isParty()
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
@@ -554,6 +619,43 @@ service cloud.firestore {
     // Очередь модерации: collectionGroup('verification').where('status','==','pending')
     match /{path=**}/verification/{docId} {
       allow read: if isAdmin();
+    }
+
+    // Отзывы одного клиента по всем мастерам — карточка пользователя в
+    // модерации: collectionGroup('reviews').where('clientId','==',uid).
+    // Только модератору; обычные читатели ходят по прямому пути в анкете.
+    match /{path=**}/reviews/{orderId} {
+      allow read: if isAdmin();
+    }
+
+    // Жалобы на отзывы.
+    //
+    // Подаёт мастер, у которого отзыв на странице; вердикт («решена» /
+    // «отклонена») выносит только сервер по вызову модератора — руками
+    // статус не меняет никто, включая самого модератора: иначе журнал
+    // фиксировал бы не все решения.
+    match /complaints/{complaintId} {
+      allow create: if authed()
+        && request.resource.data.byUid == request.auth.uid
+        && request.resource.data.subjectType == 'review'
+        && request.resource.data.masterId is string
+        && request.resource.data.orderId is string
+        && request.resource.data.reviewClientId is string
+        && request.resource.data.text is string
+        && request.resource.data.text.size() >= 1
+        && request.resource.data.text.size() <= 1000
+        && request.resource.data.status == 'новая'
+        && request.resource.data.createdAt == request.time
+        && !request.resource.data.keys().hasAny([
+          'resolvedAt', 'resolvedBy', 'resolutionNote',
+        ]);
+
+      // Автор видит свои жалобы (запрос обязан фильтровать по byUid),
+      // модератор — все
+      allow read: if isAdmin()
+        || (authed() && resource.data.byUid == request.auth.uid);
+
+      allow update, delete: if false;
     }
 
     // Сводные числа по заявкам: медиана чека и разброс.

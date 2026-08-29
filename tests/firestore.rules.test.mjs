@@ -151,6 +151,21 @@ beforeEach(async () => {
       status: 'pending',
     });
 
+    // Заблокированные сервером: мастер с сохранившимся verified и клиент,
+    // которому закрыто создание заявок. Оба флага пишет только Admin SDK.
+    await setDoc(doc(db, 'masters/blockedMaster'), {
+      name: 'Отстранённый',
+      city: 'москва',
+      skills: ['электрика'],
+      verified: true,
+      blocked: true,
+    });
+    await setDoc(doc(db, 'users/blockedClient'), {
+      name: 'Нарушитель',
+      blocked: true,
+      blockedReason: 'Оскорбления в переписке',
+    });
+
     await setDoc(doc(db, 'orders/open'), order());
     await setDoc(doc(db, 'orders/open/offers/master1'), offer());
 
@@ -170,6 +185,17 @@ beforeEach(async () => {
         masterName: 'Иван',
         status: 'Завершена',
         agreedPrice: 3500,
+      }),
+    );
+    // Работа, начатая до блокировки мастера: бросать клиента посреди
+    // ремонта нельзя, доступ к ней сохраняется
+    await setDoc(
+      doc(db, 'orders/blockedWork'),
+      order({
+        masterId: 'blockedMaster',
+        masterName: 'Отстранённый',
+        status: 'В работе',
+        agreedPrice: 2000,
       }),
     );
     await setDoc(doc(db, 'orders/legacy'), legacyOrder());
@@ -247,6 +273,65 @@ describe('Создание заявки', () => {
     await assertSucceeds(setDoc(doc(as('client1'), 'orders/twice'), order()));
     await assertFails(setDoc(doc(as('client1'), 'orders/twice'), order()));
   });
+
+  // firstOfferAt считает сервер по первому предложению, closedByAdmin с
+  // причиной — след принудительного закрытия. Клиент, засеявший их при
+  // создании, испортил бы метрику и журнал спора.
+  test('нельзя подсунуть при создании серверные поля закрытия и метрики', async () => {
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/newS1'), order({ firstOfferAt: serverTimestamp() })),
+    );
+    await assertFails(
+      setDoc(
+        doc(as('client1'), 'orders/newS2'),
+        order({ closedByAdmin: true, adminCloseReason: 'сам себе закрыл' }),
+      ),
+    );
+  });
+});
+
+describe('Блокировка', () => {
+  // Блокировка — серверное решение по нарушителю. Мастер теряет ленту и
+  // право предлагать цену, клиент — создание новых заявок; уже идущая
+  // работа не отнимается — за неё отвечает isAssignedMaster.
+  test('заблокированный клиент не создаёт заявку', async () => {
+    await assertFails(
+      setDoc(doc(as('blockedClient'), 'orders/newBlocked'), order({ clientId: 'blockedClient' })),
+    );
+  });
+
+  test('заблокированный мастер не видит открытую заявку', async () => {
+    await assertFails(getDoc(doc(as('blockedMaster'), 'orders/open')));
+  });
+
+  test('заблокированный мастер не присылает предложение', async () => {
+    await assertFails(
+      setDoc(
+        doc(as('blockedMaster'), 'orders/open/offers/blockedMaster'),
+        offer({ masterId: 'blockedMaster', masterName: 'Отстранённый' }),
+      ),
+    );
+  });
+
+  test('заблокированный мастер продолжает видеть свою работу', async () => {
+    await assertSucceeds(getDoc(doc(as('blockedMaster'), 'orders/blockedWork')));
+  });
+
+  // Флаг пишет только сервер: иначе блокировка снималась бы правкой
+  // собственного профиля. Перезапись документа целиком, «теряющая» поле,
+  // тоже отклоняется — на это и смотрит diff в правиле.
+  test('владелец не может снять себе блокировку', async () => {
+    await assertFails(
+      updateDoc(doc(as('blockedClient'), 'users/blockedClient'), { blocked: false }),
+    );
+    await assertFails(setDoc(doc(as('blockedClient'), 'users/blockedClient'), { name: 'Чистый' }));
+  });
+
+  test('нельзя завести профиль сразу с полем блокировки', async () => {
+    await assertFails(
+      setDoc(doc(as('client2'), 'users/client2'), { name: 'Хитрец', blocked: false }),
+    );
+  });
 });
 
 describe('Фото заявки', () => {
@@ -306,9 +391,35 @@ describe('Кто видит заявку', () => {
   test('выбранный мастер свою заявку видит', async () => {
     await assertSucceeds(getDoc(doc(as('master1'), 'orders/working')));
   });
+
+  // Модератор разбирает споры и закрывает зависшие сделки — ему нужен
+  // полный контекст. Это осознанный разворот прежнего решения «админ не
+  // видит заявок», зафиксированный в ARCHITECTURE.md.
+  test('модератор читает любую заявку и список по статусу', async () => {
+    await assertSucceeds(getDoc(doc(as('admin1'), 'orders/working')));
+    await assertSucceeds(
+      getDocs(query(collection(as('admin1'), 'orders'), where('status', '==', 'В работе'))),
+    );
+  });
+
+  test('писать в заявку модератор не может — закрытие только через сервер', async () => {
+    await assertFails(updateDoc(doc(as('admin1'), 'orders/working'), { status: 'Отменена' }));
+    await assertFails(
+      updateDoc(doc(as('admin1'), 'orders/open'), {
+        closedByAdmin: true,
+        adminCloseReason: 'спор',
+      }),
+    );
+  });
 });
 
 describe('Предложения мастеров', () => {
+  // Модератору предложения нужны в карточке заявки при разборе спора
+  test('модератор видит предложение по заявке, чужой мастер — нет', async () => {
+    await assertSucceeds(getDoc(doc(as('admin1'), 'orders/open/offers/master1')));
+    await assertFails(getDoc(doc(as('master2'), 'orders/open/offers/master1')));
+  });
+
   test('мастер присылает своё предложение', async () => {
     await assertSucceeds(
       setDoc(
@@ -692,6 +803,25 @@ describe('Отзывы и рейтинг', () => {
     await assertSucceeds(updateDoc(doc(as('client1'), 'orders/finished'), { reviewed: true }));
     await assertFails(updateDoc(doc(as('master1'), 'orders/finished'), { reviewed: true }));
   });
+
+  // Пометку скрытия ставит только сервер по решению модератора: отзыв,
+  // рождённый сразу скрытым, обошёл бы и модерацию, и пересчёт рейтинга
+  test('пометку скрытия нельзя подсунуть при создании отзыва', async () => {
+    await assertFails(
+      setDoc(doc(as('client1'), 'masters/master1/reviews/finished'), review({ hidden: false })),
+    );
+  });
+
+  // Карточка пользователя в модерации: его отзывы по всем мастерам сразу
+  test('отзывы клиента по всем мастерам собирает только модератор', async () => {
+    await assertSucceeds(setDoc(doc(as('client1'), 'masters/master1/reviews/finished'), review()));
+    await assertSucceeds(
+      getDocs(query(collectionGroup(as('admin1'), 'reviews'), where('clientId', '==', 'client1'))),
+    );
+    await assertFails(
+      getDocs(query(collectionGroup(as('master1'), 'reviews'), where('clientId', '==', 'client1'))),
+    );
+  });
 });
 
 describe('Переписка по заявке', () => {
@@ -739,6 +869,15 @@ describe('Переписка по заявке', () => {
         collection(as('client1'), 'orders/working/messages'),
         message('client1', 'а'.repeat(2001)),
       ),
+    );
+  });
+
+  // Разбор спора — это чтение диалога; голос в чужой сделке модератору
+  // не принадлежит
+  test('модератор читает переписку, но не пишет в неё', async () => {
+    await assertSucceeds(getDocs(collection(as('admin1'), 'orders/working/messages')));
+    await assertFails(
+      addDoc(collection(as('admin1'), 'orders/working/messages'), message('admin1')),
     );
   });
 });
@@ -1255,6 +1394,15 @@ describe('Профиль пользователя', () => {
   test('чужую анкету удалить нельзя', async () => {
     await assertFails(deleteDoc(doc(as('master2'), 'masters/master1')));
   });
+
+  // Модератору профиль нужен целиком: карточка пользователя, флаг
+  // блокировки, телефон для поиска. Писать он в него не может ничего.
+  test('модератор читает чужой профиль, но не пишет в него', async () => {
+    await assertSucceeds(setDoc(doc(as('client1'), 'users/client1'), { name: 'Дмитрий' }));
+    await assertSucceeds(getDoc(doc(as('admin1'), 'users/client1')));
+    await assertFails(updateDoc(doc(as('admin1'), 'users/client1'), { name: 'Другое имя' }));
+    await assertFails(updateDoc(doc(as('admin1'), 'users/blockedClient'), { blocked: false }));
+  });
 });
 
 describe('Поддержка и модератор', () => {
@@ -1344,11 +1492,106 @@ describe('Поддержка и модератор', () => {
     );
   });
 
-  // Доступ дан треду поддержки, а не поддереву пользователя: остальное
-  // закрыто от модератора так же, как от любого постороннего
+  // Доступ дан треду поддержки, а не поддереву пользователя: остальные
+  // треды закрыты от модератора так же, как от любого постороннего.
+  // (Сам документ профиля модератор теперь читает — это отдельное правило
+  // с отдельными тестами в «Профиле пользователя».)
   test('личные треды пользователя модератору недоступны', async () => {
     await assertFails(getDoc(doc(as('admin1'), 'users/client1/threads/diary')));
     await assertFails(getDoc(doc(as('admin1'), 'users/client1/threads/diary/messages/m1')));
-    await assertFails(getDoc(doc(as('admin1'), 'users/client1')));
+  });
+
+  // Рабочий статус обращения: список значений закрыт, произвольная строка
+  // сломала бы фильтры в разделе модерации
+  test('модератор ставит статус обращения только из списка', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('admin1'), 'users/client1/threads/support'), {
+        supportStatus: 'в работе',
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(as('admin1'), 'users/client1/threads/support'), {
+        supportStatus: 'потерялось',
+      }),
+    );
+  });
+});
+
+describe('Жалобы на отзывы', () => {
+  const complaint = (patch = {}) => ({
+    byUid: 'master1',
+    subjectType: 'review',
+    masterId: 'master1',
+    orderId: 'finished',
+    reviewClientId: 'client1',
+    text: 'Отзыв не о моей работе',
+    status: 'новая',
+    createdAt: serverTimestamp(),
+    ...patch,
+  });
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'complaints/c1'), {
+        byUid: 'master1',
+        subjectType: 'review',
+        masterId: 'master1',
+        orderId: 'finished',
+        reviewClientId: 'client1',
+        text: 'Отзыв не о моей работе',
+        status: 'новая',
+        createdAt: new Date(),
+      });
+    });
+  });
+
+  test('мастер жалуется на отзыв о себе', async () => {
+    await assertSucceeds(addDoc(collection(as('master1'), 'complaints'), complaint()));
+  });
+
+  test('от чужого имени жалоба не подаётся', async () => {
+    await assertFails(addDoc(collection(as('master2'), 'complaints'), complaint()));
+  });
+
+  // Вердикт выносит только сервер: жалоба, рождённая сразу решённой,
+  // прошла бы мимо модератора и мимо журнала
+  test('жалобу нельзя подать сразу решённой', async () => {
+    await assertFails(
+      addDoc(collection(as('master1'), 'complaints'), complaint({ status: 'решена' })),
+    );
+    await assertFails(
+      addDoc(collection(as('master1'), 'complaints'), complaint({ resolvedBy: 'master1' })),
+    );
+  });
+
+  test('пустая и гигантская жалоба не проходят', async () => {
+    await assertFails(addDoc(collection(as('master1'), 'complaints'), complaint({ text: '' })));
+    await assertFails(
+      addDoc(collection(as('master1'), 'complaints'), complaint({ text: 'ж'.repeat(1001) })),
+    );
+  });
+
+  // Свои жалобы автор видит только запросом с фильтром по byUid — правила
+  // проверяются против запроса, а не результатов
+  test('автор видит свои жалобы, чужие и без фильтра — нет', async () => {
+    await assertSucceeds(
+      getDocs(query(collection(as('master1'), 'complaints'), where('byUid', '==', 'master1'))),
+    );
+    await assertFails(
+      getDocs(query(collection(as('master2'), 'complaints'), where('byUid', '==', 'master1'))),
+    );
+    await assertFails(getDocs(collection(as('master1'), 'complaints')));
+  });
+
+  test('модератор читает все жалобы', async () => {
+    await assertSucceeds(getDoc(doc(as('admin1'), 'complaints/c1')));
+    await assertSucceeds(getDocs(collection(as('admin1'), 'complaints')));
+  });
+
+  test('вердикт руками не ставит никто, включая модератора', async () => {
+    await assertFails(updateDoc(doc(as('master1'), 'complaints/c1'), { status: 'решена' }));
+    await assertFails(updateDoc(doc(as('admin1'), 'complaints/c1'), { status: 'решена' }));
+    await assertFails(deleteDoc(doc(as('admin1'), 'complaints/c1')));
   });
 });
