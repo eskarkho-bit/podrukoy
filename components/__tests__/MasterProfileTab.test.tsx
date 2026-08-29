@@ -13,6 +13,7 @@ const PROFILE: MasterProfile = {
   experienceYears: null,
   education: null,
   verified: true,
+  blocked: false,
   rating: null,
   reviewsCount: 0,
   completedOrders: 0,
@@ -29,6 +30,7 @@ function renderProfile(email: string) {
       onEdit={noop}
       onLogout={noop}
       onClose={noop}
+      onComplain={async () => true}
     />,
   );
 }

@@ -45,6 +45,7 @@ const DEMO_PROFILE: MasterProfile = {
   experienceYears: 9,
   education: 'среднее специальное',
   verified: true,
+  blocked: false,
   rating: 4.8,
   reviewsCount: 41,
   // 43 — чтобы витрина показывала и прогресс «до 50 заказов осталось 7»
@@ -221,6 +222,7 @@ const DEMO_MARKET: OrderStats = {
 const DEMO_REVIEWS: MasterReview[] = [
   {
     id: 'demo-r1',
+    clientId: 'demo-c1',
     clientName: 'Дмитрий',
     stars: 5,
     text: 'Повесил люстру за час, убрал за собой. Рекомендую!',
@@ -228,6 +230,7 @@ const DEMO_REVIEWS: MasterReview[] = [
   },
   {
     id: 'demo-r2',
+    clientId: 'demo-c2',
     clientName: 'Амина',
     stars: 5,
     text: 'Быстро нашёл причину, розетка больше не искрит.',
@@ -235,6 +238,7 @@ const DEMO_REVIEWS: MasterReview[] = [
   },
   {
     id: 'demo-r3',
+    clientId: 'demo-c3',
     clientName: 'Ибрагим',
     stars: 4,
     text: 'Сделал хорошо, но приехал на полчаса позже.',
@@ -242,6 +246,7 @@ const DEMO_REVIEWS: MasterReview[] = [
   },
   {
     id: 'demo-r4',
+    clientId: 'demo-c4',
     clientName: 'Хава',
     stars: 5,
     text: 'Аккуратный и вежливый мастер, всё объяснил.',
@@ -300,6 +305,7 @@ export function MasterDemoScreen() {
         <JobList
           email="demo@domio.app"
           profile={DEMO_PROFILE}
+          blockedReason={null}
           jobs={jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))}
           typingJobId={null}
           onOpenJob={setOpenJobId}
@@ -330,6 +336,7 @@ export function MasterDemoScreen() {
           profile={DEMO_PROFILE}
           reviews={DEMO_REVIEWS}
           onEdit={noop}
+          onComplain={async () => true}
           onLogout={noop}
           onClose={noop}
         />

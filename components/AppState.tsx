@@ -91,6 +91,10 @@ type AppState = {
   // отметка в профиле — способ попросить его молчать
   remindersOff: boolean;
   setRemindersOff: (off: boolean) => void;
+  // Блокировка модерацией: создание заявок закрыто правилами, а флаг из
+  // профиля позволяет сказать об этом до попытки, вместе с причиной
+  blocked: boolean;
+  blockedReason: string | null;
   setActiveAddress: (addr: string) => void;
   setCity: (city: string) => void;
   setChatOpen: (open: boolean) => void;
@@ -174,6 +178,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // Отказ от напоминаний о повторяемых работах. Отсутствие поля — согласие:
   // так напоминания работают и у тех, кто регистрировался до их появления
   const [remindersOff, setRemindersOffLocal] = useState(false);
+  const [blocked, setBlockedLocal] = useState(false);
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
   // Открытая переписка — это вложенный экран поверх вкладки «Сообщения»
   const [chatOpen, setChatOpen] = useState(false);
   // Шторки поверх «Заказов» (действия по объекту, детали заказа) тоже прячут нижнюю панель
@@ -262,6 +268,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setConsentsLocal((d.consents ?? {}) as Consents);
         setThemeModeLocal(d.themeMode === 'dark' ? 'dark' : 'light');
         setRemindersOffLocal(d.remindersOff === true);
+        setBlockedLocal(d.blocked === true);
+        setBlockedReason(typeof d.blockedReason === 'string' ? d.blockedReason : null);
       },
       (e) => console.warn('Профиль недоступен:', e),
     );
@@ -607,6 +615,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     preferredMasterId,
   }: OrderDraft) => {
     if (!uid) return;
+
+    // Правила всё равно отклонят запись — но человеку нужен ответ словами,
+    // а не «недостаточно прав»
+    if (blocked) {
+      setNotice(
+        blockedReason
+          ? `Создание заявок ограничено: ${blockedReason}`
+          : 'Создание заявок ограничено модерацией. Напишите в поддержку',
+      );
+      return;
+    }
 
     try {
       await setDoc(doc(db, 'orders', id), {
@@ -1085,6 +1104,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     dismissNotice: () => setNotice(null),
     setUserName,
     remindersOff,
+    blocked,
+    blockedReason,
     setRemindersOff,
     setActiveAddress,
     setCity,

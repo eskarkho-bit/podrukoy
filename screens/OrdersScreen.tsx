@@ -103,6 +103,9 @@ type Props = {
   onOverlayOpenChange?: (open: boolean) => void;
   // Экран целиком перекрыт другим оверлеем — режимом мастера или модерацией
   covered?: boolean;
+  // Блокировка модерацией: создание заявок закрыто, баннер объясняет почему
+  blocked?: boolean;
+  blockedReason?: string | null;
 };
 
 export function OrdersScreen({
@@ -121,6 +124,8 @@ export function OrdersScreen({
   onOpenOrderChat,
   onOverlayOpenChange,
   covered,
+  blocked,
+  blockedReason,
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -261,6 +266,16 @@ export function OrdersScreen({
                 <Text style={[styles.addrText, styles.addrTextAdd]}>Добавить адрес</Text>
               </Pressable>
             )}
+          </Animated.View>
+        )}
+
+        {/* Дом остаётся живым и осмотримым — закрыто только создание заявок */}
+        {blocked && (
+          <Animated.View entering={FadeInDown.duration(320)} style={styles.blockedBanner}>
+            <Text style={styles.blockedBannerTitle}>Создание заявок ограничено</Text>
+            <Text style={styles.blockedBannerText}>
+              {blockedReason || 'Решение модерации. Напишите в поддержку, если не согласны.'}
+            </Text>
           </Animated.View>
         )}
 
@@ -521,6 +536,22 @@ const makeStyles = (t: Palette) =>
     headerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
     header: { fontSize: 20, fontFamily: FONTS.display, color: t.text },
     headerChevron: { fontSize: 15, color: t.accent, fontWeight: '800', marginTop: 2 },
+    blockedBanner: {
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.danger,
+      padding: 14,
+      marginBottom: 12,
+    },
+    blockedBannerTitle: { fontSize: 13, fontWeight: '800', color: t.danger },
+    blockedBannerText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: t.text,
+      marginTop: 5,
+      lineHeight: 17,
+    },
     addrCard: {
       position: 'absolute',
       top: 94,

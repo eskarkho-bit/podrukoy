@@ -30,15 +30,35 @@ import { Glyph, themedIconColors } from '../components/glyphIcons';
 import { counted, rub } from '../components/format';
 import { settlementLabel } from '../components/cities';
 import { MAIN_CITIES, type AdminStats } from '../components/adminStats';
-import { useAdminState, type Pending, type SupportMessage } from '../components/AdminState';
+import {
+  useAdminState,
+  type Pending,
+  type SupportMessage,
+  type SupportStatus,
+} from '../components/AdminState';
+import { DashboardBlock } from './admin/DashboardBlock';
+import { OrdersTab } from './admin/OrdersTab';
+import { PeopleTab } from './admin/PeopleTab';
+import { ComplaintsSection } from './admin/ComplaintsSection';
+import { AuditLayer } from './admin/AuditLayer';
 
-// Модерация мастеров. Открыта только владельцам документа admins/{uid} —
+// Раздел модерации. Открыт только владельцам документа admins/{uid} —
 // завести его можно лишь в консоли Firebase, из приложения нельзя.
 //
-// Смысл экрана: к клиенту домой едет живой человек, и приложение обязано
-// знать, кто это. Пока заявка не одобрена, мастер не видит ни одной заявки.
-//
-// Данные и записи — только через AdminState: экран о Firestore не знает.
+// Пять вкладок: сводка (числа и журнал), мастера (очередь проверки и
+// жалобы), заявки (споры и принудительное закрытие), люди (поиск и
+// блокировки), поддержка. Данные и записи — только через AdminState:
+// экран о Firestore не знает.
+
+export type AdminTab = 'summary' | 'masters' | 'orders' | 'people' | 'support';
+
+const ADMIN_TABS: { id: AdminTab; label: string; icon: string }[] = [
+  { id: 'summary', label: 'Сводка', icon: '📊' },
+  { id: 'masters', label: 'Мастера', icon: '🛡️' },
+  { id: 'orders', label: 'Заявки', icon: '🧾' },
+  { id: 'people', label: 'Люди', icon: '👤' },
+  { id: 'support', label: 'Поддержка', icon: '🛟' },
+];
 
 type Props = {
   open: boolean;
@@ -49,6 +69,8 @@ type Props = {
 // ждёт допуска и не может работать
 const STALE_MS = 24 * 60 * 60 * 1000;
 
+const SUPPORT_STATUSES: SupportStatus[] = ['новое', 'в работе', 'закрыто'];
+
 export function AdminScreen({ open, onClose }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -58,10 +80,32 @@ export function AdminScreen({ open, onClose }: Props) {
     stats,
     refreshing,
     refreshStats,
+    dashboard,
     supportThreads,
+    complaints,
+    watchSupportChat,
+    sendSupportReply,
+    setSupportStatus,
   } = useAdminState();
+
+  const [tab, setTab] = useState<AdminTab>('summary');
   const [busyUid, setBusyUid] = useState<string | null>(null);
   const [openSupportUid, setOpenSupportUid] = useState<string | null>(null);
+  const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
+  const [sending, setSending] = useState(false);
+  const [supportFilter, setSupportFilter] = useState<SupportStatus | null>(null);
+  // Журнал: слой поверх раздела; из карточки заявки — с фильтром по ней
+  const [auditSubject, setAuditSubject] = useState<{ type: string; id: string } | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
+
+  // Закрытый раздел в следующий раз открывается со сводки — с чистого листа
+  useEffect(() => {
+    if (open) return;
+    setTab('summary');
+    setOpenSupportUid(null);
+    setAuditOpen(false);
+    setAuditSubject(null);
+  }, [open]);
 
   // Оверлей выезжает справа. Значения ведём из эффекта, а не изнутри стиля:
   // экран перерисовывается на каждом изменении очереди, и анимация в стиле
@@ -90,6 +134,30 @@ export function AdminScreen({ open, onClose }: Props) {
     setBusyUid(null);
   };
 
+  // Переписка открытого обращения — подписка живёт здесь, чтобы сам
+  // SupportChat оставался чистым компонентом с пропсами
+  useEffect(() => {
+    if (!openSupportUid) {
+      setSupportMessages([]);
+      return;
+    }
+    return watchSupportChat(openSupportUid, setSupportMessages);
+  }, [openSupportUid, watchSupportChat]);
+
+  const sendReply = async (text: string): Promise<boolean> => {
+    if (!openSupportUid) return false;
+    setSending(true);
+    const ok = await sendSupportReply(openSupportUid, text);
+    setSending(false);
+    return ok;
+  };
+
+  const waiting = supportThreads.filter((s) => s.lastFrom === 'user').length;
+  const filteredThreads = supportFilter
+    ? supportThreads.filter((s) => s.supportStatus === supportFilter)
+    : supportThreads;
+  const openThread = supportThreads.find((s) => s.uid === openSupportUid) ?? null;
+
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, styles.root, layerStyle]}
@@ -102,89 +170,148 @@ export function AdminScreen({ open, onClose }: Props) {
         <View style={styles.backChipGhost} />
       </View>
 
-      <ScrollView
-        style={styles.fill}
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refreshStats} tintColor={t.accent} />
-        }
-      >
-        <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
-          Модерация
-        </Animated.Text>
-        <Animated.Text entering={FadeInDown.delay(40).duration(380)} style={styles.headerSub}>
-          {items.length
-            ? counted(items.length, 'заявка ждёт', 'заявки ждут', 'заявок ждут') + ' решения'
-            : 'Новые заявки мастеров появятся здесь'}
-        </Animated.Text>
+      {tab === 'summary' && (
+        <ScrollView
+          style={styles.fill}
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refreshStats} tintColor={t.accent} />
+          }
+        >
+          <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
+            Модерация
+          </Animated.Text>
+          <Animated.Text entering={FadeInDown.delay(40).duration(380)} style={styles.headerSub}>
+            {items.length
+              ? counted(items.length, 'заявка ждёт', 'заявки ждут', 'заявок ждут') + ' решения'
+              : 'Сводка по маркетплейсу'}
+          </Animated.Text>
 
-        {stats && (
-          <StatsBlock
-            stats={stats}
-            stale={
-              items.filter((i) => i.appliedMs != null && Date.now() - i.appliedMs > STALE_MS).length
-            }
-          />
-        )}
-
-        {items.map((item, i) => (
-          <Animated.View
-            key={item.uid}
-            entering={FadeInDown.delay(firstBatch ? 80 + i * STAGGER : 0).duration(360)}
-            exiting={FadeOut.duration(180)}
-            layout={LinearTransition.springify().damping(20).stiffness(170)}
-          >
-            <PendingCard
-              item={item}
-              busy={busyUid === item.uid}
-              onDecide={(approved, reason) => decideCard(item.uid, approved, reason)}
+          {stats && (
+            <StatsBlock
+              stats={stats}
+              stale={
+                items.filter((i) => i.appliedMs != null && Date.now() - i.appliedMs > STALE_MS)
+                  .length
+              }
             />
-          </Animated.View>
-        ))}
+          )}
 
-        {items.length === 0 && (
-          <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.emptyWrap}>
-            <Glyph glyph="✅" size={42} colors={themedIconColors(t)} style={styles.emptyIcon} />
-            <Text style={styles.emptyTitle}>Очередь пуста</Text>
-          </Animated.View>
-        )}
+          <DashboardBlock dashboard={dashboard} />
 
-        {/* Обращения в поддержку. Имени клиента здесь нет намеренно: профиль
-            пользователя модератору не открыт, только сам тред. */}
-        {supportThreads.length > 0 && (
-          <>
-            <Animated.Text entering={FadeInDown.duration(360)} style={styles.sectionTitle}>
-              Поддержка
-              {supportThreads.some((s) => s.lastFrom === 'user')
-                ? ` · ${counted(
-                    supportThreads.filter((s) => s.lastFrom === 'user').length,
-                    'обращение ждёт',
-                    'обращения ждут',
-                    'обращений ждут',
-                  )} ответа`
-                : ''}
-            </Animated.Text>
-            {supportThreads.map((s) => (
-              <Animated.View
-                key={s.uid}
-                entering={FadeIn.duration(280)}
-                layout={LinearTransition.springify().damping(20).stiffness(170)}
-              >
-                <PressableScale style={styles.supportRow} onPress={() => setOpenSupportUid(s.uid)}>
-                  <View style={styles.supportBody}>
-                    <Text style={styles.supportWho}>Клиент {s.uid.slice(0, 6)}…</Text>
-                    <Text style={styles.supportPreview} numberOfLines={1}>
-                      {s.lastFrom === 'master' ? 'Вы: ' : ''}
-                      {s.lastText || 'Без текста'}
-                    </Text>
-                  </View>
-                  {s.lastFrom === 'user' && <Text style={styles.supportBadge}>ждёт ответа</Text>}
-                </PressableScale>
-              </Animated.View>
-            ))}
-          </>
-        )}
-      </ScrollView>
+          <PressableScale
+            style={styles.auditRow}
+            onPress={() => {
+              setAuditSubject(null);
+              setAuditOpen(true);
+            }}
+          >
+            <Glyph glyph="📄" size={22} colors={themedIconColors(t)} />
+            <Text style={styles.auditRowText}>Журнал действий</Text>
+            <Text style={styles.auditRowChevron}>›</Text>
+          </PressableScale>
+        </ScrollView>
+      )}
+
+      {tab === 'masters' && (
+        <ScrollView style={styles.fill} contentContainerStyle={styles.content}>
+          <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
+            Мастера
+          </Animated.Text>
+          <Animated.Text entering={FadeInDown.delay(40).duration(380)} style={styles.headerSub}>
+            {items.length
+              ? counted(items.length, 'заявка ждёт', 'заявки ждут', 'заявок ждут') + ' решения'
+              : 'Новые заявки мастеров появятся здесь'}
+          </Animated.Text>
+
+          {items.map((item, i) => (
+            <Animated.View
+              key={item.uid}
+              entering={FadeInDown.delay(firstBatch ? 80 + i * STAGGER : 0).duration(360)}
+              exiting={FadeOut.duration(180)}
+              layout={LinearTransition.springify().damping(20).stiffness(170)}
+            >
+              <PendingCard
+                item={item}
+                busy={busyUid === item.uid}
+                onDecide={(approved, reason) => decideCard(item.uid, approved, reason)}
+              />
+            </Animated.View>
+          ))}
+
+          {items.length === 0 && (
+            <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.emptyWrap}>
+              <Glyph glyph="✅" size={42} colors={themedIconColors(t)} style={styles.emptyIcon} />
+              <Text style={styles.emptyTitle}>Очередь пуста</Text>
+            </Animated.View>
+          )}
+
+          <ComplaintsSection />
+        </ScrollView>
+      )}
+
+      {tab === 'orders' && (
+        <OrdersTab
+          onShowHistory={(orderId) => {
+            setAuditSubject({ type: 'order', id: orderId });
+            setAuditOpen(true);
+          }}
+        />
+      )}
+
+      {tab === 'people' && <PeopleTab />}
+
+      {tab === 'support' && (
+        <ScrollView style={styles.fill} contentContainerStyle={styles.content}>
+          <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
+            Поддержка
+          </Animated.Text>
+          <Animated.Text entering={FadeInDown.delay(40).duration(380)} style={styles.headerSub}>
+            {waiting
+              ? `${counted(waiting, 'обращение ждёт', 'обращения ждут', 'обращений ждут')} ответа`
+              : 'Все обращения разобраны'}
+          </Animated.Text>
+
+          <SupportStatusChips value={supportFilter} onChange={setSupportFilter} />
+
+          {/* Имени клиента здесь нет намеренно: в списке хватает превью,
+              а профиль открывается по uid во вкладке «Люди» */}
+          {filteredThreads.map((s) => (
+            <Animated.View
+              key={s.uid}
+              entering={FadeIn.duration(280)}
+              layout={LinearTransition.springify().damping(20).stiffness(170)}
+            >
+              <PressableScale style={styles.supportRow} onPress={() => setOpenSupportUid(s.uid)}>
+                <View style={styles.supportBody}>
+                  <Text style={styles.supportWho}>
+                    Клиент {s.uid.slice(0, 6)}… · {s.supportStatus}
+                  </Text>
+                  <Text style={styles.supportPreview} numberOfLines={1}>
+                    {s.lastFrom === 'master' ? 'Вы: ' : ''}
+                    {s.lastText || 'Без текста'}
+                  </Text>
+                </View>
+                {s.lastFrom === 'user' && <Text style={styles.supportBadge}>ждёт ответа</Text>}
+              </PressableScale>
+            </Animated.View>
+          ))}
+
+          {filteredThreads.length === 0 && (
+            <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.emptyWrap}>
+              <Glyph glyph="🛟" size={42} colors={themedIconColors(t)} style={styles.emptyIcon} />
+              <Text style={styles.emptyTitle}>Обращений нет</Text>
+            </Animated.View>
+          )}
+        </ScrollView>
+      )}
+
+      <AdminTabs
+        active={tab}
+        onSelect={setTab}
+        mastersDot={items.length > 0 || complaints.length > 0}
+        supportDot={waiting > 0}
+      />
 
       {openSupportUid && (
         <Animated.View
@@ -192,37 +319,96 @@ export function AdminScreen({ open, onClose }: Props) {
           exiting={SlideOutRight.duration(280)}
           style={StyleSheet.absoluteFill}
         >
-          <SupportChat uid={openSupportUid} onBack={() => setOpenSupportUid(null)} />
+          <SupportChat
+            uid={openSupportUid}
+            status={openThread?.supportStatus ?? 'новое'}
+            messages={supportMessages}
+            sending={sending}
+            onSend={sendReply}
+            onSetStatus={(s) => setSupportStatus(openSupportUid, s)}
+            onBack={() => setOpenSupportUid(null)}
+          />
+        </Animated.View>
+      )}
+
+      {auditOpen && (
+        <Animated.View
+          entering={SlideInRight.springify().damping(20).stiffness(160)}
+          exiting={SlideOutRight.duration(280)}
+          style={StyleSheet.absoluteFill}
+        >
+          <AuditLayer subject={auditSubject ?? undefined} onBack={() => setAuditOpen(false)} />
         </Animated.View>
       )}
     </Animated.View>
   );
 }
 
+// ---------- Чипы статуса обращений ----------
+
+export function SupportStatusChips({
+  value,
+  onChange,
+}: {
+  value: SupportStatus | null;
+  onChange: (v: SupportStatus | null) => void;
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  return (
+    <View style={styles.statusChipsRow}>
+      {[null, ...SUPPORT_STATUSES].map((s) => {
+        const active = value === s;
+        return (
+          <PressableScale
+            key={s ?? 'все'}
+            style={[styles.statusChip, active && styles.statusChipOn]}
+            onPress={() => onChange(active ? null : s)}
+          >
+            <Text style={[styles.statusChipText, active && styles.statusChipTextOn]}>
+              {s ?? 'все'}
+            </Text>
+          </PressableScale>
+        );
+      })}
+    </View>
+  );
+}
+
 // ---------- Переписка с клиентом ----------
 
 // Ответ уходит от лица «Поддержки», а не от имени модератора: клиенту
-// важен ответ сервиса, а не то, кто из людей дежурил.
-function SupportChat({ uid, onBack }: { uid: string; onBack: () => void }) {
+// важен ответ сервиса, а не то, кто из людей дежурил. Данные приходят
+// пропсами — подписку держит AdminScreen.
+export function SupportChat({
+  uid,
+  status,
+  messages,
+  sending,
+  onSend,
+  onSetStatus,
+  onBack,
+}: {
+  uid: string;
+  status: SupportStatus;
+  messages: SupportMessage[];
+  sending: boolean;
+  onSend: (text: string) => Promise<boolean>;
+  onSetStatus: (s: SupportStatus) => void;
+  onBack: () => void;
+}) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
-  const { watchSupportChat, sendSupportReply } = useAdminState();
-  const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-
-  useEffect(() => watchSupportChat(uid, setMessages), [uid, watchSupportChat]);
 
   const send = async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
-    setSending(true);
-    if (await sendSupportReply(uid, trimmed)) {
+    if (await onSend(trimmed)) {
       setText('');
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     }
-    setSending(false);
   };
 
   return (
@@ -236,6 +422,23 @@ function SupportChat({ uid, onBack }: { uid: string; onBack: () => void }) {
         </PressableScale>
         <Text style={styles.chatTitle}>Клиент {uid.slice(0, 6)}…</Text>
         <View style={styles.backChipGhost} />
+      </View>
+
+      <View style={styles.statusChipsBar}>
+        {SUPPORT_STATUSES.map((s) => {
+          const active = status === s;
+          return (
+            <PressableScale
+              key={s}
+              style={[styles.statusChip, active && styles.statusChipOn]}
+              onPress={() => onSetStatus(s)}
+              accessibilityRole="button"
+              accessibilityLabel={`Статус: ${s}`}
+            >
+              <Text style={[styles.statusChipText, active && styles.statusChipTextOn]}>{s}</Text>
+            </PressableScale>
+          );
+        })}
       </View>
 
       <ScrollView
@@ -284,11 +487,8 @@ function SupportChat({ uid, onBack }: { uid: string; onBack: () => void }) {
 }
 
 // Сводка: что происходит с мастерами, где в республике пусто и почём работа.
-//
-// Самих заявок здесь нет намеренно — модератор их не читает. Цены приходят
-// гистограммой, которую собирает функция на завершении заказа: числа видны,
-// адреса и комментарии — нет.
-function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
+// Цены приходят гистограммой, которую собирает функция на завершении заказа.
+export function StatsBlock({ stats, stale }: { stats: AdminStats; stale: number }) {
   const { mode } = useTheme();
   const styles = themed[mode];
   const { coverage } = stats;
@@ -407,7 +607,7 @@ function waitedText(appliedMs: number): string {
   return counted(Math.floor(hours / 24), 'день', 'дня', 'дней');
 }
 
-function PendingCard({
+export function PendingCard({
   item,
   busy,
   onDecide,
@@ -524,6 +724,73 @@ function PendingCard({
   );
 }
 
+// ---------- Нижние вкладки раздела ----------
+
+// Та же панель, что у раздела мастера (MasterTabs), но со своими вкладками.
+// Нарочно не общий компонент — те же соображения, что и там.
+export function AdminTabs({
+  active,
+  onSelect,
+  mastersDot,
+  supportDot,
+}: {
+  active: AdminTab;
+  onSelect: (tab: AdminTab) => void;
+  mastersDot: boolean;
+  supportDot: boolean;
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const [barW, setBarW] = useState(0);
+  const pillW = barW > 0 ? (barW - 12) / ADMIN_TABS.length : 0;
+  const idx = ADMIN_TABS.findIndex((tabItem) => tabItem.id === active);
+
+  // Анимации из эффектов, а не из стиля: панель перерисовывается на каждом
+  // обновлении очереди, и анимация в стиле начиналась бы заново
+  const x = useSharedValue(0);
+  const measured = useRef(false);
+  useEffect(() => {
+    if (pillW <= 0) return;
+    if (measured.current) x.value = withSpring(idx * pillW, springs.card);
+    else x.value = idx * pillW;
+    measured.current = true;
+  }, [idx, pillW, x]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    width: pillW,
+    transform: [{ translateX: x.value }],
+  }));
+
+  return (
+    <View style={styles.tabsWrap} pointerEvents="box-none">
+      <View style={styles.tabsBar} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
+        {barW > 0 && <Animated.View style={[styles.tabsPill, pillStyle]} pointerEvents="none" />}
+        {ADMIN_TABS.map((tabItem) => {
+          const selected = tabItem.id === active;
+          const showDot =
+            !selected &&
+            ((tabItem.id === 'masters' && mastersDot) || (tabItem.id === 'support' && supportDot));
+          return (
+            <PressableScale
+              key={tabItem.id}
+              style={styles.tabBtn}
+              onPress={() => onSelect(tabItem.id)}
+              accessibilityRole="button"
+              accessibilityLabel={tabItem.label}
+            >
+              <View>
+                <Text style={styles.tabIcon}>{tabItem.icon}</Text>
+                {showDot && <View style={styles.tabDot} />}
+              </View>
+              <Text style={[styles.tabLabel, selected && styles.tabLabelOn]}>{tabItem.label}</Text>
+            </PressableScale>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { backgroundColor: t.bg },
@@ -539,7 +806,7 @@ const makeStyles = (t: Palette) =>
     backChip: { paddingVertical: 8, paddingHorizontal: 10 },
     backChipGhost: { width: 60 },
     backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
-    content: { padding: 16, paddingBottom: 60 },
+    content: { padding: 16, paddingBottom: 130 },
     header: { fontSize: 20, fontFamily: FONTS.display, color: t.text },
     headerSub: {
       color: t.textMuted,
@@ -600,6 +867,18 @@ const makeStyles = (t: Palette) =>
     cityChipOk: { borderColor: t.accentBorder, backgroundColor: t.accentSoft },
     cityChipText: { fontSize: 11.5, fontWeight: '700', color: t.textMuted },
     cityChipTextOk: { color: t.accent },
+    auditRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+    },
+    auditRowText: { flex: 1, fontSize: 13, fontWeight: '800', color: t.text },
+    auditRowChevron: { fontSize: 16, fontWeight: '800', color: t.textMuted },
     card: {
       backgroundColor: t.card,
       borderRadius: 18,
@@ -611,7 +890,6 @@ const makeStyles = (t: Palette) =>
     cardHead: { flexDirection: 'row', gap: 12 },
     photo: { width: 82, height: 82, borderRadius: 14, backgroundColor: t.chip },
     photoEmpty: { alignItems: 'center', justifyContent: 'center' },
-    photoIcon: { fontSize: 32 },
     cardWho: { flex: 1 },
     name: { fontSize: 15, fontWeight: '800', color: t.text },
     meta: { fontSize: 12, fontWeight: '600', color: t.textMuted, marginTop: 3 },
@@ -648,13 +926,24 @@ const makeStyles = (t: Palette) =>
     emptyTitle: { fontSize: 14, fontWeight: '800', color: t.textMuted },
 
     // ---------- поддержка ----------
-    sectionTitle: {
-      fontSize: 11,
-      fontWeight: '800',
-      color: t.textMuted,
-      marginTop: 20,
-      marginBottom: 8,
+    statusChipsRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
+    statusChipsBar: {
+      flexDirection: 'row',
+      gap: 6,
+      paddingHorizontal: 16,
+      paddingBottom: 8,
     },
+    statusChip: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.soft,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+    },
+    statusChipOn: { borderColor: t.accentBorder, backgroundColor: t.accentSoft },
+    statusChipText: { fontSize: 11.5, fontWeight: '700', color: t.textMuted },
+    statusChipTextOn: { color: t.accent },
     supportRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -714,6 +1003,52 @@ const makeStyles = (t: Palette) =>
       justifyContent: 'center',
     },
     chatSendText: { color: t.onAccent, fontSize: 16, fontWeight: '800' },
+
+    // ---------- вкладки ----------
+    tabsWrap: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 24,
+      alignItems: 'center',
+    },
+    tabsBar: {
+      flexDirection: 'row',
+      backgroundColor: t.card,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 6,
+      marginHorizontal: 16,
+      shadowColor: t.shadow,
+      shadowOpacity: 0.14,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 6,
+    },
+    tabsPill: {
+      position: 'absolute',
+      top: 6,
+      bottom: 6,
+      left: 6,
+      borderRadius: 16,
+      backgroundColor: t.accentSoft,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+    },
+    tabBtn: { flex: 1, alignItems: 'center', paddingVertical: 7, gap: 2 },
+    tabIcon: { fontSize: 16 },
+    tabDot: {
+      position: 'absolute',
+      top: -1,
+      right: -5,
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      backgroundColor: t.warn,
+    },
+    tabLabel: { fontSize: 9.5, fontWeight: '800', color: t.textMuted },
+    tabLabelOn: { color: t.accent },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

@@ -21,6 +21,9 @@ export type Application = {
   cardBindingId: string | null;
   status: VerificationStatus;
   rejectionReason: string | null;
+  // Причина отстранения. Лежит здесь, а не в мировой анкете: её видят
+  // только сам мастер и модератор. Пишет только сервер.
+  blockedReason: string | null;
   // Редакция согласия на обработку фотографии лица. Пусто — снимать нельзя:
   // это отдельное согласие, а не часть общего.
   biometricConsent: string | null;
@@ -43,6 +46,7 @@ export const EMPTY_APPLICATION: Application = {
   cardBindingId: null,
   status: 'draft',
   rejectionReason: null,
+  blockedReason: null,
   biometricConsent: null,
   bindingState: null,
 };
@@ -60,6 +64,7 @@ export function applicationFrom(data: Record<string, unknown> | undefined): Appl
     status:
       status === 'pending' || status === 'approved' || status === 'rejected' ? status : 'draft',
     rejectionReason: typeof data.rejectionReason === 'string' ? data.rejectionReason : null,
+    blockedReason: typeof data.blockedReason === 'string' ? data.blockedReason : null,
     biometricConsent: typeof data.biometricConsent === 'string' ? data.biometricConsent : null,
     bindingState: BINDING_STATES.includes(data.bindingState as BindingState)
       ? (data.bindingState as BindingState)

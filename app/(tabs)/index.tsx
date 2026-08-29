@@ -21,6 +21,8 @@ export default function OrdersRoute() {
       onOpenOrderChat={s.openChat}
       onOverlayOpenChange={s.setOverlayOpen}
       covered={s.masterOpen || s.adminOpen}
+      blocked={s.blocked}
+      blockedReason={s.blockedReason}
     />
   );
 }

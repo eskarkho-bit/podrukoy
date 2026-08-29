@@ -69,6 +69,7 @@ import {
 import { priceSummary, type OrderStats } from '../components/orderStats';
 import { deleteVerificationPhoto, uploadVerificationPhoto } from '../components/photoUpload';
 import { firestoreErrorText } from '../components/firestoreError';
+import { fileComplaint } from '../components/complaints';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { settlementLabel } from '../components/cities';
@@ -152,6 +153,7 @@ export const ACTIVE_STATUSES: JobStatus[] = ['new', 'offered', 'accepted', 'awai
 
 export type MasterReview = {
   id: string;
+  clientId: string;
   clientName: string;
   stars: number;
   text: string;
@@ -245,6 +247,9 @@ export type MasterProfile = {
   education: EducationLevel | null;
   // Ставит только модератор. Без него заявок не видно — это и есть проверка.
   verified: boolean;
+  // Отстранение сервером: лента и предложения закрыты правилами,
+  // а этот флаг объясняет мастеру, почему у него пусто
+  blocked: boolean;
   // Считает Cloud Function — сам мастер эти поля переписать не может
   rating: number | null;
   reviewsCount: number;
@@ -329,6 +334,7 @@ export function MasterScreen({ open, onClose }: Props) {
                 experienceYears: typeof v.experienceYears === 'number' ? v.experienceYears : null,
                 education: educationFrom(v.education),
                 verified: v.verified === true,
+                blocked: v.blocked === true,
                 rating: typeof v.rating === 'number' ? v.rating : null,
                 reviewsCount: typeof v.reviewsCount === 'number' ? v.reviewsCount : 0,
                 completedOrders: typeof v.completedOrders === 'number' ? v.completedOrders : 0,
@@ -575,16 +581,22 @@ export function MasterScreen({ open, onClose }: Props) {
       query(collection(db, 'masters', myUid, 'reviews'), orderBy('createdAt', 'desc'), limit(30)),
       (snap) =>
         setReviews(
-          snap.docs.map((d) => {
-            const v = d.data();
-            return {
-              id: d.id,
-              clientName: String(v.clientName ?? 'Клиент'),
-              stars: typeof v.stars === 'number' ? v.stars : 0,
-              text: String(v.text ?? ''),
-              createdMs: v.createdAt?.toMillis?.() ?? null,
-            };
-          }),
+          snap.docs
+            // Скрытые модерацией — не на витрине. Фильтр здесь, а не в
+            // запросе: where('hidden','!=',true) отсёк бы старые отзывы
+            // без этого поля. Сервер их из рейтинга уже исключил.
+            .filter((d) => d.get('hidden') !== true)
+            .map((d) => {
+              const v = d.data();
+              return {
+                id: d.id,
+                clientId: String(v.clientId ?? ''),
+                clientName: String(v.clientName ?? 'Клиент'),
+                stars: typeof v.stars === 'number' ? v.stars : 0,
+                text: String(v.text ?? ''),
+                createdMs: v.createdAt?.toMillis?.() ?? null,
+              };
+            }),
         ),
       (e) => console.warn('Отзывы недоступны:', e),
     );
@@ -757,6 +769,7 @@ export function MasterScreen({ open, onClose }: Props) {
             <JobList
               email={user?.email ?? ''}
               profile={master}
+              blockedReason={application.blockedReason}
               jobs={jobs.filter((j) => ACTIVE_STATUSES.includes(j.status))}
               typingJobId={typingJobId}
               onOpenJob={handleOpenJob}
@@ -789,6 +802,20 @@ export function MasterScreen({ open, onClose }: Props) {
               onEdit={() => setEditingProfile(true)}
               onLogout={handleLogout}
               onClose={onClose}
+              onComplain={async (review, text) => {
+                try {
+                  await fileComplaint({
+                    orderId: review.id,
+                    reviewClientId: review.clientId,
+                    text,
+                  });
+                  return true;
+                } catch (e) {
+                  console.warn('Жалоба не отправлена:', e);
+                  showNotice(firestoreErrorText(e, 'Жалоба не отправлена. Проверьте связь'));
+                  return false;
+                }
+              }}
             />
           )}
 
@@ -1484,6 +1511,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 export function JobList({
   email,
   profile,
+  blockedReason,
   jobs,
   typingJobId,
   onOpenJob,
@@ -1492,6 +1520,8 @@ export function JobList({
 }: {
   email: string;
   profile: MasterProfile;
+  /** Причина отстранения — из приватной анкеты, мировой документ её не держит */
+  blockedReason: string | null;
   jobs: Job[];
   typingJobId: string | null;
   onOpenJob: (id: string) => void;
@@ -1543,6 +1573,18 @@ export function JobList({
             .filter(Boolean)
             .join(' · ') || email}
         </Animated.Text>
+
+        {/* Отстранённому лента и так пуста по правилам — баннер объясняет,
+            почему, вместо молчаливой пустоты */}
+        {profile.blocked && (
+          <Animated.View entering={FadeInDown.delay(60).duration(360)} style={styles.blockedBanner}>
+            <Text style={styles.blockedBannerTitle}>Доступ к заявкам приостановлен</Text>
+            <Text style={styles.blockedBannerText}>
+              {blockedReason ||
+                'Модерация ограничила доступ. Напишите в поддержку, если не согласны.'}
+            </Text>
+          </Animated.View>
+        )}
 
         <Animated.View entering={FadeInDown.delay(80).duration(360)} style={styles.statsRow}>
           <View style={styles.statCard}>
@@ -1928,6 +1970,7 @@ export function ProfileTab({
   onEdit,
   onLogout,
   onClose,
+  onComplain,
 }: {
   email: string;
   profile: MasterProfile;
@@ -1935,9 +1978,27 @@ export function ProfileTab({
   onEdit: () => void;
   onLogout: () => void;
   onClose: () => void;
+  /** Жалоба на отзыв; true — жалоба принята и модерация её увидит */
+  onComplain: (review: MasterReview, text: string) => Promise<boolean>;
 }) {
-  const { mode } = useTheme();
+  const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  // Жалоба на отзыв: раскрытое поле причины у одного отзыва за раз.
+  // Отправленные помечаются локально — грузить свои жалобы ради галочки
+  // не стоит, а при перезаходе кнопка просто вернётся.
+  const [complainId, setComplainId] = useState<string | null>(null);
+  const [complainText, setComplainText] = useState('');
+  const [complained, setComplained] = useState<Set<string>>(new Set());
+
+  const submitComplaint = async (review: MasterReview) => {
+    const text = complainText.trim();
+    if (!text) return;
+    if (await onComplain(review, text)) {
+      setComplained((prev) => new Set(prev).add(review.id));
+      setComplainId(null);
+    }
+  };
+
   const fullName = [profile.name, profile.lastName].filter(Boolean).join(' ');
   const initials =
     [profile.name, profile.lastName]
@@ -2041,6 +2102,48 @@ export function ProfileTab({
                 </Text>
               </View>
               {!!r.text && <Text style={styles.reviewText}>{r.text}</Text>}
+
+              {complained.has(r.id) ? (
+                <Text style={styles.complainSent}>Жалоба отправлена — модерация посмотрит</Text>
+              ) : complainId === r.id ? (
+                <View style={styles.complainBox}>
+                  <TextInput
+                    style={styles.complainInput}
+                    value={complainText}
+                    onChangeText={setComplainText}
+                    placeholder="Что не так с этим отзывом"
+                    placeholderTextColor={t.textMuted}
+                    multiline
+                    maxLength={1000}
+                    autoFocus
+                  />
+                  <View style={styles.complainRow}>
+                    <PressableScale
+                      style={[styles.complainBtn, !complainText.trim() && styles.complainBtnDim]}
+                      onPress={() => submitComplaint(r)}
+                      disabled={!complainText.trim()}
+                    >
+                      <Text style={styles.complainBtnText}>Отправить</Text>
+                    </PressableScale>
+                    <PressableScale
+                      style={styles.complainGhost}
+                      onPress={() => setComplainId(null)}
+                    >
+                      <Text style={styles.complainGhostText}>Отмена</Text>
+                    </PressableScale>
+                  </View>
+                </View>
+              ) : (
+                <PressableScale
+                  style={styles.complainLinkWrap}
+                  onPress={() => {
+                    setComplainId(r.id);
+                    setComplainText('');
+                  }}
+                >
+                  <Text style={styles.complainLink}>Пожаловаться</Text>
+                </PressableScale>
+              )}
             </Animated.View>
           ))
         )}
@@ -2911,6 +3014,61 @@ const makeStyles = (t: Palette) =>
     reviewMeta: { color: t.textMuted, fontWeight: '600', fontSize: 11 },
     reviewText: { color: t.text, fontWeight: '600', fontSize: 13, lineHeight: 18 },
     reviewsEmpty: { color: t.textMuted, fontWeight: '600', fontSize: 12.5, lineHeight: 18 },
+    // Жалоба на отзыв
+    complainLinkWrap: { marginTop: 8, alignSelf: 'flex-start' },
+    complainLink: { fontSize: 11.5, fontWeight: '800', color: t.textMuted },
+    complainSent: { fontSize: 11.5, fontWeight: '700', color: t.accent, marginTop: 8 },
+    complainBox: { marginTop: 10 },
+    complainInput: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 12.5,
+      fontWeight: '600',
+      color: t.text,
+      minHeight: 54,
+      textAlignVertical: 'top',
+    },
+    complainRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+    complainBtn: {
+      flex: 1,
+      borderRadius: 12,
+      backgroundColor: t.accent,
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    complainBtnDim: { opacity: 0.6 },
+    complainBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 12.5 },
+    complainGhost: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    complainGhostText: { color: t.textMuted, fontWeight: '800', fontSize: 12.5 },
+    // Баннер отстранения в ленте
+    blockedBanner: {
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.danger,
+      padding: 14,
+      marginBottom: 14,
+    },
+    blockedBannerTitle: { fontSize: 13, fontWeight: '800', color: t.danger },
+    blockedBannerText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: t.text,
+      marginTop: 5,
+      lineHeight: 17,
+    },
 
     // ---------- нижние вкладки ----------
     tabsWrap: {
