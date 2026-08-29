@@ -115,6 +115,10 @@ describe('ActionSheet', () => {
     expect(draft.category).toBe('электрика');
     expect(draft.title).toContain('Розетка');
     expect(draft.title).toContain('Искрит');
+    // Объект и вид работы едут в заявку как есть: по ним сервер узнаёт
+    // повторяемые услуги и напоминает, когда подойдёт срок
+    expect(draft.objectId).toBe('socket');
+    expect(draft.serviceLabel).toBe('Не работает');
     // Пробелы по краям комментария не должны доезжать до базы
     expect(draft.comment).toBe('искрит и пахнет');
   });

@@ -33,24 +33,26 @@ async function dropPendingOffers(masterId: string): Promise<number> {
   return offers.size;
 }
 
-export const onMasterDeleted = onDocumentDeleted(
-  { document: 'masters/{masterId}', retry: true },
-  async (event) => {
-    const db = getFirestore();
-    const masterId = event.params.masterId;
+/**
+ * Отвязывает исчезнувшего мастера от его заявок.
+ *
+ * «В работе» возвращаются в поиск: клиент не должен сидеть с
+ * мастером-призраком. «Ждёт подтверждения» и завершённые остаются — работа
+ * сделана, — но телефон мастера из них уходит: человека больше нет, звонить
+ * некому, а чужой номер без владельца — это уже не контакт, а утечка.
+ * Телефон клиента у возвращённой в поиск заявки тоже снимается: открытую
+ * заявку снова читают все мастера города.
+ *
+ * Возвращает, сколько заявок вернулось в поиск. Каждый шаг идемпотентен:
+ * повтор события перепишет те же значения.
+ */
+export async function detachMasterFromOrders(masterId: string): Promise<number> {
+  const db = getFirestore();
+  const orders = await db.collection('orders').where('masterId', '==', masterId).get();
 
-    const dropped = await dropPendingOffers(masterId);
-
-    // Заявки, где он был исполнителем. «Ждёт подтверждения» не трогаем:
-    // работа сделана, клиенту остаётся её подтвердить, и отбирать у него
-    // эту возможность нельзя.
-    const orders = await db
-      .collection('orders')
-      .where('masterId', '==', masterId)
-      .where('status', '==', 'В работе')
-      .get();
-
-    for (const d of orders.docs) {
+  let reopened = 0;
+  for (const d of orders.docs) {
+    if (d.get('status') === 'В работе') {
       await d.ref.set(
         {
           status: 'Поиск мастера',
@@ -58,10 +60,13 @@ export const onMasterDeleted = onDocumentDeleted(
           masterName: null,
           agreedPrice: null,
           agreedAt: null,
+          masterPhone: null,
+          clientPhone: null,
           reopenedAt: new Date(),
         },
         { merge: true },
       );
+      reopened += 1;
 
       const clientId = d.get('clientId');
       if (clientId) {
@@ -72,16 +77,29 @@ export const onMasterDeleted = onDocumentDeleted(
           { href: '/' },
         );
       }
+    } else if (d.get('masterPhone') != null) {
+      await d.ref.set({ masterPhone: null }, { merge: true });
     }
+  }
+  return reopened;
+}
+
+export const onMasterDeleted = onDocumentDeleted(
+  { document: 'masters/{masterId}', retry: true },
+  async (event) => {
+    const masterId = event.params.masterId;
+
+    const dropped = await dropPendingOffers(masterId);
+    const reopened = await detachMasterFromOrders(masterId);
 
     await audit({
       action: 'master.deleted',
       actor: SYSTEM,
       subject: { type: 'master', id: masterId },
       correlationId: event.id,
-      details: { offersDropped: dropped, ordersReopened: orders.size },
+      details: { offersDropped: dropped, ordersReopened: reopened },
     });
-    logger.info('Мастер удалён', { masterId, dropped, reopened: orders.size });
+    logger.info('Мастер удалён', { masterId, dropped, reopened });
   },
 );
 

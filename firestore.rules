@@ -76,10 +76,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Список повторяет CATEGORIES в components/serviceOptions.ts: меняются
+    // только вместе, иначе шторка соберёт заявку, которую правила отклонят
     function validCategory(c) {
       return c in [
         'электрика', 'сантехника', 'бытовая техника', 'окна',
-        'участок', 'ворота', 'инструмент', 'разное',
+        'участок', 'ворота', 'инструмент',
+        'двери и замки', 'отопление', 'кровля', 'сварка',
+        'разное',
       ];
     }
 
@@ -316,6 +320,12 @@ service cloud.firestore {
         return request.resource.data.get(field, null) == resource.data.get(field, null);
       }
 
+      // Телефоны сторон в заявку пишет только сервер после выбора мастера:
+      // подсунуть их при создании нельзя — открытую заявку читают все
+      // проверенные мастера города, и чужой номер им видеть рано.
+      // preferredMasterId — просьба показать заявку прошлому мастеру первым
+      // (кнопка «Повторить»): ставится один раз при создании, дальше не
+      // меняется — clientFields() его не пропускает.
       allow create: if authed()
         && request.resource.data.clientId == request.auth.uid
         && request.resource.data.status == 'Поиск мастера'
@@ -323,7 +333,10 @@ service cloud.firestore {
         && request.resource.data.agreedPrice == null
         && request.resource.data.reviewed == false
         && request.resource.data.city is string
-        && validCategory(request.resource.data.category);
+        && validCategory(request.resource.data.category)
+        && !request.resource.data.keys().hasAny(['masterPhone', 'clientPhone'])
+        && (request.resource.data.get('preferredMasterId', null) == null
+          || request.resource.data.preferredMasterId is string);
 
       // Свободную заявку видит любой проверенный мастер — иначе он не сможет
       // предложить цену. Как только клиент кого-то выбрал, статус меняется и

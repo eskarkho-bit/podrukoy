@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
+import { Glyph, themedIconColors } from './glyphIcons';
 import { LEGAL_DOCS, REQUIRED_DOCS, type LegalDocId } from './legal';
 import { LegalScreen } from '../screens/LegalScreen';
 
@@ -17,7 +18,7 @@ type Props = {
 };
 
 export function ConsentGate({ onAccept, onLogout }: Props) {
-  const { mode } = useTheme();
+  const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [accepted, setAccepted] = useState(false);
   const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
@@ -38,7 +39,7 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
     <Animated.View entering={FadeIn.duration(240)} style={[StyleSheet.absoluteFill, styles.root]}>
       <ScrollView contentContainerStyle={styles.content}>
         <Animated.View entering={FadeInDown.duration(420)} style={styles.badge}>
-          <Text style={styles.badgeIcon}>📄</Text>
+          <Glyph glyph="📄" size={32} colors={themedIconColors(t)} />
         </Animated.View>
 
         <Animated.Text entering={FadeInDown.delay(60).duration(380)} style={styles.title}>

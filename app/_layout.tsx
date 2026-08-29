@@ -1,3 +1,4 @@
+import { GolosText_600SemiBold, GolosText_700Bold, useFonts } from '@expo-google-fonts/golos-text';
 import * as Notifications from 'expo-notifications';
 import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -59,6 +60,11 @@ function RootShell() {
   // Заставка запуска. Показывается один раз за холодный старт и накрывает
   // момент, когда сессия ещё определяется и роутер решает, вход или главная.
   const [splashDone, setSplashDone] = useState(false);
+
+  // Заголовки набираются Golos Text (components/typography.ts). Рендер не
+  // ждёт: до загрузки React Native молча подставляет системный шрифт, а
+  // заставка запуска обычно живёт дольше, чем грузятся два файла начертаний.
+  useFonts({ GolosText_600SemiBold, GolosText_700Bold });
 
   // Без сессии данные всё равно не сохранить — правила Firestore требуют
   // авторизации. Поэтому неавторизованного уводим на вход, а вошедшего — с него.

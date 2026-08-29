@@ -38,6 +38,8 @@ import {
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
+import { FONTS } from '../components/typography';
+import { Glyph, themedIconColors } from '../components/glyphIcons';
 import { useAuth } from '../components/AuthState';
 import { useAppState } from '../components/AppState';
 import { counted, rub } from '../components/format';
@@ -302,7 +304,7 @@ export function AdminScreen({ open, onClose }: Props) {
 
         {items.length === 0 && (
           <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.emptyWrap}>
-            <Text style={styles.emptyIcon}>✅</Text>
+            <Glyph glyph="✅" size={42} colors={themedIconColors(t)} style={styles.emptyIcon} />
             <Text style={styles.emptyTitle}>Очередь пуста</Text>
           </Animated.View>
         )}
@@ -629,7 +631,7 @@ function PendingCard({
           <Image source={{ uri: item.photoUrl }} style={styles.photo} />
         ) : (
           <View style={[styles.photo, styles.photoEmpty]}>
-            <Text style={styles.photoIcon}>🙂</Text>
+            <Glyph glyph="🙂" size={38} colors={themedIconColors(t)} />
           </View>
         )}
         <View style={styles.cardWho}>
@@ -735,7 +737,7 @@ const makeStyles = (t: Palette) =>
     backChipGhost: { width: 60 },
     backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
     content: { padding: 16, paddingBottom: 60 },
-    header: { fontSize: 20, fontWeight: '800', color: t.text },
+    header: { fontSize: 20, fontFamily: FONTS.display, color: t.text },
     headerSub: {
       color: t.textMuted,
       fontWeight: '600',

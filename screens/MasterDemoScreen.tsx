@@ -54,6 +54,7 @@ const DEMO_PROFILE: MasterProfile = {
 const baseJob = {
   createdMs: null as number | null,
   completedMs: null as number | null,
+  clientPhone: null as string | null,
   legacy: false,
   unread: false,
   messages: [] as Job['messages'],
@@ -93,6 +94,8 @@ const DEMO_JOBS: Job[] = [
     desc: 'Под мойкой собирается вода, кажется, течёт сифон.',
     status: 'accepted',
     price: 2500,
+    // В витрине виден и звонок: номер ненастоящий
+    clientPhone: '+79280000000',
     createdMs: daysAgo(3),
     messages: [
       { id: 'demo-m1', from: 'client', text: 'Когда сможете приехать?', time: '14:02' },

@@ -12,6 +12,9 @@ import Animated, {
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
+import { Glyph, themedIconColors } from '../components/glyphIcons';
+import { FONTS } from '../components/typography';
+import { VerificationExplainer } from '../components/VerificationExplainer';
 import { formatRuPhone } from '../components/phoneAuth';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
@@ -30,6 +33,9 @@ type Props = {
   onChangeCity: (city: string) => void;
   ordersTotal: number;
   ordersActive: number;
+  // Напоминания о повторяемых работах: шлёт сервер, здесь только выключатель
+  remindersOn: boolean;
+  onChangeReminders: (on: boolean) => void;
   onContactSupport: () => void;
   // Вход в режим мастера (перед ним — обязательная авторизация)
   onOpenMaster: () => void;
@@ -60,6 +66,8 @@ export function ProfileScreen({
   onChangeCity,
   ordersTotal,
   ordersActive,
+  remindersOn,
+  onChangeReminders,
   onContactSupport,
   onOpenMaster,
   isAdmin,
@@ -79,6 +87,8 @@ export function ProfileScreen({
   const [draft, setDraft] = useState(name);
   const [pickingCity, setPickingCity] = useState(false);
   const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
+  // Оверлей «Как мы проверяем мастеров»
+  const [verifOpen, setVerifOpen] = useState(false);
   // Смена пароля разворачивается в списке, как и удаление: без отдельного
   // экрана, но с текущим паролем — открытая сессия сама по себе не даёт
   // отрезать владельца от аккаунта
@@ -193,7 +203,7 @@ export function ProfileScreen({
 
         <Animated.View entering={FadeInDown.delay(80).duration(360)} style={styles.card}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarIcon}>👤</Text>
+            <Glyph glyph="👤" size={34} colors={themedIconColors(t)} />
           </View>
 
           {editing ? (
@@ -221,7 +231,7 @@ export function ProfileScreen({
           <Text style={styles.address}>{address}</Text>
           {email === FOUNDER_EMAIL && (
             <View style={styles.founderChip}>
-              <Text style={styles.founderText}>⭐ основатель domio</Text>
+              <Text style={styles.founderText}>★ основатель domio</Text>
             </View>
           )}
         </Animated.View>
@@ -244,11 +254,26 @@ export function ProfileScreen({
         <Animated.View entering={FadeInDown.delay(140).duration(360)}>
           <PressableScale style={styles.masterCard} onPress={onOpenMaster}>
             <View style={styles.masterIconWrap}>
-              <Text style={styles.masterIcon}>🛠️</Text>
+              <Glyph glyph="🛠️" size={24} colors={themedIconColors(t)} />
             </View>
             <View style={styles.masterBody}>
               <Text style={styles.masterTitle}>Я мастер</Text>
               <Text style={styles.masterSub}>Заказы рядом, отклики и чат с клиентами</Text>
+            </View>
+            <Text style={styles.masterChevron}>›</Text>
+          </PressableScale>
+        </Animated.View>
+
+        {/* Проверка мастеров — главное отличие сервиса; клиент должен уметь
+            прочитать, что за ней стоит, не создавая заявку */}
+        <Animated.View entering={FadeInDown.delay(145).duration(360)}>
+          <PressableScale style={styles.masterCard} onPress={() => setVerifOpen(true)}>
+            <View style={styles.masterIconWrap}>
+              <Glyph glyph="🛡️" size={24} colors={themedIconColors(t)} />
+            </View>
+            <View style={styles.masterBody}>
+              <Text style={styles.masterTitle}>Проверенные мастера</Text>
+              <Text style={styles.masterSub}>Как устроена проверка — фото, телефон, карта</Text>
             </View>
             <Text style={styles.masterChevron}>›</Text>
           </PressableScale>
@@ -260,7 +285,7 @@ export function ProfileScreen({
           <Animated.View entering={FadeInDown.delay(150).duration(360)}>
             <PressableScale style={styles.masterCard} onPress={onOpenAdmin}>
               <View style={styles.masterIconWrap}>
-                <Text style={styles.masterIcon}>🛡️</Text>
+                <Glyph glyph="🛡️" size={24} colors={themedIconColors(t)} />
               </View>
               <View style={styles.masterBody}>
                 <Text style={styles.masterTitle}>Модерация</Text>
@@ -294,6 +319,14 @@ export function ProfileScreen({
         >
           <Text style={styles.rowLabel}>Email-уведомления</Text>
           <Toggle value={emailOn} onChange={setEmailOn} />
+        </Animated.View>
+
+        <Animated.View
+          entering={FadeInDown.delay(160 + STAGGER * 3.5).duration(340)}
+          style={styles.row}
+        >
+          <Text style={styles.rowLabel}>Напоминать о повторных работах</Text>
+          <Toggle value={remindersOn} onChange={onChangeReminders} />
         </Animated.View>
 
         <Animated.View
@@ -521,6 +554,8 @@ export function ProfileScreen({
           onClose={() => setPickingCity(false)}
         />
       )}
+
+      <VerificationExplainer open={verifOpen} onClose={() => setVerifOpen(false)} />
     </View>
   );
 }
@@ -556,7 +591,7 @@ const makeStyles = (t: Palette) =>
     fill: { flex: 1 },
     root: { flex: 1, backgroundColor: t.bg },
     content: { padding: 16, paddingTop: 60, paddingBottom: 120 },
-    header: { fontSize: 20, fontWeight: '800', marginBottom: 16, color: t.text },
+    header: { fontSize: 20, fontFamily: FONTS.display, marginBottom: 16, color: t.text },
     card: {
       backgroundColor: t.card,
       borderRadius: 20,

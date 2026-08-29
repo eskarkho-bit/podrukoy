@@ -10,10 +10,19 @@ describe('categoryFor', () => {
     expect(categoryFor('sink')).toBe('сантехника');
     expect(categoryFor('pipe')).toBe('сантехника');
     expect(categoryFor('stove')).toBe('бытовая техника');
+    expect(categoryFor('fridge')).toBe('бытовая техника');
+    expect(categoryFor('washer')).toBe('бытовая техника');
+    expect(categoryFor('ac')).toBe('бытовая техника');
     expect(categoryFor('window')).toBe('окна');
     expect(categoryFor('lawn')).toBe('участок');
     expect(categoryFor('gate')).toBe('ворота');
     expect(categoryFor('tools')).toBe('инструмент');
+    expect(categoryFor('door')).toBe('двери и замки');
+    expect(categoryFor('boiler')).toBe('отопление');
+    expect(categoryFor('panel')).toBe('электрика');
+    expect(categoryFor('septic')).toBe('сантехника');
+    expect(categoryFor('roof')).toBe('кровля');
+    expect(categoryFor('fence')).toBe('сварка');
   });
 
   // Неизвестный объект обязан давать существующую специальность: правила
@@ -29,6 +38,9 @@ describe('categoryFor', () => {
       'socket',
       'sink',
       'stove',
+      'fridge',
+      'washer',
+      'ac',
       'light',
       'shower',
       'pipe',
@@ -37,6 +49,12 @@ describe('categoryFor', () => {
       'trees',
       'gate',
       'tools',
+      'door',
+      'boiler',
+      'panel',
+      'septic',
+      'roof',
+      'fence',
       'чужое',
     ];
     objects.forEach((id) => {
@@ -92,7 +110,7 @@ describe('flowFor', () => {
   // Готовый список никогда не покроет все случаи: без запасного выхода человек
   // с нестандартной проблемой просто закроет шторку и уйдёт
   test('на каждом шаге любого дерева есть «Другое»', () => {
-    ['socket', 'light', 'нет-такого'].forEach((id) => {
+    ['socket', 'light', 'washer', 'нет-такого'].forEach((id) => {
       const flow = flowFor(id);
       // Последний тип — «Другое» без уточнений: шторка поведёт сразу к описанию
       const last = flow[flow.length - 1];
@@ -108,5 +126,23 @@ describe('flowFor', () => {
   test('в «Свете» есть установка люстры', () => {
     const install = flowFor('light').find((type) => type.label === 'Установка');
     expect(install?.subs).toContain('Люстра');
+  });
+
+  // Самая срочная услуга каталога: человек стоит перед запертой дверью.
+  // Пропасть она может только молча, поэтому её держит тест.
+  test('у входной двери есть вскрытие замка', () => {
+    const stuck = flowFor('door').find((type) => type.label === 'Не открывается');
+    expect(stuck?.subs).toContain('Вскрытие замка');
+  });
+
+  test('«Другое» замыкает и новые деревья каталога', () => {
+    ['door', 'boiler', 'panel', 'septic', 'roof', 'fence'].forEach((id) => {
+      const flow = flowFor(id);
+      const last = flow[flow.length - 1];
+      expect(last.label).toBe(OTHER_LABEL);
+      flow.slice(0, -1).forEach((type) => {
+        expect(type.subs[type.subs.length - 1]).toBe(OTHER_LABEL);
+      });
+    });
   });
 });

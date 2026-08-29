@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -47,7 +48,11 @@ import {
 } from 'firebase/firestore';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
+import { ConfettiBurst } from '../components/ConfettiBurst';
+import { EmptyScene } from '../components/illustrations';
+import { Glyph, themedIconColors } from '../components/glyphIcons';
 import { PressableScale } from '../components/PressableScale';
+import { FONTS, TABULAR } from '../components/typography';
 import { useAuth } from '../components/AuthState';
 import { useAppState } from '../components/AppState';
 import { counted, plural, ratingText, rub } from '../components/format';
@@ -117,6 +122,9 @@ export type Job = {
   title: string;
   client: string;
   address: string;
+  // Телефон клиента. Кладёт сервер после выбора мастера; у почтовых
+  // аккаунтов его может не быть — тогда кнопки звонка нет
+  clientPhone: string | null;
   date: string;
   desc: string;
   status: JobStatus;
@@ -210,6 +218,9 @@ const OBJECT_EMOJI: Record<string, string> = {
   Деревья: '🌳',
   Ворота: '🚪',
   Инструменты: '🧰',
+  Холодильник: '❄️',
+  'Стиральная машина': '👕',
+  Кондиционер: '🌬️',
 };
 
 const jobEmoji = (title: string) => OBJECT_EMOJI[title.split(' · ')[0]] ?? '🛠️';
@@ -390,6 +401,7 @@ export function MasterScreen({ open, onClose }: Props) {
         title: v.title ?? 'Заявка',
         client: v.clientName ?? 'Клиент',
         address: v.address ?? '',
+        clientPhone: typeof v.clientPhone === 'string' ? v.clientPhone : null,
         date: v.date ?? '',
         desc: v.comment || 'Клиент не оставил комментарий.',
         status,
@@ -429,6 +441,7 @@ export function MasterScreen({ open, onClose }: Props) {
           title: offer.title,
           client: '',
           address: '',
+          clientPhone: null,
           date: '',
           desc: '',
           status: 'closed',
@@ -982,10 +995,19 @@ function MasterApplicationScreen({
 
       if (!verified) {
         // Фото уезжает в Storage под путь, закрытый для всех, кроме
-        // владельца и модератора
+        // владельца и модератора. Загрузка может не удаться — например,
+        // Storage ещё не подключён или пропала связь, — и это не повод
+        // терять остальную анкету: у загрузки свой срок ожидания
+        // (photoUpload.ts), а анкета сохраняется черновиком в любом случае.
         let photoUrl = application.photoUrl;
+        let photoFailed = false;
         if (photoUri && photoUri !== application.photoUrl) {
-          photoUrl = await uploadVerificationPhoto(myUid, photoUri);
+          try {
+            photoUrl = await uploadVerificationPhoto(myUid, photoUri);
+          } catch (e) {
+            console.warn('Фото для проверки не загрузилось:', e);
+            photoFailed = true;
+          }
         }
 
         const ref = doc(db, 'masters', myUid, 'verification', 'application');
@@ -1002,6 +1024,19 @@ function MasterApplicationScreen({
           },
           { merge: true },
         );
+
+        // Без свежего снимка на проверку не отправляем: правила всё равно
+        // потребуют фотографию, а отправлять со старой, когда человек снял
+        // новую, значило бы показать модератору не то, что он хотел
+        if (photoFailed) {
+          setError(
+            sendForReview
+              ? 'Анкета сохранена, но фото не загрузилось, поэтому заявка не отправлена. Проверьте связь и попробуйте ещё раз'
+              : 'Анкета сохранена, но фото не загрузилось. Попробуйте ещё раз',
+          );
+          setLoading(false);
+          return;
+        }
 
         if (sendForReview) {
           await updateDoc(ref, { status: 'pending', appliedAt: serverTimestamp() });
@@ -1029,7 +1064,7 @@ function MasterApplicationScreen({
 
         <ScrollView contentContainerStyle={styles.loginContent}>
           <Animated.View entering={FadeInDown.duration(420)} style={styles.loginBadge}>
-            <Text style={styles.loginBadgeIcon}>⏳</Text>
+            <Glyph glyph="⏳" size={38} colors={themedIconColors(t)} />
           </Animated.View>
           <Animated.Text entering={FadeInDown.delay(60).duration(380)} style={styles.loginTitle}>
             Заявка на проверке
@@ -1079,7 +1114,7 @@ function MasterApplicationScreen({
 
       <ScrollView contentContainerStyle={styles.loginContent} keyboardShouldPersistTaps="handled">
         <Animated.View entering={FadeInDown.duration(420)} style={styles.loginBadge}>
-          <Text style={styles.loginBadgeIcon}>🛠️</Text>
+          <Glyph glyph="🛠️" size={38} colors={themedIconColors(t)} />
         </Animated.View>
 
         <Animated.Text entering={FadeInDown.delay(60).duration(380)} style={styles.loginTitle}>
@@ -1091,6 +1126,35 @@ function MasterApplicationScreen({
             : 'Мы проверяем каждого мастера вручную: к клиентам домой едет живой ' +
               'человек, и они должны знать, кто это. Отдельный аккаунт не нужен.'}
         </Animated.Text>
+
+        {/* Чеклист готовности: анкета, брошенная на полпути, — потерянный
+            мастер. Прогресс показывает, сколько осталось, и что карта —
+            не тупик: без неё допуск решает модератор. */}
+        {!verified && (
+          <Animated.View entering={FadeInDown.delay(120).duration(360)} style={styles.readyCard}>
+            <View style={styles.readyHead}>
+              <Text style={styles.readyTitle}>Готовность анкеты</Text>
+              <Text style={styles.readyCount}>
+                {[!!photoUri, phoneValid(phone), cardBound].filter(Boolean).length} из 3
+              </Text>
+            </View>
+            <ChecklistItem done={!!photoUri} label="Фото лица" hint="снимается камерой ниже" />
+            <ChecklistItem
+              done={phoneValid(phone)}
+              label="Телефон"
+              hint="по нему свяжется модератор"
+            />
+            <ChecklistItem
+              done={cardBound}
+              label="Банковская карта"
+              hint={
+                cardBound
+                  ? `•••• ${application.cardLast4 ?? ''}`
+                  : 'если привязка недоступна — допуск решит модератор'
+              }
+            />
+          </Animated.View>
+        )}
 
         {rejected && (
           <Animated.View entering={FadeInDown.delay(120).duration(360)} style={styles.rejectCard}>
@@ -1218,7 +1282,10 @@ function MasterApplicationScreen({
                 editable={!loading}
                 maxLength={16}
               />
-              <Text style={styles.fieldHint}>По нему свяжемся, если что-то не сойдётся</Text>
+              <Text style={styles.fieldHint}>
+                По нему свяжемся при проверке. Его же увидит клиент, который выберет ваше
+                предложение, — чтобы позвонить и договориться о времени
+              </Text>
 
               <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>О себе</Text>
               <TextInput
@@ -1257,7 +1324,7 @@ function MasterApplicationScreen({
                   <Image source={{ uri: photoUri }} style={styles.facePhoto} />
                 ) : (
                   <View style={[styles.facePhoto, styles.facePhotoEmpty]}>
-                    <Text style={styles.facePhotoIcon}>🙂</Text>
+                    <Glyph glyph="🙂" size={36} colors={themedIconColors(t)} />
                   </View>
                 )}
                 <View style={styles.faceBody}>
@@ -1384,6 +1451,23 @@ function MasterApplicationScreen({
   );
 }
 
+// Пункт чеклиста готовности анкеты: кружок-галочка, название и подсказка
+function ChecklistItem({ done, label, hint }: { done: boolean; label: string; hint: string }) {
+  const { mode, colors: t } = useTheme();
+  const styles = themed[mode];
+  return (
+    <View style={styles.readyRow}>
+      <View style={[styles.readyDot, done && { backgroundColor: t.accent, borderColor: t.accent }]}>
+        {done && <Text style={styles.readyDotCheck}>✓</Text>}
+      </View>
+      <View style={styles.readyBody}>
+        <Text style={[styles.readyLabel, done && { color: t.text }]}>{label}</Text>
+        <Text style={styles.readyHint}>{hint}</Text>
+      </View>
+    </View>
+  );
+}
+
 function SummaryRow({ label, value }: { label: string; value: string }) {
   const { mode } = useTheme();
   const styles = themed[mode];
@@ -1490,7 +1574,7 @@ export function JobList({
 
         {jobs.length === 0 ? (
           <Animated.View entering={FadeIn.delay(160).duration(400)} style={styles.emptyWrap}>
-            <Text style={styles.emptyIcon}>📭</Text>
+            <EmptyScene kind="jobs" />
             <Text style={styles.emptyTitle}>Пока нет заявок</Text>
             <Text style={styles.emptySub}>
               {profile.cities.length || profile.skills.length
@@ -1510,7 +1594,12 @@ export function JobList({
               >
                 <PressableScale style={styles.jobItem} onPress={() => onOpenJob(job.id)}>
                   <View style={styles.jobIconWrap}>
-                    <Text style={styles.jobIcon}>{jobEmoji(job.title)}</Text>
+                    <Glyph
+                      glyph={jobEmoji(job.title)}
+                      size={21}
+                      colors={themedIconColors(t)}
+                      textStyle={styles.jobIcon}
+                    />
                   </View>
                   <View style={styles.jobBody}>
                     <Text style={styles.jobTitle}>{job.title}</Text>
@@ -1781,7 +1870,7 @@ export function HistoryTab({
 
         {sorted.length === 0 ? (
           <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.emptyWrap}>
-            <Text style={styles.emptyIcon}>🗂️</Text>
+            <EmptyScene kind="history" />
             <Text style={styles.emptyTitle}>История пуста</Text>
             <Text style={styles.emptySub}>
               Завершённые и отменённые заказы будут собираться здесь
@@ -1796,7 +1885,12 @@ export function HistoryTab({
             >
               <PressableScale style={styles.jobItem} onPress={() => onOpenJob(job.id)}>
                 <View style={styles.jobIconWrap}>
-                  <Text style={styles.jobIcon}>{jobEmoji(job.title)}</Text>
+                  <Glyph
+                    glyph={jobEmoji(job.title)}
+                    size={21}
+                    colors={themedIconColors(t)}
+                    textStyle={styles.jobIcon}
+                  />
                 </View>
                 <View style={styles.jobBody}>
                   <Text style={styles.jobTitle}>{job.title}</Text>
@@ -1874,7 +1968,7 @@ export function ProfileTab({
             </View>
             {email === FOUNDER_EMAIL && (
               <View style={styles.founderChip}>
-                <Text style={styles.founderText}>⭐ основатель domio</Text>
+                <Text style={styles.founderText}>★ основатель domio</Text>
               </View>
             )}
           </View>
@@ -2053,7 +2147,12 @@ function MasterTabButton({
   return (
     <PressableScale style={styles.tabsTab} onPress={onPress}>
       <View>
-        <Text style={styles.tabsIcon}>{tab.icon}</Text>
+        <Glyph
+          glyph={tab.icon}
+          size={22}
+          colors={themedIconColors(t)}
+          textStyle={styles.tabsIcon}
+        />
         {showDot && <View style={styles.tabsDot} />}
       </View>
       <Animated.Text style={[styles.tabsLabel, textStyle]}>{tab.label}</Animated.Text>
@@ -2143,15 +2242,20 @@ export function JobDetail({
         <Animated.View entering={FadeInDown.delay(40).duration(360)} style={styles.detailCard}>
           <View style={styles.detailHead}>
             <View style={styles.detailIconWrap}>
-              <Text style={styles.detailIcon}>{jobEmoji(job.title)}</Text>
+              <Glyph
+                glyph={jobEmoji(job.title)}
+                size={25}
+                colors={themedIconColors(t)}
+                textStyle={styles.detailIcon}
+              />
             </View>
             <View style={styles.detailHeadBody}>
               <Text style={styles.detailJobTitle}>{job.title}</Text>
               {!!(job.address || job.date) && (
                 <Text style={styles.detailMeta}>
-                  {[job.address && `📍 ${job.address}`, job.date && `📅 ${job.date}`]
-                    .filter(Boolean)
-                    .join('   ')}
+                  {/* Без пиктограмм: адрес и дата читаются сами, а цветные
+                      эмодзи на каждом Android рисуются по-своему */}
+                  {[job.address, job.date].filter(Boolean).join(' · ')}
                 </Text>
               )}
             </View>
@@ -2176,7 +2280,7 @@ export function JobDetail({
           >
             <View style={styles.statusHead}>
               <View style={styles.statusIconWrap}>
-                <Text style={styles.statusIcon}>💰</Text>
+                <Glyph glyph="💰" size={22} colors={themedIconColors(t)} />
               </View>
               <View style={styles.statusBody}>
                 <Text style={styles.statusTitle}>
@@ -2269,9 +2373,17 @@ export function JobDetail({
                 entering={FadeInDown.delay(90).duration(360)}
                 style={[styles.priceCard, celebratory && styles.priceCardAccepted]}
               >
+                {/* Выбор клиента — главное событие в жизни мастера на площадке.
+                    Один залп, только на «выбрали», не на «завершена». */}
+                {job.status === 'accepted' && <ConfettiBurst />}
                 <View style={styles.statusHead}>
                   <View style={[styles.statusIconWrap, celebratory && styles.statusIconWrapOn]}>
-                    <Text style={styles.statusIcon}>{view.icon}</Text>
+                    <Glyph
+                      glyph={view.icon}
+                      size={22}
+                      colors={themedIconColors(t)}
+                      textStyle={styles.statusIcon}
+                    />
                   </View>
                   <View style={styles.statusBody}>
                     <Text style={[styles.statusTitle, { color: statusColorFor(job.status, t) }]}>
@@ -2289,6 +2401,23 @@ export function JobDetail({
                   </PressableScale>
                 )}
 
+                {/* Телефон клиента сервер кладёт в заявку после выбора:
+                    договориться о времени голосом быстрее, чем перепиской.
+                    У почтового аккаунта номера может не быть — тогда остаётся чат. */}
+                {(job.status === 'accepted' || job.status === 'awaiting') && !!job.clientPhone && (
+                  <PressableScale
+                    style={styles.callBtn}
+                    onPress={() => {
+                      if (job.clientPhone) {
+                        Linking.openURL(`tel:${job.clientPhone}`).catch(() => {});
+                      }
+                    }}
+                  >
+                    <Glyph glyph="📞" size={15} colors={themedIconColors(t)} />
+                    <Text style={styles.callBtnText}>Позвонить клиенту</Text>
+                  </PressableScale>
+                )}
+
                 {/* Пока клиент не выбрал, предложение можно забрать назад */}
                 {job.status === 'offered' && !job.legacy && (
                   <PressableScale style={styles.withdrawBtn} onPress={onWithdrawOffer}>
@@ -2303,7 +2432,7 @@ export function JobDetail({
         {/* Чат с клиентом */}
         {(job.messages.length > 0 || typing) && (
           <Animated.Text entering={FadeIn.delay(150).duration(300)} style={styles.chatTitle}>
-            💬 Чат с клиентом
+            Чат с клиентом
           </Animated.Text>
         )}
 
@@ -2454,6 +2583,38 @@ const makeStyles = (t: Palette) =>
       paddingHorizontal: 12,
       lineHeight: 18,
     },
+    readyCard: {
+      backgroundColor: t.card,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      padding: 14,
+      marginBottom: 12,
+      alignSelf: 'stretch',
+    },
+    readyHead: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    readyTitle: { fontSize: 13.5, fontFamily: FONTS.heading, color: t.text },
+    readyCount: { fontSize: 12.5, fontWeight: '800', color: t.accent, ...TABULAR },
+    readyRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 9 },
+    readyDot: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: t.toggleOff,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 1,
+    },
+    readyDotCheck: { color: t.onAccent, fontSize: 11, fontWeight: '900', lineHeight: 13 },
+    readyBody: { flex: 1 },
+    readyLabel: { fontSize: 13, fontWeight: '800', color: t.textSoft },
+    readyHint: { fontSize: 11, fontWeight: '600', color: t.textMuted, marginTop: 1 },
     loginCard: {
       alignSelf: 'stretch',
       backgroundColor: t.card,
@@ -2610,7 +2771,7 @@ const makeStyles = (t: Palette) =>
     // Лента заявок
     // Нижний отступ — под плавающую панель вкладок
     listContent: { padding: 16, paddingTop: 8, paddingBottom: 120 },
-    header: { fontSize: 20, fontWeight: '800', color: t.text },
+    header: { fontSize: 20, fontFamily: FONTS.display, color: t.text },
     headerSub: {
       color: t.textMuted,
       fontWeight: '600',
@@ -2966,6 +3127,19 @@ const makeStyles = (t: Palette) =>
       alignItems: 'center',
     },
     finishBtnText: { color: t.onAccent, fontWeight: '800', fontSize: 13 },
+    callBtn: {
+      marginTop: 10,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 6,
+      borderRadius: 12,
+      paddingVertical: 11,
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      backgroundColor: t.card,
+    },
+    callBtnText: { color: t.accent, fontWeight: '800', fontSize: 13 },
     offerCommentInput: {
       borderWidth: 1,
       borderColor: t.inputBorder,

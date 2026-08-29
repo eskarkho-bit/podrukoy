@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import Animated, {
   interpolateColor,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
-  ZoomIn,
 } from 'react-native-reanimated';
 import { springs } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
+import { Glyph, themedIconColors } from './glyphIcons';
 import { PressableScale } from './PressableScale';
+import { PulseDot } from './PulseDot';
 
 export type TabId = 'orders' | 'messages' | 'profile';
 
@@ -119,8 +120,8 @@ function TabButton({
   return (
     <PressableScale style={styles.tab} onPress={onPress}>
       <Animated.View style={iconStyle}>
-        <Text style={styles.icon}>{tab.icon}</Text>
-        {showDot && <Animated.View entering={ZoomIn.springify().damping(14)} style={styles.dot} />}
+        <Glyph glyph={tab.icon} size={22} colors={themedIconColors(t)} textStyle={styles.icon} />
+        {showDot && <PulseDot style={styles.dot} />}
       </Animated.View>
       <Animated.Text style={[styles.label, textStyle]}>{tab.label}</Animated.Text>
     </PressableScale>

@@ -21,6 +21,11 @@ const app = initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+// Storage по умолчанию молча повторяет неудачную загрузку до десяти минут —
+// на экране это выглядит как вечное «Сохраняем…». Пока бакет не подключён
+// или недоступен, честная ошибка через полминуты полезнее тихой надежды.
+storage.maxUploadRetryTime = 20_000;
+storage.maxOperationRetryTime = 10_000;
 // Регион должен совпадать с тем, где развёрнуты функции: в functions/src
 // регион не задан, значит us-central1
 export const functions = getFunctions(app, 'us-central1');

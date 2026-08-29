@@ -87,6 +87,10 @@ type AppState = {
   showNotice: (text: string) => void;
   dismissNotice: () => void;
   setUserName: (name: string) => void;
+  // Напоминания о повторяемых работах (стрижка газона и т.п.) шлёт сервер;
+  // отметка в профиле — способ попросить его молчать
+  remindersOff: boolean;
+  setRemindersOff: (off: boolean) => void;
   setActiveAddress: (addr: string) => void;
   setCity: (city: string) => void;
   setChatOpen: (open: boolean) => void;
@@ -167,6 +171,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [consents, setConsentsLocal] = useState<Consents | null>(null);
   // Тема оформления — переключается тумблером в настройках профиля
   const [themeMode, setThemeModeLocal] = useState<ThemeMode>('light');
+  // Отказ от напоминаний о повторяемых работах. Отсутствие поля — согласие:
+  // так напоминания работают и у тех, кто регистрировался до их появления
+  const [remindersOff, setRemindersOffLocal] = useState(false);
   // Открытая переписка — это вложенный экран поверх вкладки «Сообщения»
   const [chatOpen, setChatOpen] = useState(false);
   // Шторки поверх «Заказов» (действия по объекту, детали заказа) тоже прячут нижнюю панель
@@ -215,6 +222,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setActiveAddressLocal(DEFAULT_ADDRESS);
       setCityLocal('');
       setConsentsLocal(null);
+      setRemindersOffLocal(false);
       deleting.current = false;
       return;
     }
@@ -253,6 +261,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setCityLocal(d.city ?? '');
         setConsentsLocal((d.consents ?? {}) as Consents);
         setThemeModeLocal(d.themeMode === 'dark' ? 'dark' : 'light');
+        setRemindersOffLocal(d.remindersOff === true);
       },
       (e) => console.warn('Профиль недоступен:', e),
     );
@@ -321,6 +330,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
                 address: v.address ?? undefined,
                 masterId: v.masterId ?? null,
                 masterName: v.masterName ?? null,
+                masterPhone: v.masterPhone ?? null,
+                objectId: v.objectId ?? undefined,
+                serviceLabel: v.serviceLabel ?? undefined,
                 agreedPrice: v.agreedPrice ?? null,
                 reviewed: !!v.reviewed,
                 price: v.price ?? null,
@@ -583,7 +595,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // Заявка пишется по идентификатору, выданному шторкой заранее: setDoc по
   // известному id идемпотентен, а addDoc на каждый вызов создавал новую
   // заявку — двойное нажатие давало два заказа.
-  const createOrder = async ({ id, title, comment, photoUri, category }: OrderDraft) => {
+  const createOrder = async ({
+    id,
+    title,
+    comment,
+    photoUri,
+    category,
+    objectId,
+    serviceLabel,
+    address,
+    preferredMasterId,
+  }: OrderDraft) => {
     if (!uid) return;
 
     try {
@@ -600,12 +622,19 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         // писать в orders/{id}/ только владельцу заявки, а чтобы это
         // проверить, заявка уже должна существовать
         photoUrl: null,
-        address: activeAddress,
+        address: address || activeAddress,
+        // Повторная заявка просит показать её прошлому мастеру первым.
+        // Поле пишется только при создании; дальше правила его не пускают.
+        ...(preferredMasterId ? { preferredMasterId } : {}),
         // По городу и специальности заявку находят мастера нужного профиля.
         // Город пустой — заявку увидят только те, кто не ограничил себя
         // городом; об этом предупреждает профиль.
         city: cityKey(city),
         category,
+        // Объект и вид работы — для серверных напоминаний о повторяемых
+        // услугах: по заголовку их надёжно не распознать
+        objectId,
+        serviceLabel,
         // Цена появится, когда мастер пришлёт предложение в orders/{id}/offers
         agreedPrice: null,
         agreedAt: null,
@@ -791,6 +820,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setThemeModeLocal(next);
     const ref = userDoc();
     if (ref) updateDoc(ref, { themeMode: next }).catch(() => {});
+  };
+
+  const setRemindersOff = (off: boolean) => {
+    setRemindersOffLocal(off);
+    const ref = userDoc();
+    if (ref) updateDoc(ref, { remindersOff: off }).catch(() => {});
   };
 
   const markThreadRead = (threadId: string) => {
@@ -1049,6 +1084,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     showNotice: setNotice,
     dismissNotice: () => setNotice(null),
     setUserName,
+    remindersOff,
+    setRemindersOff,
     setActiveAddress,
     setCity,
     setChatOpen,

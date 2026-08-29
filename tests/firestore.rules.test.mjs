@@ -202,6 +202,37 @@ describe('Создание заявки', () => {
     await assertFails(setDoc(doc(as('client1'), 'orders/new4'), order({ category: 'магия' })));
   });
 
+  // Список специальностей в правилах повторяет CATEGORIES из serviceOptions.ts:
+  // новая позиция каталога без правки правил падала бы молча — у пользователя
+  test('заявка с новой специальностью каталога создаётся', async () => {
+    for (const category of ['двери и замки', 'отопление', 'кровля', 'сварка']) {
+      await assertSucceeds(
+        setDoc(doc(as('client1'), `orders/new-${category}`), order({ category })),
+      );
+    }
+  });
+
+  // Телефоны кладёт только сервер и только после выбора мастера: открытую
+  // заявку читают все проверенные мастера города, номерам там не место
+  test('нельзя создать заявку сразу с телефонами сторон', async () => {
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/new6'), order({ clientPhone: '+79990000000' })),
+    );
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/new7'), order({ masterPhone: '+79990000000' })),
+    );
+  });
+
+  test('повторная заявка создаётся с просьбой показать прошлому мастеру', async () => {
+    await assertSucceeds(
+      setDoc(doc(as('client1'), 'orders/new8'), order({ preferredMasterId: 'master1' })),
+    );
+  });
+
+  test('просьба о мастере — строка, а не что попало', async () => {
+    await assertFails(setDoc(doc(as('client1'), 'orders/new9'), order({ preferredMasterId: 42 })));
+  });
+
   test('нельзя создать заявку сразу отмеченной как оценённая', async () => {
     await assertFails(setDoc(doc(as('client1'), 'orders/new5'), order({ reviewed: true })));
   });
@@ -453,6 +484,35 @@ describe('Что клиент менять не вправе', () => {
   test('может отменить свою незакрытую заявку', async () => {
     await assertSucceeds(updateDoc(doc(as('client1'), 'orders/open'), { status: 'Отменена' }));
     await assertSucceeds(updateDoc(doc(as('client1'), 'orders/working'), { status: 'Отменена' }));
+  });
+
+  // Телефоны сторон пишет только сервер после выбора мастера. Ни одна из
+  // сторон дописать их не может: у клиента и мастера перечни разрешённых
+  // полей закрыты, и номера в них не входят.
+  test('телефоны сторон не дописать ни клиенту, ни мастеру', async () => {
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/open'), { masterPhone: '+79990000000' }),
+    );
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { clientPhone: '+79990000000' }),
+    );
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), { clientPhone: '+79990000000' }),
+    );
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), { masterPhone: '+79990000000' }),
+    );
+  });
+
+  // Просьба показать заявку прошлому мастеру ставится один раз при создании:
+  // менять её задним числом значило бы дёргать мастеров именными пушами
+  test('просьбу о прошлом мастере после создания не поменять', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'orders/repeat'), order({ preferredMasterId: 'master1' }));
+    });
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/repeat'), { preferredMasterId: 'master2' }),
+    );
   });
 });
 

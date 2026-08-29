@@ -15,6 +15,8 @@ export default function ProfileRoute() {
       onChangeCity={s.setCity}
       ordersTotal={s.orders.length}
       ordersActive={s.ordersActive}
+      remindersOn={!s.remindersOff}
+      onChangeReminders={(on) => s.setRemindersOff(!on)}
       onContactSupport={() => s.openChat(SUPPORT_THREAD_ID)}
       onOpenMaster={() => s.setMasterOpen(true)}
       isAdmin={s.isAdmin}

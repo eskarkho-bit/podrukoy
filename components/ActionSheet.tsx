@@ -22,7 +22,12 @@ import Animated, {
 import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { palettes, Palette, useTheme } from '../theme';
+import { AnimatedCheck } from './AnimatedCheck';
+import { hapticSuccess } from './haptics';
 import { PressableScale } from './PressableScale';
+import { Glyph, themedIconColors } from './glyphIcons';
+import { FONTS } from './typography';
+import { hasObjectIcon, ObjectIcon } from './objectIcons';
 import { SheetGrabber, useSheetDrag } from './sheetDrag';
 import { categoryFor, flowFor, OTHER_LABEL, ServiceType, type Category } from './serviceOptions';
 import { newOrderId } from '../firebaseConfig';
@@ -39,6 +44,16 @@ export type OrderDraft = {
   // Специальность выводится из объекта дома: клиент её не выбирает, но по ней
   // заявка находит мастеров нужного профиля
   category: Category;
+  // Объект дома и вид работы — по ним сервер узнаёт повторяемые услуги
+  // (стрижка газона, заточка) и напоминает, когда подойдёт срок. Заголовок
+  // для этого не годится: он собран для человека, а не для сравнения.
+  objectId: string;
+  serviceLabel: string;
+  // Повторная заявка приходит с адресом прошлой; без поля берётся активный
+  // адрес профиля — путь обычной шторки не меняется
+  address?: string;
+  // Просьба показать заявку прошлому мастеру первым — ему уйдёт именной пуш
+  preferredMasterId?: string | null;
 };
 
 type Props = {
@@ -57,6 +72,8 @@ type Step = 'type' | 'sub' | 'form' | 'done';
 export function ActionSheet({ object, address, onClose, onComplete }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  // Считается заранее: внутри flow.map имя t занято типом работы
+  const iconColors = themedIconColors(t);
   const [step, setStep] = useState<Step>('type');
   const [serviceType, setServiceType] = useState<ServiceType | null>(null);
   const [serviceSub, setServiceSub] = useState<string | null>(null);
@@ -145,6 +162,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
     if (submitted.current) return;
     submitted.current = true;
 
+    hapticSuccess();
     goForward('done');
     // Даём «галочке» отыграть, затем закрываем и создаём заявку
     timer.current = setTimeout(() => {
@@ -155,6 +173,8 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
         comment: comment.trim(),
         photoUri,
         category: categoryFor(object.id),
+        objectId: object.id,
+        serviceLabel: serviceType?.label ?? OTHER_LABEL,
       });
     }, 1400);
   };
@@ -211,7 +231,17 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
               </Animated.View>
             ) : (
               <View style={styles.iconCircle}>
-                <Text style={styles.icon}>{object.icon}</Text>
+                {hasObjectIcon(object.id) ? (
+                  // Цвета иконки — из темы: кружок шторки в тёмной теме тёмный,
+                  // и зелень сцены на нём потерялась бы
+                  <ObjectIcon
+                    id={object.id}
+                    size={28}
+                    colors={{ stroke: t.accent, fill: t.accentSoft, glass: t.blue }}
+                  />
+                ) : (
+                  <Text style={styles.icon}>{object.icon}</Text>
+                )}
               </View>
             )}
             <View style={styles.headerText}>
@@ -231,7 +261,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
               style={styles.doneWrap}
             >
               <View style={styles.checkCircle}>
-                <Text style={styles.check}>✓</Text>
+                <AnimatedCheck size={30} color={t.accent} />
               </View>
               <Text style={styles.doneTitle}>Заявка создана</Text>
               <Text style={styles.doneSub}>Мастер скоро свяжется с вами</Text>
@@ -248,7 +278,12 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                   <Animated.View key={t.label} entering={enterAnim(i + 1)}>
                     <PressableScale style={styles.option} onPress={() => pickType(t)}>
                       <View style={styles.optionIconWrap}>
-                        <Text style={styles.optionIcon}>{t.icon}</Text>
+                        <Glyph
+                          glyph={t.icon}
+                          size={18}
+                          colors={iconColors}
+                          textStyle={styles.optionIcon}
+                        />
                       </View>
                       <Text style={styles.optionText}>{t.label}</Text>
                       <Text style={styles.chevron}>›</Text>
@@ -269,7 +304,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
               {step === 'form' && !showDetails && (
                 <Animated.View entering={enterAnim(1)}>
                   <PressableScale style={styles.detailsBtn} onPress={() => setDetailsOpen(true)}>
-                    <Text style={styles.photoBtnIcon}>💬</Text>
+                    <Glyph glyph="💬" size={22} colors={iconColors} style={styles.photoBtnIcon} />
                     <Text style={styles.photoBtnText}>Оставить комментарий</Text>
                   </PressableScale>
                 </Animated.View>
@@ -292,11 +327,21 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                     ) : (
                       <View style={styles.photoRow}>
                         <PressableScale style={styles.photoBtn} onPress={() => addPhoto('camera')}>
-                          <Text style={styles.photoBtnIcon}>📷</Text>
+                          <Glyph
+                            glyph="📷"
+                            size={24}
+                            colors={iconColors}
+                            style={styles.photoBtnIcon}
+                          />
                           <Text style={styles.photoBtnText}>Сфотографировать</Text>
                         </PressableScale>
                         <PressableScale style={styles.photoBtn} onPress={() => addPhoto('library')}>
-                          <Text style={styles.photoBtnIcon}>🖼️</Text>
+                          <Glyph
+                            glyph="🖼️"
+                            size={24}
+                            colors={iconColors}
+                            style={styles.photoBtnIcon}
+                          />
                           <Text style={styles.photoBtnText}>Из галереи</Text>
                         </PressableScale>
                       </View>
@@ -374,7 +419,7 @@ const makeStyles = (t: Palette) =>
       justifyContent: 'center',
     },
     backBtnText: { fontSize: 24, color: t.accent, fontWeight: '700', marginTop: -2 },
-    title: { fontSize: 17, fontWeight: '800', color: t.text },
+    title: { fontSize: 17, fontFamily: FONTS.heading, color: t.text },
     subtitle: { fontSize: 12, color: t.textMuted, fontWeight: '600', marginTop: 2 },
     stepTitle: { fontSize: 13, fontWeight: '800', color: t.textSoft, marginBottom: 10 },
     option: {

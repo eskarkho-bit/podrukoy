@@ -9,6 +9,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
 import { notifyMastersAbout } from './orderPush';
+import { shareOrderContacts } from './orderContacts';
 import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
 import { recountCompletedOrders } from './masterStats';
@@ -18,6 +19,7 @@ export { requestPhoneCode, verifyPhoneCode } from './phoneAuth';
 export { onDeletionRequested } from './deletion';
 export { onMasterDeleted, onMasterUnverified } from './masterExit';
 export { reconcile } from './reconcile';
+export { serviceReminders } from './serviceReminders';
 
 // Серверная часть «domio». Здесь живёт всё, чему нельзя доверять клиенту:
 // рассылка уведомлений (клиент не вправе читать чужие токены) и пересчёт
@@ -42,15 +44,37 @@ export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event
   const order = event.data?.data();
   if (!order || order.status !== 'Поиск мастера') return;
 
+  // Повторная заявка зовёт прошлого мастера лично: «Повторить» в приложении
+  // пишет preferredMasterId, и этому мастеру уходит именной пуш вместо общего
+  const preferred =
+    typeof order.preferredMasterId === 'string' && order.preferredMasterId !== order.clientId
+      ? order.preferredMasterId
+      : null;
+
   await audit({
     action: 'order.created',
     actor: { type: 'user', uid: String(order.clientId ?? '') },
     subject: { type: 'order', id: event.params.orderId },
     correlationId: event.id,
-    details: { category: String(order.category ?? ''), city: String(order.city ?? '') },
+    details: {
+      category: String(order.category ?? ''),
+      city: String(order.city ?? ''),
+      preferredMasterId: preferred,
+    },
   });
 
-  await notifyMastersAbout(order, 'Новая заявка рядом');
+  await notifyMastersAbout(order, 'Новая заявка рядом', { excludeUid: preferred ?? undefined });
+
+  if (preferred) {
+    // Проверка допуска та же, что в общей рассылке: непроверенного мастера
+    // правила к заявке не пустят, и звать его туда незачем
+    const master = await getFirestore().doc(`masters/${preferred}`).get();
+    if (master.get('verified') === true) {
+      await pushTo([preferred], 'Ваш клиент снова зовёт вас', String(order.title ?? 'Заявка'), {
+        href: '/profile',
+      });
+    }
+  }
 });
 
 // ---------- предложение мастера → клиенту ----------
@@ -140,8 +164,10 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
     });
   }
 
-  // Клиент выбрал исполнителя
+  // Клиент выбрал исполнителя. С этого момента заявку читают только двое —
+  // сервер кладёт в неё телефоны сторон, и у обеих появляется кнопка звонка
   if (after.status === 'В работе' && masterId) {
+    await shareOrderContacts(event.params.orderId, event.id);
     await pushTo([masterId], 'Вас выбрали!', `${title} · ${rub(Number(after.agreedPrice ?? 0))}`, {
       href: '/profile',
     });

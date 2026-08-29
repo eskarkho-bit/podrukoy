@@ -17,9 +17,14 @@ import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { AreaId, HouseScene, ROOMS, Room, SceneObject, Stage } from '../components/HouseScene';
 import { ActionSheet, OrderDraft } from '../components/ActionSheet';
+import { ObjectListSheet } from '../components/ObjectListSheet';
 import { OrderSheet, statusColor } from '../components/OrderSheet';
+import { RepeatSheet } from '../components/RepeatSheet';
 import { counted } from '../components/format';
 import { PressableScale } from '../components/PressableScale';
+import { Glyph, themedIconColors } from '../components/glyphIcons';
+import { FONTS } from '../components/typography';
+import { EmptyScene } from '../components/illustrations';
 
 const AREAS: AreaId[] = ['Дом', 'Двор', 'Гараж'];
 
@@ -59,6 +64,13 @@ export type Order = {
   // Кто взялся за заявку
   masterId?: string | null;
   masterName?: string | null;
+  // Телефон мастера. Появляется после выбора исполнителя — его кладёт сервер,
+  // и только тогда у заявки есть кому звонить
+  masterPhone?: string | null;
+  // Объект дома и вид работы — по ним «Повторить» собирает новую заявку.
+  // У заявок, созданных до появления этих полей, их нет — тогда кнопки нет.
+  objectId?: string;
+  serviceLabel?: string;
   // Предложения мастеров, дешёвые сверху
   offers?: Offer[];
   // Цена, на которую клиент согласился явно
@@ -120,6 +132,11 @@ export function OrdersScreen({
   const [activeObject, setActiveObject] = useState<SceneObject | null>(null);
   // Заказ, открытый в шторке деталей
   const [openedOrderId, setOpenedOrderId] = useState<string | null>(null);
+  // Заказ, который повторяют: открывает шторку повтора вместо шторки деталей
+  const [repeatOrder, setRepeatOrder] = useState<Order | null>(null);
+  // Дом списком: тот же выбор объекта, но перечнем — для тех, кому так
+  // привычнее, и для скринридера
+  const [listOpen, setListOpen] = useState(false);
   // Дропдаун выбора адреса под заголовком
   const [addrOpen, setAddrOpen] = useState(false);
   // Режим ввода нового адреса внутри дропдауна
@@ -136,11 +153,12 @@ export function OrdersScreen({
   // Вкладки остаются смонтированными после первого захода, поэтому сцена сама
   // не узнает, что её больше не видно. Считаем это здесь и говорим ей прямо.
   const isFocused = useIsFocused();
-  const sceneHidden = !isFocused || !!covered || !!activeObject || !!openedOrder;
+  const sceneHidden =
+    !isFocused || !!covered || !!activeObject || !!openedOrder || !!repeatOrder || listOpen;
 
   useEffect(() => {
-    onOverlayOpenChange?.(!!activeObject || !!openedOrder);
-  }, [activeObject, openedOrder, onOverlayOpenChange]);
+    onOverlayOpenChange?.(!!activeObject || !!openedOrder || !!repeatOrder || listOpen);
+  }, [activeObject, openedOrder, repeatOrder, listOpen, onOverlayOpenChange]);
 
   const selectArea = (next: AreaId) => {
     setArea(next);
@@ -210,7 +228,7 @@ export function OrdersScreen({
                   closeAddrDropdown();
                 }}
               >
-                <Text style={styles.addrIcon}>🏡</Text>
+                <Glyph glyph="🏡" size={18} colors={themedIconColors(t)} />
                 <Text style={styles.addrText}>{addr}</Text>
                 {addr === activeAddress && <Text style={styles.addrCheck}>✓</Text>}
               </Pressable>
@@ -218,7 +236,7 @@ export function OrdersScreen({
             <View style={styles.addrDivider} />
             {addrAdding ? (
               <Animated.View entering={FadeIn.duration(200)} style={styles.addrRow}>
-                <Text style={styles.addrIcon}>🏡</Text>
+                <Glyph glyph="🏡" size={18} colors={themedIconColors(t)} />
                 <TextInput
                   style={styles.addrInput}
                   value={addrDraft}
@@ -277,13 +295,28 @@ export function OrdersScreen({
           </Animated.Text>
         </View>
 
+        {/* Дом списком — второй вход в тот же выбор объекта. Изометрия
+            остаётся главной, но не единственной: кому-то перечень привычнее,
+            а скринридеру доступен только он */}
+        <Animated.View entering={FadeIn.delay(200).duration(400)} style={styles.listLinkWrap}>
+          <PressableScale
+            style={styles.listLink}
+            onPress={() => setListOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Выбрать объект из списка"
+          >
+            <Glyph glyph="🗂️" size={15} colors={themedIconColors(t)} />
+            <Text style={styles.listLinkText}>Выбрать из списка</Text>
+          </PressableScale>
+        </Animated.View>
+
         <Animated.Text entering={FadeInDown.delay(200).duration(400)} style={styles.sectionTitle}>
           Недавние заказы
         </Animated.Text>
 
         {orders.length === 0 ? (
           <Animated.View entering={FadeIn.delay(260).duration(400)} style={styles.emptyWrap}>
-            <Text style={styles.emptyIcon}>🗂️</Text>
+            <EmptyScene kind="orders" />
             <Text style={styles.emptyTitle}>Пока нет заказов</Text>
             <Text style={styles.emptySub}>
               Коснитесь объекта в доме, чтобы создать первую заявку
@@ -295,6 +328,9 @@ export function OrdersScreen({
             // мастера»: именно оно говорит, есть ли что решать
             const pending = (order.offers ?? []).filter((o) => o.status === 'pending').length;
             const waitingReview = order.status === 'Завершена' && !order.reviewed;
+            // Статусы, где дело за клиентом, зовут действием, а не названием
+            // состояния — и зелёным, как всё, что ждёт его решения
+            const waitingConfirm = order.status === 'Ждёт подтверждения';
             return (
               <Animated.View
                 key={order.id}
@@ -321,8 +357,12 @@ export function OrdersScreen({
                     <Text style={[styles.orderStatus, { color: t.accent }]}>
                       {counted(pending, 'предложение', 'предложения', 'предложений')}
                     </Text>
+                  ) : waitingConfirm ? (
+                    <Text style={[styles.orderStatus, { color: t.accent }]}>
+                      Подтвердите работу
+                    </Text>
                   ) : waitingReview ? (
-                    <Text style={[styles.orderStatus, { color: t.warn }]}>Оцените работу</Text>
+                    <Text style={[styles.orderStatus, { color: t.accent }]}>Оцените работу</Text>
                   ) : (
                     <Text style={[styles.orderStatus, { color: statusColor(order.status, t) }]}>
                       {order.status}
@@ -334,6 +374,16 @@ export function OrdersScreen({
           })
         )}
       </ScrollView>
+
+      {listOpen && (
+        <ObjectListSheet
+          onClose={() => setListOpen(false)}
+          onPick={(obj) => {
+            setListOpen(false);
+            setActiveObject(obj);
+          }}
+        />
+      )}
 
       {activeObject && (
         <ActionSheet
@@ -360,6 +410,26 @@ export function OrdersScreen({
           onChat={() => {
             setOpenedOrderId(null);
             onOpenOrderChat(openedOrder.id);
+          }}
+          // У заявок до появления objectId повторять нечего — кнопки не будет
+          onRepeat={
+            openedOrder.objectId && openedOrder.serviceLabel
+              ? () => {
+                  setOpenedOrderId(null);
+                  setRepeatOrder(openedOrder);
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {repeatOrder && (
+        <RepeatSheet
+          order={repeatOrder}
+          onClose={() => setRepeatOrder(null)}
+          onSubmit={(draft) => {
+            onCreateOrder(draft);
+            setRepeatOrder(null);
           }}
         />
       )}
@@ -449,7 +519,7 @@ const makeStyles = (t: Palette) =>
     container: { flex: 1 },
     content: { padding: 16, paddingTop: 60, paddingBottom: 120 },
     headerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
-    header: { fontSize: 20, fontWeight: '800', color: t.text },
+    header: { fontSize: 20, fontFamily: FONTS.display, color: t.text },
     headerChevron: { fontSize: 15, color: t.accent, fontWeight: '800', marginTop: 2 },
     addrCard: {
       position: 'absolute',
@@ -529,7 +599,20 @@ const makeStyles = (t: Palette) =>
       marginBottom: 20,
     },
     houseCaption: { position: 'absolute', color: t.textMuted, fontWeight: '600', fontSize: 12.5 },
-    sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10, color: t.text },
+    listLinkWrap: { alignItems: 'center', marginTop: -8, marginBottom: 16 },
+    listLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 7,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    listLinkText: { fontWeight: '700', fontSize: 12.5, color: t.accent },
+    sectionTitle: { fontSize: 15, fontFamily: FONTS.heading, marginBottom: 10, color: t.text },
     orderItem: {
       flexDirection: 'row',
       justifyContent: 'space-between',

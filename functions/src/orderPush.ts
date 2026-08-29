@@ -14,10 +14,14 @@ export const MASTERS_SCAN_LIMIT = 1000;
 /**
  * Шлёт пуш о заявке всем подходящим проверенным мастерам.
  * Возвращает, скольким мастерам ушло уведомление.
+ *
+ * excludeUid — мастер, которому уже ушёл именной пуш (повторная заявка зовёт
+ * прошлого исполнителя лично): второй, общий, был бы дублем.
  */
 export async function notifyMastersAbout(
   order: FirebaseFirestore.DocumentData,
   title: string,
+  options?: { excludeUid?: string },
 ): Promise<number> {
   const db = getFirestore();
   const snap = await db.collection('masters').limit(MASTERS_SCAN_LIMIT).get();
@@ -36,6 +40,7 @@ export async function notifyMastersAbout(
       // Клиент не должен получать уведомление о собственной заявке, даже
       // если он же зарегистрирован мастером
       if (d.id === order.clientId) return false;
+      if (options?.excludeUid && d.id === options.excludeUid) return false;
       // Мастер отмечает несколько населённых пунктов; у анкет, заведённых до
       // множественного выбора, остаётся прежнее поле city строкой
       const cities: string[] = Array.isArray(d.get('cities'))

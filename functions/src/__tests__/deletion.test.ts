@@ -29,6 +29,7 @@ async function seed() {
     clientId: UID,
     clientName: 'Дмитрий',
     address: 'ул. Ленина, 24',
+    clientPhone: '+79991234567',
     status: 'Завершена',
   });
 
@@ -64,6 +65,8 @@ describe('полное удаление', () => {
     expect(done.get('clientName')).toBe('Удалённый аккаунт');
     expect(done.get('address')).toBe('');
     expect(done.get('photoUrl')).toBeNull();
+    // Телефон, разделённый с мастером при выборе, — тоже персональные данные
+    expect(done.get('clientPhone')).toBeNull();
     expect(done.get('anonymizedAt')).toBeTruthy();
   });
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -10,9 +10,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { palettes, Palette, useTheme } from '../theme';
+import { Glyph, themedIconColors } from './glyphIcons';
+import { FONTS, TABULAR } from './typography';
+import { hapticImpact, hapticSuccess } from './haptics';
 import { PressableScale } from './PressableScale';
 import { SheetGrabber, useSheetDrag } from './sheetDrag';
 import { counted, ratingText, rub } from './format';
+import { VerificationExplainer } from './VerificationExplainer';
 import type { Offer, Order } from '../screens/OrdersScreen';
 
 type Props = {
@@ -28,15 +32,65 @@ type Props = {
   // Старые заявки, где предложение лежало в самой заявке
   onAcceptPrice: () => void;
   onDeclinePrice: () => void;
+  // Повторить завершённую заявку: передаётся, только когда повторять есть что
+  onRepeat?: () => void;
 };
 
 const CANCELLABLE = ['Поиск мастера', 'Есть предложения', 'В работе'];
 
+// Правило цвета: жёлтый — ждём других, зелёный — дело за вами. «Ждёт
+// подтверждения» — единственный статус, где от клиента требуется поступок
+// (принять работу), и жёлтая пауза маскировала бы призыв к действию.
 export function statusColor(status: string, t: Palette) {
   if (status === 'В работе') return t.blue;
+  if (status === 'Ждёт подтверждения') return t.accent;
   if (status === 'Завершена') return t.accent;
   if (status === 'Отменена') return t.textMuted;
-  return t.warn; // Поиск мастера, ждёт подтверждения и прочие «ожидающие»
+  return t.warn; // Поиск мастера и прочие «ждём ответа»
+}
+
+// ---------- Лента статуса ----------
+
+// Путь заявки как четыре шага. Точный статус написан в чипе — лента отвечает
+// на другой вопрос: «сколько уже пройдено». Подписи короткие: полные названия
+// статусов вчетвером не помещаются.
+const STEPPER_STEPS: { statuses: string[]; label: string }[] = [
+  // «Есть предложения» — только у заявок, созданных до подколлекции offers
+  { statuses: ['Поиск мастера', 'Есть предложения'], label: 'Поиск' },
+  { statuses: ['В работе'], label: 'В работе' },
+  { statuses: ['Ждёт подтверждения'], label: 'Приёмка' },
+  { statuses: ['Завершена'], label: 'Готово' },
+];
+
+function StatusStepper({ status }: { status: string }) {
+  const { mode, colors: t } = useTheme();
+  const styles = themed[mode];
+  const idx = STEPPER_STEPS.findIndex((s) => s.statuses.includes(status));
+  // Отменённой заявке лента прогресса не положена: пути больше нет
+  if (idx < 0) return null;
+
+  return (
+    <View style={styles.stepperRow}>
+      {STEPPER_STEPS.map((step, i) => (
+        <View key={step.label} style={[styles.stepperItemWrap, i === 0 && styles.stepperItemFirst]}>
+          {i > 0 && (
+            <View style={[styles.stepperLine, i <= idx && { backgroundColor: t.accent }]} />
+          )}
+          <View style={styles.stepperItem}>
+            <View
+              style={[
+                styles.stepperDot,
+                i <= idx && { backgroundColor: t.accent, borderColor: t.accent },
+              ]}
+            />
+            <Text style={[styles.stepperLabel, i === idx && styles.stepperLabelOn]}>
+              {step.label}
+            </Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 // Детали заказа: фото крупно, комментарий, предложения мастеров и действия.
@@ -51,10 +105,13 @@ export function OrderSheet({
   onSubmitReview,
   onAcceptPrice,
   onDeclinePrice,
+  onRepeat,
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [confirming, setConfirming] = useState(false);
+  // «Как мы проверяем мастеров» — открывается с бейджа на предложении
+  const [verifOpen, setVerifOpen] = useState(false);
   const { gesture, cardStyle } = useSheetDrag(onClose);
 
   const offers = (order.offers ?? []).filter((o) => o.status === 'pending');
@@ -64,6 +121,14 @@ export function OrderSheet({
   const awaitingConfirm = order.status === 'Ждёт подтверждения';
   const canReview = order.status === 'Завершена' && !order.reviewed && !!order.masterId;
   const cancellable = CANCELLABLE.includes(order.status);
+
+  // Телефон мастера сервер кладёт в заявку после выбора исполнителя — сделка
+  // на этом рынке живёт в звонке, и прятать его за чатом значило бы, что
+  // номерами обменяются первым же сообщением
+  const canCall = !!order.masterId && !!order.masterPhone;
+  const dial = () => {
+    if (order.masterPhone) Linking.openURL(`tel:${order.masterPhone}`).catch(() => {});
+  };
 
   // Заявки до появления offers: предложение лежит в самой заявке и
   // показывается по-старому
@@ -110,6 +175,8 @@ export function OrderSheet({
           </View>
         </Animated.View>
 
+        <StatusStepper status={order.status} />
+
         {order.photoUri ? (
           <Animated.View entering={FadeInDown.delay(120).duration(300)}>
             <Image source={{ uri: order.photoUri }} style={styles.photo} />
@@ -144,7 +211,11 @@ export function OrderSheet({
                   <OfferCard
                     key={offer.masterId}
                     offer={offer}
-                    onPick={() => onAcceptOffer(offer.masterId)}
+                    onPick={() => {
+                      hapticSuccess();
+                      onAcceptOffer(offer.masterId);
+                    }}
+                    onVerifiedInfo={() => setVerifOpen(true)}
                   />
                 ))}
               </>
@@ -172,8 +243,9 @@ export function OrderSheet({
               </PressableScale>
             </View>
 
-            <PressableScale style={styles.offerDiscuss} onPress={onChat}>
-              <Text style={styles.offerDiscussText}>💬 Обговорить цену</Text>
+            <PressableScale style={[styles.offerDiscuss, styles.iconLabelRow]} onPress={onChat}>
+              <Glyph glyph="💬" size={16} colors={themedIconColors(t)} />
+              <Text style={styles.offerDiscussText}>Обговорить цену</Text>
             </PressableScale>
           </Animated.View>
         )}
@@ -200,7 +272,13 @@ export function OrderSheet({
         {/* Мастер сообщил, что закончил — просим подтвердить результат */}
         {awaitingConfirm && (
           <Animated.View entering={FadeInDown.delay(180).duration(300)}>
-            <PressableScale style={styles.confirmBtn} onPress={onConfirmDone}>
+            <PressableScale
+              style={styles.confirmBtn}
+              onPress={() => {
+                hapticSuccess();
+                onConfirmDone();
+              }}
+            >
               <Text style={styles.confirmBtnText}>✓ Работа выполнена — подтвердить</Text>
             </PressableScale>
           </Animated.View>
@@ -211,20 +289,95 @@ export function OrderSheet({
         {canReview && <ReviewForm onSubmit={onSubmitReview} />}
 
         {/* Писать некому, пока мастер не выбран: до этого у заявки нет
-            собеседника, и сообщение осталось бы без ответа */}
-        {(order.masterId || legacyOffer) && (
-          <Animated.View entering={FadeInDown.delay(200).duration(300)}>
-            <PressableScale
-              style={[styles.chatBtn, (awaitingConfirm || canReview) && styles.chatBtnSecondary]}
-              onPress={onChat}
-            >
-              <Text
+            собеседника, и сообщение осталось бы без ответа. Как только сервер
+            положил в заявку телефон, рядом с чатом встаёт звонок. */}
+        {(order.masterId || legacyOffer) &&
+          (canCall ? (
+            <Animated.View entering={FadeInDown.delay(200).duration(300)} style={styles.contactRow}>
+              <PressableScale
                 style={[
-                  styles.chatBtnText,
-                  (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
+                  styles.chatBtn,
+                  styles.contactBtn,
+                  styles.iconLabelRow,
+                  (awaitingConfirm || canReview) && styles.chatBtnSecondary,
                 ]}
+                onPress={dial}
               >
-                💬 Написать мастеру
+                {/* На акцентной кнопке зелёная иконка слилась бы с фоном —
+                    контур берёт цвет текста кнопки */}
+                <Glyph
+                  glyph="📞"
+                  size={17}
+                  colors={
+                    awaitingConfirm || canReview
+                      ? themedIconColors(t)
+                      : { stroke: t.onAccent, fill: t.accent, glass: t.accentSoft }
+                  }
+                />
+                <Text
+                  style={[
+                    styles.chatBtnText,
+                    (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
+                  ]}
+                >
+                  Позвонить
+                </Text>
+              </PressableScale>
+              <PressableScale
+                style={[
+                  styles.chatBtn,
+                  styles.contactBtn,
+                  styles.iconLabelRow,
+                  styles.chatBtnSecondary,
+                ]}
+                onPress={onChat}
+              >
+                <Glyph glyph="💬" size={17} colors={themedIconColors(t)} />
+                <Text style={[styles.chatBtnText, styles.chatBtnTextSecondary]}>Написать</Text>
+              </PressableScale>
+            </Animated.View>
+          ) : (
+            <Animated.View entering={FadeInDown.delay(200).duration(300)}>
+              <PressableScale
+                style={[
+                  styles.chatBtn,
+                  styles.iconLabelRow,
+                  (awaitingConfirm || canReview) && styles.chatBtnSecondary,
+                ]}
+                onPress={onChat}
+              >
+                <Glyph
+                  glyph="💬"
+                  size={17}
+                  colors={
+                    awaitingConfirm || canReview
+                      ? themedIconColors(t)
+                      : { stroke: t.onAccent, fill: t.accent, glass: t.accentSoft }
+                  }
+                />
+                <Text
+                  style={[
+                    styles.chatBtnText,
+                    (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
+                  ]}
+                >
+                  Написать мастеру
+                </Text>
+              </PressableScale>
+            </Animated.View>
+          ))}
+
+        {/* Повторить завершённую работу — та же услуга и адрес без похода по
+            дому; прошлого мастера можно позвать первым */}
+        {order.status === 'Завершена' && onRepeat && (
+          <Animated.View entering={FadeInDown.delay(230).duration(300)}>
+            <PressableScale
+              style={[styles.chatBtn, styles.chatBtnSecondary, styles.iconLabelRow]}
+              onPress={onRepeat}
+            >
+              <Glyph glyph="🔄" size={16} colors={themedIconColors(t)} />
+              <Text style={[styles.chatBtnText, styles.chatBtnTextSecondary]}>
+                Повторить заявку
               </Text>
             </PressableScale>
           </Animated.View>
@@ -243,14 +396,24 @@ export function OrderSheet({
           </Animated.View>
         )}
       </Animated.View>
+
+      <VerificationExplainer open={verifOpen} onClose={() => setVerifOpen(false)} />
     </View>
   );
 }
 
 // ---------- Предложение одного мастера ----------
 
-function OfferCard({ offer, onPick }: { offer: Offer; onPick: () => void }) {
-  const { mode } = useTheme();
+function OfferCard({
+  offer,
+  onPick,
+  onVerifiedInfo,
+}: {
+  offer: Offer;
+  onPick: () => void;
+  onVerifiedInfo: () => void;
+}) {
+  const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [confirming, setConfirming] = useState(false);
   // Профиль мастера раскрывается на месте, а не отдельным экраном: шторка
@@ -269,7 +432,16 @@ function OfferCard({ offer, onPick }: { offer: Offer; onPick: () => void }) {
     >
       <View style={styles.offerHead}>
         <Pressable style={styles.offerWho} onPress={() => setProfileOpen((v) => !v)}>
-          <Text style={styles.offerName}>{fullName}</Text>
+          <View style={styles.offerNameRow}>
+            <Text style={styles.offerName}>{fullName}</Text>
+            {/* Предложение может прислать только проверенный мастер — правила
+                не пускают остальных. Бейдж делает это видимым и объясняет,
+                что стоит за словом «проверен». */}
+            <Pressable style={styles.verifiedChip} onPress={onVerifiedInfo}>
+              <Glyph glyph="🛡️" size={11} colors={themedIconColors(t)} />
+              <Text style={styles.verifiedText}>Проверен</Text>
+            </Pressable>
+          </View>
           <Text style={styles.offerRating}>
             {offer.rating != null
               ? `★ ${ratingText(offer.rating)} · ${counted(offer.reviewsCount, 'отзыв', 'отзыва', 'отзывов')}`
@@ -279,6 +451,8 @@ function OfferCard({ offer, onPick }: { offer: Offer; onPick: () => void }) {
             {profileOpen ? 'Свернуть профиль' : 'Профиль мастера ›'}
           </Text>
         </Pressable>
+        {/* Цена — то, что клиент сравнивает между предложениями: ей самый
+            крупный кегль в карточке и цифры одной ширины */}
         <Text style={styles.offerPriceSmall}>{rub(offer.price)}</Text>
       </View>
 
@@ -368,7 +542,11 @@ function ReviewForm({ onSubmit }: { onSubmit: (stars: number, text: string) => v
 
       <PressableScale
         style={[styles.reviewBtn, stars === 0 && styles.reviewBtnDim]}
-        onPress={() => stars > 0 && onSubmit(stars, text.trim())}
+        onPress={() => {
+          if (stars === 0) return;
+          hapticImpact();
+          onSubmit(stars, text.trim());
+        }}
         disabled={stars === 0}
       >
         <Text style={styles.reviewBtnText}>
@@ -396,8 +574,31 @@ const makeStyles = (t: Palette) =>
       elevation: 8,
     },
     headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
+    stepperRow: { flexDirection: 'row', marginBottom: 14, marginTop: 2 },
+    // Первая ячейка без соединителя не растягивается — иначе линия к второй
+    // точке начиналась бы с разрывом
+    stepperItemWrap: { flexDirection: 'row', alignItems: 'flex-start', flex: 1 },
+    stepperItemFirst: { flex: 0 },
+    stepperItem: { alignItems: 'center', gap: 3 },
+    stepperDot: {
+      width: 9,
+      height: 9,
+      borderRadius: 4.5,
+      borderWidth: 2,
+      borderColor: t.toggleOff,
+      backgroundColor: t.card,
+    },
+    stepperLine: {
+      flex: 1,
+      height: 2,
+      backgroundColor: t.toggleOff,
+      marginTop: 3.5,
+      marginHorizontal: 3,
+    },
+    stepperLabel: { fontSize: 9.5, fontWeight: '700', color: t.textMuted },
+    stepperLabelOn: { color: t.accent },
     headerText: { flex: 1 },
-    title: { fontSize: 16, fontWeight: '800', color: t.text, lineHeight: 21 },
+    title: { fontSize: 16, fontFamily: FONTS.heading, color: t.text, lineHeight: 21 },
     date: { fontSize: 11.5, color: t.textMuted, fontWeight: '600', marginTop: 3 },
     statusChip: {
       flexDirection: 'row',
@@ -454,10 +655,21 @@ const makeStyles = (t: Palette) =>
     },
     offerHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
     offerWho: { flex: 1 },
-    offerName: { fontSize: 14, fontWeight: '800', color: t.text },
+    offerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+    offerName: { fontSize: 14, fontFamily: FONTS.heading, color: t.text },
+    verifiedChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      backgroundColor: t.accentSoft,
+      borderRadius: 9,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+    },
+    verifiedText: { fontSize: 10, fontWeight: '800', color: t.accentStrong },
     offerRating: { fontSize: 11.5, fontWeight: '700', color: t.textMuted, marginTop: 2 },
     offerProfileToggle: { fontSize: 11.5, fontWeight: '800', color: t.accent, marginTop: 4 },
-    offerPriceSmall: { fontSize: 19, fontWeight: '800', color: t.text },
+    offerPriceSmall: { fontSize: 23, fontFamily: FONTS.heading, color: t.text, ...TABULAR },
     profileBox: {
       backgroundColor: t.card,
       borderRadius: 12,
@@ -484,7 +696,14 @@ const makeStyles = (t: Palette) =>
       marginTop: 8,
     },
     offerLabel: { fontSize: 11, fontWeight: '800', color: t.textMuted },
-    offerPrice: { fontSize: 26, fontWeight: '800', color: t.text, marginTop: 4, marginBottom: 12 },
+    offerPrice: {
+      fontSize: 26,
+      fontFamily: FONTS.heading,
+      color: t.text,
+      marginTop: 4,
+      marginBottom: 12,
+      ...TABULAR,
+    },
     offerRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
     offerBtn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
     offerAccept: { backgroundColor: t.accent },
@@ -493,6 +712,8 @@ const makeStyles = (t: Palette) =>
     offerDecline: { backgroundColor: t.card, borderWidth: 1, borderColor: t.border },
     offerDeclineText: { color: t.danger, fontWeight: '800', fontSize: 13.5 },
     offerDiscuss: { alignItems: 'center', paddingVertical: 11, marginTop: 4 },
+    // Ряд «иконка + подпись» для кнопок, где раньше эмодзи жил в строке текста
+    iconLabelRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 },
     offerDiscussText: { color: t.accent, fontWeight: '800', fontSize: 13 },
     agreedCard: {
       backgroundColor: t.accentFaint,
@@ -565,6 +786,9 @@ const makeStyles = (t: Palette) =>
       backgroundColor: t.accent,
       marginBottom: 9,
     },
+    // Звонок и чат в один ряд: после выбора мастера оба действия равноправны
+    contactRow: { flexDirection: 'row', gap: 8 },
+    contactBtn: { flex: 1 },
     chatBtnSecondary: {
       backgroundColor: t.card,
       borderWidth: 1,

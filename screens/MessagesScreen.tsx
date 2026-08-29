@@ -28,6 +28,10 @@ import Animated, {
 import { STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
+import { Glyph, themedIconColors } from '../components/glyphIcons';
+import { FONTS } from '../components/typography';
+import { PulseDot } from '../components/PulseDot';
+import { EmptyScene } from '../components/illustrations';
 
 export type ChatMessage = { id: string; from: 'user' | 'master'; text: string; time: string };
 export type Thread = {
@@ -125,7 +129,7 @@ function ThreadList({
   typingThreadId: string | null;
   onOpen: (id: string) => void;
 }) {
-  const { mode } = useTheme();
+  const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   // Стаггер — это представление списка при первом появлении экрана. Дальше
   // треды приходят по одному из подписки, и задержка «по номеру в списке»
@@ -141,7 +145,7 @@ function ThreadList({
 
       {threads.length === 0 ? (
         <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.emptyWrap}>
-          <Text style={styles.emptyIcon}>💬</Text>
+          <EmptyScene kind="messages" />
           <Text style={styles.emptyTitle}>Пока нет сообщений</Text>
           <Text style={styles.emptySub}>
             Здесь появятся ответы мастера, когда вы создадите заявку
@@ -159,7 +163,12 @@ function ThreadList({
             >
               <PressableScale style={styles.threadItem} onPress={() => onOpen(thread.id)}>
                 <View style={styles.avatar}>
-                  <Text style={styles.avatarIcon}>{thread.icon}</Text>
+                  <Glyph
+                    glyph={thread.icon}
+                    size={24}
+                    colors={themedIconColors(t)}
+                    textStyle={styles.avatarIcon}
+                  />
                 </View>
                 <View style={styles.threadBody}>
                   <View style={styles.threadTopRow}>
@@ -175,7 +184,7 @@ function ThreadList({
                     </Text>
                   )}
                 </View>
-                {thread.unread && <View style={styles.unreadDot} />}
+                {thread.unread && <PulseDot style={styles.unreadDot} />}
               </PressableScale>
             </Animated.View>
           );
@@ -219,7 +228,12 @@ function ThreadDetail({
           <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.detailTitleWrap}>
-          <Text style={styles.detailAvatar}>{thread.icon}</Text>
+          <Glyph
+            glyph={thread.icon}
+            size={22}
+            colors={themedIconColors(t)}
+            textStyle={styles.detailAvatar}
+          />
           <Text style={styles.detailName}>{thread.name}</Text>
         </View>
         <View style={styles.backChip_ghost} />
@@ -330,7 +344,7 @@ const makeStyles = (t: Palette) =>
     root: { flex: 1, backgroundColor: t.bg },
     container: { flex: 1 },
     content: { padding: 16, paddingTop: 60, paddingBottom: 120 },
-    header: { fontSize: 20, fontWeight: '800', marginBottom: 16, color: t.text },
+    header: { fontSize: 20, fontFamily: FONTS.display, marginBottom: 16, color: t.text },
     emptyWrap: {
       alignItems: 'center',
       paddingVertical: 40,

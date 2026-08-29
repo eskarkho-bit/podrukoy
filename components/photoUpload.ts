@@ -1,10 +1,35 @@
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { storage } from '../firebaseConfig';
 
+// Свой предел ожидания поверх лимитов SDK. Без него зависшая загрузка
+// держит кнопку «Сохраняем…» до десяти минут: SDK считает сетевые ошибки
+// поправимыми и повторяет их молча. Пользователь столько не ждёт — через
+// полминуты он должен получить честную ошибку и сохранённый черновик.
+const UPLOAD_TIMEOUT_MS = 30_000;
+
+function withDeadline<T>(work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('Загрузка файла не уложилась в отведённое время')),
+      UPLOAD_TIMEOUT_MS,
+    );
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 // expo-image-picker отдаёт локальный URI (file:// на телефоне, blob: на вебе).
 // Другому устройству он ничего не скажет, поэтому файл уезжает в Storage,
 // а в заявке остаётся постоянная ссылка.
-async function upload(path: string, localUri: string): Promise<string> {
+async function doUpload(path: string, localUri: string): Promise<string> {
   const response = await fetch(localUri);
   const blob = await response.blob();
 
@@ -12,6 +37,10 @@ async function upload(path: string, localUri: string): Promise<string> {
   await uploadBytes(fileRef, blob, { contentType: blob.type || 'image/jpeg' });
 
   return getDownloadURL(fileRef);
+}
+
+function upload(path: string, localUri: string): Promise<string> {
+  return withDeadline(doUpload(path, localUri));
 }
 
 /**

@@ -71,6 +71,7 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
           // Мастер не должен ехать к исчезнувшему клиенту
           ...(open ? { status: 'Отменена' } : {}),
           clientName: ANONYMOUS,
+          clientPhone: null,
           address: '',
           comment: '',
           photoUrl: null,

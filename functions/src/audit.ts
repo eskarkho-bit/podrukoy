@@ -27,7 +27,9 @@ export type AuditAction =
   | 'order.cancelled'
   | 'order.reopened'
   | 'order.repushed'
+  | 'order.reminder_sent'
   | 'order.anonymized'
+  | 'order.contacts_shared'
   // мастера
   | 'master.applied'
   | 'master.approved'
@@ -55,7 +57,8 @@ export type AuditAction =
   // фоновые прогоны
   | 'reconcile.started'
   | 'reconcile.finished'
-  | 'reconcile.skipped';
+  | 'reconcile.skipped'
+  | 'reminders.finished';
 
 export type AuditActor =
   /** Действие инициировал человек из приложения */

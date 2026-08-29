@@ -14,17 +14,113 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, Ellipse, Line, Polygon, Rect } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  Ellipse,
+  Line,
+  Polygon,
+  RadialGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 import { springs } from '../motion';
+import { useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
+import { Glyph } from './glyphIcons';
+import { hasObjectIcon, ObjectIcon } from './objectIcons';
 
 export type AreaId = 'Дом' | 'Двор' | 'Гараж';
 export type Stage = 'exterior' | 'open' | 'room';
 
+// Сцена днём и ночью. Тёмная тема раньше оставляла дом ярким пятном —
+// теперь вместе с ней наступает ночь: тёмное небо, тёплый свет в окнах,
+// луна вместо облаков. Цвета собраны парой палитр, а не рассыпаны по SVG.
+type ScenePalette = {
+  sky: string;
+  sceneBorder: string;
+  ground: string;
+  groundStroke: string;
+  path: string;
+  garage: [string, string, string, string];
+  lineSoft: string;
+  wallLeft: string;
+  wallRight: string;
+  door: string;
+  doorKnob: string;
+  windowGlass: string;
+  windowFrame: string;
+  planBase: string;
+  planStroke: string;
+  roof: [string, string, string, string];
+  chimney: [string, string, string];
+  trunk: string;
+  crowns: [string, string, string];
+  label: string;
+  objectLabel: string;
+};
+
+const DAY: ScenePalette = {
+  sky: '#F6FAF3',
+  sceneBorder: '#E6E9E1',
+  ground: '#E4EDDC',
+  groundStroke: '#D8E4CC',
+  path: '#ECEAE0',
+  garage: ['#DCE6D2', '#F6F4EC', '#EAE7DD', '#D5DCCB'],
+  lineSoft: '#FFFFFF',
+  wallLeft: '#ECE9E0',
+  wallRight: '#F8F6EF',
+  door: '#6E8A64',
+  doorKnob: '#F2F5F0',
+  windowGlass: '#C7D6E0',
+  windowFrame: '#FFFFFF',
+  planBase: '#FBF9F3',
+  planStroke: '#E8E5DA',
+  roof: ['#708A66', '#7E9873', '#9CB48E', '#F3F1E8'],
+  chimney: ['#F0ECE0', '#E8E4D6', '#DDD8C8'],
+  trunk: '#B49B7D',
+  crowns: ['#9CB88C', '#8AA97A', '#A9C29A'],
+  label: '#5E7A56',
+  objectLabel: '#3C4A37',
+};
+
+const NIGHT: ScenePalette = {
+  sky: '#141C17',
+  sceneBorder: '#243329',
+  ground: '#1D2A21',
+  groundStroke: '#243329',
+  path: '#242F26',
+  garage: ['#22301F', '#2C3A2E', '#25322A', '#1C271F'],
+  lineSoft: 'rgba(255,255,255,0.14)',
+  wallLeft: '#2A382E',
+  wallRight: '#33453A',
+  door: '#48624A',
+  doorKnob: '#DCD6B8',
+  // Ночью дома живёт свет — окна тёплые, это половина всего настроения
+  windowGlass: '#F2D98F',
+  windowFrame: '#E8D9A0',
+  planBase: '#243026',
+  planStroke: '#2E3B31',
+  roof: ['#31463A', '#3B5344', '#4A6450', '#2A3A32'],
+  chimney: ['#3B4B41', '#33423A', '#2C3A32'],
+  trunk: '#6E5C46',
+  crowns: ['#3F5A44', '#354E3A', '#4A6850'],
+  label: '#A9C29A',
+  objectLabel: '#DEE5D8',
+};
+
+// Комнаты на плане ночью — те же цвета, приглушённые до «света ламп»
+const NIGHT_ROOM_FILLS: Record<string, string> = {
+  kitchen: '#4A4331',
+  living: '#3B4A35',
+  bath: '#33444A',
+  bedroom: '#453A47',
+};
+
 export type SceneObject = {
   id: string;
   title: string;
-  icon: string;
+  icon: string; // эмодзи-запас: показывается, только если векторной иконки нет
   place: string;
   // Координаты в системе сцены (viewBox 400×340)
   x: number;
@@ -52,9 +148,13 @@ export const ROOMS: Room[] = [
     y: 118,
     points: '200,100 255,127.5 200,155 145,127.5',
     fill: '#F5E9D2',
+    // Координаты подобраны так, чтобы кружки и подписи трёх чипов не
+    // наезжали друг на друга: подпись висит под кружком, и «Холодильник»
+    // шире всех — ему правый угол, где снизу пусто
     objects: [
-      { id: 'sink', title: 'Мойка', icon: '🚰', place: 'Кухня', x: 170, y: 120 },
-      { id: 'stove', title: 'Плита', icon: '🔥', place: 'Кухня', x: 228, y: 140 },
+      { id: 'sink', title: 'Мойка', icon: '🚰', place: 'Кухня', x: 158, y: 124 },
+      { id: 'stove', title: 'Плита', icon: '🔥', place: 'Кухня', x: 196, y: 152 },
+      { id: 'fridge', title: 'Холодильник', icon: '❄️', place: 'Кухня', x: 245, y: 125 },
     ],
   },
   {
@@ -65,7 +165,10 @@ export const ROOMS: Room[] = [
     y: 153,
     points: '255,127.5 310,155 255,182.5 200,155',
     fill: '#E3ECDB',
-    objects: [{ id: 'light', title: 'Свет', icon: '💡', place: 'Гостиная', x: 255, y: 155 }],
+    objects: [
+      { id: 'light', title: 'Свет', icon: '💡', place: 'Гостиная', x: 238, y: 152 },
+      { id: 'ac', title: 'Кондиционер', icon: '🌬️', place: 'Гостиная', x: 296, y: 158 },
+    ],
   },
   {
     id: 'bath',
@@ -77,7 +180,8 @@ export const ROOMS: Room[] = [
     fill: '#D9E7E9',
     objects: [
       { id: 'shower', title: 'Душ', icon: '🚿', place: 'Ванная', x: 174, y: 170 },
-      { id: 'pipe', title: 'Труба', icon: '🔧', place: 'Ванная', x: 230, y: 192 },
+      { id: 'pipe', title: 'Труба', icon: '🔧', place: 'Ванная', x: 234, y: 188 },
+      { id: 'washer', title: 'Стиральная машина', icon: '👕', place: 'Ванная', x: 200, y: 208 },
     ],
   },
   {
@@ -95,17 +199,37 @@ export const ROOMS: Room[] = [
   },
 ];
 
-// Объекты во дворе и в гараже — доступны сразу при выборе вкладки
+// Объекты во дворе и в гараже — доступны сразу при выборе вкладки.
+// Двор заодно отвечает за то, что видно с улицы: входную дверь, крышу,
+// котёл у стены — в план комнат они не ложатся, а со двора до них рукой
+// подать. Координаты подобраны, чтобы кружок одного чипа не наезжал на
+// подпись соседнего: подпись висит под кружком и шире него.
 const AREA_OBJECTS: Record<'Двор' | 'Гараж', SceneObject[]> = {
   Двор: [
     { id: 'lawn', title: 'Газон', icon: '🌿', place: 'Двор', x: 283, y: 262 },
     { id: 'trees', title: 'Деревья', icon: '🌳', place: 'Двор', x: 332, y: 214 },
+    { id: 'door', title: 'Входная дверь', icon: '🚪', place: 'Вход в дом', x: 251, y: 222 },
+    { id: 'roof', title: 'Крыша', icon: '🏠', place: 'Дом', x: 200, y: 160 },
+    { id: 'boiler', title: 'Котёл и бойлер', icon: '♨️', place: 'Котельная', x: 198, y: 246 },
+    { id: 'septic', title: 'Септик', icon: '🕳️', place: 'Двор', x: 256, y: 304 },
+    { id: 'fence', title: 'Забор и навес', icon: '🧱', place: 'Двор', x: 352, y: 284 },
   ],
   Гараж: [
     { id: 'gate', title: 'Ворота', icon: '🚪', place: 'Гараж', x: 104, y: 290 },
     { id: 'tools', title: 'Инструменты', icon: '🧰', place: 'Гараж', x: 64, y: 244 },
+    { id: 'panel', title: 'Щиток', icon: '⚡', place: 'Гараж', x: 158, y: 252 },
   ],
 };
+
+// Все объекты сцены одним списком, по вкладкам. Нужен шторке «Выбрать из
+// списка»: изометрия — витрина, но не единственная дверь. Кому-то список
+// привычнее картинки, скринридер читает только его, а котёл или септик
+// глазами на сцене можно и не найти.
+export const SCENE_OBJECT_GROUPS: { area: AreaId; objects: SceneObject[] }[] = [
+  { area: 'Дом', objects: ROOMS.flatMap((room) => room.objects) },
+  { area: 'Двор', objects: AREA_OBJECTS['Двор'] },
+  { area: 'Гараж', objects: AREA_OBJECTS['Гараж'] },
+];
 
 // Центр «кадра»: куда камера привозит выбранную точку
 const CX = 200;
@@ -159,6 +283,11 @@ export function HouseScene({
 }: Props) {
   const [w, setW] = useState(0);
   const k = w / 400; // масштаб: координаты сцены → пиксели экрана
+
+  // Ночь приходит вместе с тёмной темой приложения
+  const { mode } = useTheme();
+  const night = mode === 'dark';
+  const P = night ? NIGHT : DAY;
 
   // «Камера»: масштаб и смещение всей сцены
   const cs = useSharedValue(1);
@@ -250,9 +379,11 @@ export function HouseScene({
     return { transform: [{ translateY: -2.6 * b * k }, { scale: 1 + 0.005 * b }] };
   });
 
+  // Непрозрачность самой тени задаёт градиент в разметке; здесь только
+  // дыхание — тень слабеет и сжимается, когда дом «поднимается»
   const shadowStyle = useAnimatedStyle(() => {
     const b = wave(breath.value) * breathOn.value;
-    return { opacity: 0.09 - 0.02 * b, transform: [{ scale: 1 - 0.02 * b }] };
+    return { opacity: 0.9 - 0.25 * b, transform: [{ scale: 1 - 0.02 * b }] };
   });
 
   const roofStyle = useAnimatedStyle(() => ({
@@ -288,11 +419,19 @@ export function HouseScene({
     transform: [{ translateX: interpolate((drift.value + 0.45) % 1, [0, 1], [-140, 420]) * k }],
   }));
 
+  // Луна не плывёт — висит; внутри дома гаснет, как и облака
+  const moonStyle = useAnimatedStyle(() => ({
+    opacity: 0.95 * (1 - openP.value),
+  }));
+
   const focusedRoom = ROOMS.find((r) => r.id === roomId) ?? null;
   const areaObjects = area === 'Дом' ? null : AREA_OBJECTS[area];
 
   return (
-    <View style={styles.scene} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
+    <View
+      style={[styles.scene, { backgroundColor: P.sky, borderColor: P.sceneBorder }]}
+      onLayout={(e) => setW(e.nativeEvent.layout.width)}
+    >
       {w > 0 && (
         <>
           <Animated.View style={[StyleSheet.absoluteFill, cameraStyle]}>
@@ -304,27 +443,27 @@ export function HouseScene({
                 width={364}
                 height={172}
                 rx={56}
-                fill="#E4EDDC"
-                stroke="#D8E4CC"
+                fill={P.ground}
+                stroke={P.groundStroke}
                 strokeWidth={1.5}
               />
-              <Polygon points="244,252 294,277 320,264 270,239" fill="#ECEAE0" />
+              <Polygon points="244,252 294,277 320,264 270,239" fill={P.path} />
               <Polygon
                 points="80,238 124,260 84,280 40,258"
-                fill="#DCE6D2"
-                stroke="#FFFFFF"
+                fill={P.garage[0]}
+                stroke={P.lineSoft}
                 strokeWidth={2}
                 strokeOpacity={0.6}
               />
-              <Polygon points="124,260 84,280 84,306 124,286" fill="#F6F4EC" />
-              <Polygon points="40,258 84,280 84,306 40,284" fill="#EAE7DD" />
-              <Polygon points="92,302 116,290 116,272 92,284" fill="#D5DCCB" />
+              <Polygon points="124,260 84,280 84,306 124,286" fill={P.garage[1]} />
+              <Polygon points="40,258 84,280 84,306 40,284" fill={P.garage[2]} />
+              <Polygon points="92,302 116,290 116,272 92,284" fill={P.garage[3]} />
               <Line
                 x1={92}
                 y1={296}
                 x2={116}
                 y2={284}
-                stroke="#FFFFFF"
+                stroke={P.lineSoft}
                 strokeWidth={1.5}
                 strokeOpacity={0.55}
               />
@@ -333,28 +472,38 @@ export function HouseScene({
                 y1={290}
                 x2={116}
                 y2={278}
-                stroke="#FFFFFF"
+                stroke={P.lineSoft}
                 strokeWidth={1.5}
                 strokeOpacity={0.55}
               />
             </Layer>
 
-            {/* Тень дома: дышит в противофазе с ним */}
+            {/* Тень дома: дышит в противофазе с ним. Радиальный градиент, а
+                не плоская заливка: у настоящей тени нет жёсткой кромки, и
+                эллипс с чётким краем читался как тёмная лужа рядом с домом,
+                а не как тень под ним */}
             <Animated.View
               pointerEvents="none"
               style={[
                 {
                   position: 'absolute',
-                  left: 80 * k,
-                  top: 250 * k,
-                  width: 240 * k,
-                  height: 44 * k,
+                  left: 100 * k,
+                  top: 256 * k,
+                  width: 200 * k,
+                  height: 32 * k,
                 },
                 shadowStyle,
               ]}
             >
-              <Svg width="100%" height="100%" viewBox="0 0 240 44">
-                <Ellipse cx={120} cy={22} rx={118} ry={20} fill="#22301E" />
+              <Svg width="100%" height="100%" viewBox="0 0 200 32">
+                <Defs>
+                  <RadialGradient id="houseShadow" cx="50%" cy="50%" rx="50%" ry="50%">
+                    <Stop offset="0%" stopColor="#22301E" stopOpacity={0.16} />
+                    <Stop offset="65%" stopColor="#22301E" stopOpacity={0.08} />
+                    <Stop offset="100%" stopColor="#22301E" stopOpacity={0} />
+                  </RadialGradient>
+                </Defs>
+                <Ellipse cx={100} cy={16} rx={98} ry={14} fill="url(#houseShadow)" />
               </Svg>
             </Animated.View>
 
@@ -362,14 +511,14 @@ export function HouseScene({
             <Animated.View style={[StyleSheet.absoluteFill, houseStyle]} pointerEvents="box-none">
               <Animated.View style={[StyleSheet.absoluteFill, wallsStyle]} pointerEvents="none">
                 <Layer>
-                  <Polygon points="90,155 200,210 200,268 90,213" fill="#ECE9E0" />
-                  <Polygon points="310,155 200,210 200,268 310,213" fill="#F8F6EF" />
-                  <Polygon points="238,249 264,236 264,200 238,213" fill="#6E8A64" />
-                  <Circle cx={259} cy={222} r={1.6} fill="#F2F5F0" />
+                  <Polygon points="90,155 200,210 200,268 90,213" fill={P.wallLeft} />
+                  <Polygon points="310,155 200,210 200,268 310,213" fill={P.wallRight} />
+                  <Polygon points="238,249 264,236 264,200 238,213" fill={P.door} />
+                  <Circle cx={259} cy={222} r={1.6} fill={P.doorKnob} />
                   <Polygon
                     points="110,223 136,236 136,210 110,197"
-                    fill="#C7D6E0"
-                    stroke="#FFFFFF"
+                    fill={P.windowGlass}
+                    stroke={P.windowFrame}
                     strokeWidth={2}
                   />
                   <Line
@@ -377,7 +526,7 @@ export function HouseScene({
                     y1={203.5}
                     x2={123}
                     y2={229.5}
-                    stroke="#FFFFFF"
+                    stroke={P.windowFrame}
                     strokeWidth={1.5}
                   />
                 </Layer>
@@ -388,8 +537,8 @@ export function HouseScene({
                 <Layer>
                   <Polygon
                     points="200,100 310,155 200,210 90,155"
-                    fill="#FBF9F3"
-                    stroke="#E8E5DA"
+                    fill={P.planBase}
+                    stroke={P.planStroke}
                     strokeWidth={1}
                   />
                 </Layer>
@@ -397,6 +546,8 @@ export function HouseScene({
                   <RoomLayer
                     key={room.id}
                     room={room}
+                    fill={night ? (NIGHT_ROOM_FILLS[room.id] ?? room.fill) : room.fill}
+                    stroke={P.lineSoft}
                     hidden={stage === 'room' && roomId !== room.id}
                   />
                 ))}
@@ -405,33 +556,39 @@ export function HouseScene({
               {/* Крыша: поднимается вверх и растворяется */}
               <Animated.View style={[StyleSheet.absoluteFill, roofStyle]} pointerEvents="none">
                 <Layer>
-                  <Polygon points="200,100 90,155 145,89.5" fill="#708A66" />
-                  <Polygon points="200,100 310,155 255,144.5 145,89.5" fill="#7E9873" />
-                  <Polygon points="90,155 200,210 255,144.5 145,89.5" fill="#9CB48E" />
-                  <Polygon points="310,155 200,210 255,144.5" fill="#F3F1E8" />
+                  <Polygon points="200,100 90,155 145,89.5" fill={P.roof[0]} />
+                  <Polygon points="200,100 310,155 255,144.5 145,89.5" fill={P.roof[1]} />
+                  <Polygon points="90,155 200,210 255,144.5 145,89.5" fill={P.roof[2]} />
+                  <Polygon points="310,155 200,210 255,144.5" fill={P.roof[3]} />
                   <Line
                     x1={145}
                     y1={89.5}
                     x2={255}
                     y2={144.5}
-                    stroke="#FFFFFF"
+                    stroke={P.lineSoft}
                     strokeWidth={1.5}
                     strokeOpacity={0.25}
                   />
-                  <Polygon points="222,98 234,104 222,110 210,104" fill="#F0ECE0" />
-                  <Polygon points="210,104 222,110 222,124 210,118" fill="#E8E4D6" />
-                  <Polygon points="222,110 234,104 234,118 222,124" fill="#DDD8C8" />
+                  <Polygon points="222,98 234,104 222,110 210,104" fill={P.chimney[0]} />
+                  <Polygon points="210,104 222,110 222,124 210,118" fill={P.chimney[1]} />
+                  <Polygon points="222,110 234,104 234,118 222,124" fill={P.chimney[2]} />
                 </Layer>
               </Animated.View>
             </Animated.View>
 
             {/* Деревья: качаются вокруг основания, едва заметно */}
-            <Tree k={k} x={308} y={166} w={60} h={84} style={tree1Style} />
-            <Tree k={k} x={26} y={148} w={45} h={63} style={tree2Style} />
+            <Tree k={k} x={308} y={166} w={60} h={84} style={tree1Style} palette={P} />
+            <Tree k={k} x={26} y={148} w={45} h={63} style={tree2Style} palette={P} />
 
-            {/* Облака: медленно плывут через сцену */}
-            <Cloud k={k} y={14} w={68} h={30} style={cloud1Style} />
-            <Cloud k={k} y={44} w={54} h={24} style={cloud2Style} />
+            {/* Днём по небу плывут облака, ночью висит луна */}
+            {night ? (
+              <Moon k={k} style={moonStyle} />
+            ) : (
+              <>
+                <Cloud k={k} y={14} w={68} h={30} style={cloud1Style} />
+                <Cloud k={k} y={44} w={54} h={24} style={cloud2Style} />
+              </>
+            )}
 
             {/* Иконки комнат: появляются по очереди после подъёма крыши */}
             {stage !== 'exterior' &&
@@ -441,6 +598,7 @@ export function HouseScene({
                   room={room}
                   k={k}
                   index={i}
+                  labelColor={P.label}
                   visible={stage !== 'room'}
                   onPress={() => onSelectRoom(room)}
                 />
@@ -454,6 +612,7 @@ export function HouseScene({
                   obj={obj}
                   k={k}
                   index={i}
+                  labelColor={P.objectLabel}
                   focused={focusedObjectId === obj.id}
                   onPress={() => onSelectObject(obj)}
                 />
@@ -463,7 +622,12 @@ export function HouseScene({
 
           {/* Тап по дому открывает его — только на «внешнем» виде */}
           {area === 'Дом' && stage === 'exterior' && (
-            <Pressable style={styles.houseTap} onPress={onOpenHouse} />
+            <Pressable
+              style={styles.houseTap}
+              onPress={onOpenHouse}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть план дома"
+            />
           )}
 
           {/* Кнопка «назад»: шаг наружу, сохраняя ориентацию */}
@@ -498,7 +662,17 @@ function Layer({ children }: { children: ReactNode }) {
 // Комната на плане. Когда выбрана другая, эта уходит совсем, а не бледнеет:
 // полупрозрачные соседние комнаты просвечивали сквозь объекты выбранной и
 // читались как часть неё.
-function RoomLayer({ room, hidden }: { room: Room; hidden: boolean }) {
+function RoomLayer({
+  room,
+  fill,
+  stroke,
+  hidden,
+}: {
+  room: Room;
+  fill: string;
+  stroke: string;
+  hidden: boolean;
+}) {
   // Анимация запускается из эффекта, а не изнутри useAnimatedStyle: там она
   // пересоздавалась бы на каждой перерисовке и могла оборваться на полпути
   const opacity = useSharedValue(hidden ? 0 : 1);
@@ -511,8 +685,8 @@ function RoomLayer({ room, hidden }: { room: Room; hidden: boolean }) {
       <Layer>
         <Polygon
           points={room.points}
-          fill={room.fill}
-          stroke="#FFFFFF"
+          fill={fill}
+          stroke={stroke}
           strokeWidth={2.5}
           strokeLinejoin="round"
         />
@@ -531,12 +705,14 @@ function RoomChip({
   room,
   k,
   index,
+  labelColor,
   visible,
   onPress,
 }: {
   room: Room;
   k: number;
   index: number;
+  labelColor: string;
   visible: boolean;
   onPress: () => void;
 }) {
@@ -556,11 +732,16 @@ function RoomChip({
       ]}
       pointerEvents={visible ? 'auto' : 'none'}
     >
-      <PressableScale style={styles.roomChipInner} onPress={onPress}>
+      <PressableScale
+        style={styles.roomChipInner}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`Комната: ${room.title}`}
+      >
         <View style={styles.roomCircle}>
-          <Text style={styles.roomIcon}>{room.icon}</Text>
+          <Glyph glyph={room.icon} size={22} textStyle={styles.roomIcon} />
         </View>
-        <Text style={styles.roomLabel}>{room.title}</Text>
+        <Text style={[styles.roomLabel, { color: labelColor }]}>{room.title}</Text>
       </PressableScale>
     </Animated.View>
   );
@@ -570,12 +751,14 @@ function ObjectChip({
   obj,
   k,
   index,
+  labelColor,
   focused,
   onPress,
 }: {
   obj: SceneObject;
   k: number;
   index: number;
+  labelColor: string;
   focused: boolean;
   onPress: () => void;
 }) {
@@ -599,11 +782,20 @@ function ObjectChip({
         style,
       ]}
     >
-      <PressableScale style={styles.objectChipInner} onPress={onPress}>
+      <PressableScale
+        style={styles.objectChipInner}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${obj.title} — ${obj.place}`}
+      >
         <View style={[styles.objectCircle, focused && styles.objectCircleFocused]}>
-          <Text style={styles.objectIcon}>{obj.icon}</Text>
+          {hasObjectIcon(obj.id) ? (
+            <ObjectIcon id={obj.id} size={20} />
+          ) : (
+            <Text style={styles.objectIcon}>{obj.icon}</Text>
+          )}
         </View>
-        <Text style={styles.objectText}>{obj.title}</Text>
+        <Text style={[styles.objectText, { color: labelColor }]}>{obj.title}</Text>
       </PressableScale>
     </Animated.View>
   );
@@ -616,6 +808,7 @@ function Tree({
   w,
   h,
   style,
+  palette,
 }: {
   k: number;
   x: number;
@@ -623,6 +816,7 @@ function Tree({
   w: number;
   h: number;
   style: object;
+  palette: ScenePalette;
 }) {
   return (
     <Animated.View
@@ -640,10 +834,33 @@ function Tree({
       ]}
     >
       <Svg width="100%" height="100%" viewBox="0 0 60 84">
-        <Rect x={27.5} y={58} width={5} height={20} rx={2.5} fill="#B49B7D" />
-        <Circle cx={30} cy={36} r={19} fill="#9CB88C" />
-        <Circle cx={18} cy={46} r={12} fill="#8AA97A" />
-        <Circle cx={43} cy={45} r={13} fill="#A9C29A" />
+        <Rect x={27.5} y={58} width={5} height={20} rx={2.5} fill={palette.trunk} />
+        <Circle cx={30} cy={36} r={19} fill={palette.crowns[0]} />
+        <Circle cx={18} cy={46} r={12} fill={palette.crowns[1]} />
+        <Circle cx={43} cy={45} r={13} fill={palette.crowns[2]} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+// Луна с парой кратеров и три звезды — всё небо ночной сцены
+function Moon({ k, style }: { k: number; style: object }) {
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        { position: 'absolute', left: 296 * k, top: 16 * k, width: 72 * k, height: 46 * k },
+        style,
+      ]}
+    >
+      <Svg width="100%" height="100%" viewBox="0 0 72 46">
+        <Circle cx={30} cy={23} r={14} fill="#EDE8CF" />
+        <Circle cx={25} cy={19} r={3} fill="#DDD6B8" />
+        <Circle cx={35} cy={27} r={2.2} fill="#DDD6B8" />
+        <Circle cx={31} cy={13.5} r={1.6} fill="#DDD6B8" />
+        <Circle cx={58} cy={9} r={1.5} fill="#EDE8CF" opacity={0.8} />
+        <Circle cx={64} cy={30} r={1.2} fill="#EDE8CF" opacity={0.6} />
+        <Circle cx={6} cy={12} r={1.2} fill="#EDE8CF" opacity={0.6} />
       </Svg>
     </Animated.View>
   );
