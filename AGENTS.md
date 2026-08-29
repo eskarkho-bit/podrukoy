@@ -23,9 +23,9 @@ npx tsc --noEmit                 # типы приложения
 cd functions && npm run build    # типы функций
 npm run lint                     # eslint
 npm run format:check             # prettier
-npm test                         # 138 тестов компонентов
-npm run test:rules               # 128 тестов правил доступа, нужен JDK 21
-npm --prefix functions test      # 106 тестов функций, нужен JDK 21
+npm test                         # 157 тестов компонентов
+npm run test:rules               # 151 тест правил доступа, нужен JDK 21
+npm --prefix functions test      # 133 теста функций, нужен JDK 21
 ```
 
 Правила Firestore — единственное, что стоит между пользователями и чужими
@@ -56,5 +56,6 @@ npm --prefix functions test      # 106 тестов функций, нужен J
 
 - Комментарии на русском, объясняют «почему», а не «что».
 - Строки интерфейса на русском, склонения через `components/format.ts`.
-- Экраны не знают о Firestore — данные приходят через `AppState`.
-  Исключение одно: `MasterScreen`, и это долг, а не образец.
+- Экраны не знают о Firestore — данные приходят через `AppState`,
+  а у админки — через её собственный `AdminState` (он монтируется только
+  у модератора). Исключение одно: `MasterScreen`, и это долг, а не образец.

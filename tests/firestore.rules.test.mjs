@@ -1595,3 +1595,58 @@ describe('Жалобы на отзывы', () => {
     await assertFails(deleteDoc(doc(as('admin1'), 'complaints/c1')));
   });
 });
+
+// Приёмочный сценарий целиком, теми же записями, что делает приложение:
+// анкета → отправка на проверку → одобрение пакетом из двух документов →
+// лента открылась. Отдельные правила проверены выше; здесь — что цепочка
+// сходится, а не «сломано между тестами».
+describe('Сквозной сценарий допуска', () => {
+  test('мастер подал анкету → модератор одобрил → мастер видит ленту', async () => {
+    const master = as('applicant');
+    await assertSucceeds(
+      setDoc(doc(master, 'masters/applicant'), {
+        name: 'Новый мастер',
+        city: 'москва',
+        skills: ['электрика'],
+      }),
+    );
+    await assertSucceeds(
+      setDoc(doc(master, 'masters/applicant/verification/application'), {
+        phone: '79993334455',
+        about: 'Электрик, свой инструмент',
+        photoUrl: 'https://example.com/face3.jpg',
+        biometricConsent: '2026-08-29',
+        status: 'draft',
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(master, 'masters/applicant/verification/application'), {
+        status: 'pending',
+        appliedAt: serverTimestamp(),
+      }),
+    );
+
+    // До одобрения лента закрыта
+    await assertFails(getDoc(doc(as('applicant'), 'orders/open')));
+
+    // Модератор видит очередь и одобряет тем же пакетом, что AdminState.decide
+    await assertSucceeds(
+      getDocs(
+        query(collectionGroup(as('admin1'), 'verification'), where('status', '==', 'pending')),
+      ),
+    );
+    const adminDb = as('admin1');
+    const verdict = writeBatch(adminDb);
+    verdict.update(doc(adminDb, 'masters/applicant'), { verified: true });
+    verdict.update(doc(adminDb, 'masters/applicant/verification/application'), {
+      status: 'approved',
+      rejectionReason: null,
+      reviewedAt: serverTimestamp(),
+      reviewedBy: 'admin1',
+    });
+    await assertSucceeds(verdict.commit());
+
+    // Лента открылась
+    await assertSucceeds(getDoc(doc(as('applicant'), 'orders/open')));
+  });
+});
