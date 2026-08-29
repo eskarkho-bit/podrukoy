@@ -324,9 +324,24 @@
     }
   ],
   "fieldOverrides": [
+    { "collectionGroup": "audit", "fieldPath": "expiresAt", "ttl": true, "indexes": [] },
     {
       "collectionGroup": "offers",
       "fieldPath": "masterId",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "verification",
+      "fieldPath": "status",
       "indexes": [
         {
           "order": "ASCENDING",
