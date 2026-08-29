@@ -12,6 +12,9 @@ module.exports = {
     '<rootDir>/tests/',
     '<rootDir>/functions/',
     '<rootDir>/podrukoy2/',
+    // Ворктри фоновых задач Claude живут внутри репозитория — их копии
+    // тестов не должны попадать в общий прогон
+    '<rootDir>/.claude/worktrees/',
   ],
 
   // Модули Expo и React Native поставляются нескомпилированными, поэтому

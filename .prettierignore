@@ -8,6 +8,9 @@ ios
 package-lock.json
 functions/package-lock.json
 
+# Ворктри фоновых задач Claude — отдельные рабочие копии внутри репо
+.claude/worktrees
+
 # Доски дизайна и собранный холст: их пишут генераторы в design/,
 # переформатирование только поссорит их с этими файлами
 design

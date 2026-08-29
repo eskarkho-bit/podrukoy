@@ -24,6 +24,8 @@ module.exports = [
       'dist/**',
       'android/**',
       'ios/**',
+      // Ворктри фоновых задач Claude — отдельные рабочие копии внутри репо
+      '.claude/worktrees/**',
     ],
   },
 
