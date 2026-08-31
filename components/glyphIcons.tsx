@@ -885,7 +885,10 @@ export function Glyph({
   const draw = GLYPHS[glyph];
   if (!draw) return <Text style={textStyle}>{glyph}</Text>;
   return (
-    <Svg width={size} height={size} viewBox="0 0 34 34" style={style}>
+    // Иконка декоративна, клики обязаны проваливаться сквозь неё в кнопку.
+    // На вебе svg иначе перехватывает нажатие сам, и у кнопки появляется
+    // «мёртвая зона» размером с рисунок — вскрылось на «Сообщение» в Chrome.
+    <Svg width={size} height={size} viewBox="0 0 34 34" style={[{ pointerEvents: 'none' }, style]}>
       {draw(colors)}
     </Svg>
   );
