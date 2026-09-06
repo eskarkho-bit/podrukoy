@@ -138,15 +138,12 @@ beforeEach(async () => {
       photoUrl: null,
       status: 'draft',
     });
-    // Заявка, готовая к отправке: есть и фото, и карта
+    // Заявка, готовая к отправке: есть фото и согласие на него
     await setDoc(doc(db, 'masters/ready/verification/application'), {
       phone: '79990000000',
       about: 'Сантехник',
       photoUrl: 'https://example.com/face.jpg',
       biometricConsent: '2026-08-06',
-      cardLast4: '4242',
-      cardBrand: 'MasterCard',
-      cardBindingId: 'pm_test_1',
       status: 'draft',
     });
     // Заявка на рассмотрении
@@ -155,8 +152,6 @@ beforeEach(async () => {
       phone: '79991112233',
       about: '',
       photoUrl: 'https://example.com/face2.jpg',
-      cardLast4: '1111',
-      cardBindingId: 'pm_test_2',
       status: 'pending',
     });
 
@@ -1300,40 +1295,20 @@ describe('Заявка на проверку', () => {
     );
   });
 
-  test('нельзя подсунуть себе привязку карты', async () => {
+  // Вердикт пишет только модератор: подсунуть себе «проверен» ни при
+  // создании, ни правкой черновика нельзя
+  test('нельзя подсунуть себе решение модератора', async () => {
     await assertFails(
       setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
         phone: '79995554433',
         status: 'draft',
-        cardBindingId: 'pm_fake',
-        cardLast4: '0000',
+        reviewedBy: 'fresh',
+        reviewedAt: serverTimestamp(),
       }),
     );
     await assertFails(
       updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-        cardBindingId: 'pm_fake',
-      }),
-    );
-  });
-
-  // Счётчик попыток привязки — защита от спама платежами у провайдера.
-  // Если бы мастер мог его обнулять, защиты бы не было.
-  test('нельзя переписать счётчик попыток привязки', async () => {
-    await assertFails(
-      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-        bindingAttempts: 0,
-      }),
-    );
-    await assertFails(
-      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-        lastBindingAt: null,
-      }),
-    );
-    await assertFails(
-      setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
-        phone: '79995554433',
-        status: 'draft',
-        bindingAttempts: 0,
+        reviewedBy: 'newbie',
       }),
     );
   });
@@ -1354,10 +1329,9 @@ describe('Заявка на проверку', () => {
     );
   });
 
-  // Карта обязательна, но требовать её здесь нельзя: пока не настроен
-  // платёжный провайдер, привязать её невозможно, и заявка стала бы
-  // неотправляемой. Решение остаётся за модератором — он видит статус карты.
-  test('без карты заявка отправляется, решает модератор', async () => {
+  // Фото и согласие на него — всё, что нужно правилам; остальное решает
+  // модератор, который смотрит анкету и звонит по телефону
+  test('с фото и согласием заявка отправляется, решает модератор', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), 'masters/nocard/verification/application'), {
         phone: '79993334455',

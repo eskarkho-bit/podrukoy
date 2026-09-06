@@ -15,7 +15,6 @@ import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
 import { recomputeRating, recountCompletedOrders } from './masterStats';
 
-export { createCardBinding, yookassaWebhook } from './payments';
 export { requestPhoneCode, verifyPhoneCode } from './phoneAuth';
 export { onDeletionRequested } from './deletion';
 export { onMasterDeleted, onMasterUnverified } from './masterExit';
@@ -315,7 +314,6 @@ export const onVerificationChanged = onDocumentWritten(
         correlationId: event.id,
         details: {
           hasPhoto: !!after.photoUrl,
-          hasCard: !!after.cardLast4,
           // Причина отказа — свободный текст мастеру, в журнале хватит факта
           rejected: status === 'rejected',
         },

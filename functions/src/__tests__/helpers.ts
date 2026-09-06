@@ -3,9 +3,9 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 // Общая обвязка тестов функций.
 //
-// Настоящий Firestore (эмулятор) и поддельный банк. Именно в таком сочетании:
-// поведение базы — то, ради чего эти тесты и написаны, а поход к провайдеру
-// в тестах невозможен и не нужен.
+// Настоящий Firestore (эмулятор) и поддельная сеть. Именно в таком сочетании:
+// поведение базы — то, ради чего эти тесты и написаны, а поход наружу (к
+// сервису пушей Expo) в тестах невозможен и не нужен.
 
 /** Тот же демо-проект, что и в тестах правил: в настоящий он не ходит. */
 export const PROJECT_ID = 'demo-domio';
@@ -27,7 +27,7 @@ export async function wipe(...paths: string[]) {
   }
 }
 
-// ---------- поддельный банк ----------
+// ---------- поддельная сеть ----------
 
 export type FakeCall = {
   path: string;
@@ -39,8 +39,8 @@ export type FakeCall = {
 /**
  * Подменяет fetch и запоминает все обращения.
  *
- * Ключ идемпотентности сохраняется отдельно: на нём держится защита от
- * повторного возврата, и проверять его надо явно.
+ * Сегодня наружу ходит только рассылка пушей; обвязка общая, чтобы любой
+ * новый внешний вызов проверялся тем же способом.
  */
 export function fakeProvider(
   handler: (
@@ -55,7 +55,7 @@ export function fakeProvider(
   const calls: FakeCall[] = [];
 
   global.fetch = jest.fn(async (url: any, init: any) => {
-    const path = String(url).replace('https://api.yookassa.ru/v3', '');
+    const path = String(url);
     const body = init?.body ? JSON.parse(init.body) : null;
     calls.push({
       path,
@@ -75,25 +75,4 @@ export function fakeProvider(
     calls,
     of: (fragment: string) => calls.filter((c) => c.path.includes(fragment)),
   };
-}
-
-/** Ответ провайдера об успешном платеже за привязку. */
-export const succeededPayment = (uid: string, paymentId = 'pay_1') => ({
-  id: paymentId,
-  status: 'succeeded',
-  metadata: { uid, purpose: 'master-verification' },
-  payment_method: {
-    id: 'pm_saved_1',
-    card: { last4: '4242', card_type: 'MasterCard' },
-  },
-});
-
-export function withProviderKeys() {
-  process.env.YOOKASSA_SHOP_ID = 'test-shop';
-  process.env.YOOKASSA_SECRET_KEY = 'test-key';
-}
-
-export function withoutProviderKeys() {
-  delete process.env.YOOKASSA_SHOP_ID;
-  delete process.env.YOOKASSA_SECRET_KEY;
 }

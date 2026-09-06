@@ -137,20 +137,6 @@
       ]
     },
     {
-      "collectionGroup": "verification",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        {
-          "fieldPath": "bindingState",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lastBindingAt",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "threads",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -324,7 +310,12 @@
     }
   ],
   "fieldOverrides": [
-    { "collectionGroup": "audit", "fieldPath": "expiresAt", "ttl": true, "indexes": [] },
+    {
+      "collectionGroup": "audit",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
     {
       "collectionGroup": "offers",
       "fieldPath": "masterId",
@@ -342,20 +333,6 @@
     {
       "collectionGroup": "verification",
       "fieldPath": "status",
-      "indexes": [
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
-        },
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION_GROUP"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "verification",
-      "fieldPath": "refundPending",
       "indexes": [
         {
           "order": "ASCENDING",

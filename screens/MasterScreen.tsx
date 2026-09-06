@@ -97,7 +97,6 @@ import {
   applicationFrom,
   EMPTY_APPLICATION,
   phoneValid,
-  startCardBinding,
   type Application,
 } from '../components/verification';
 import { db } from '../firebaseConfig';
@@ -115,7 +114,7 @@ const MAX_FEED_CITIES = 10;
 // Аккаунт один на человека: роль мастера — это анкета masters/{uid}.
 //
 // Одной анкеты мало: доступ к заявкам даёт флаг verified, который ставит
-// модератор, посмотрев фотографию, телефон и привязанную карту. До этого
+// модератор, посмотрев фотографию и телефон. До этого
 // раздел работает, но лента пуста — иначе адреса и фотографии квартир
 // клиентов доставались бы любому, кто нажал «стать мастером».
 
@@ -1010,15 +1009,6 @@ function MasterApplicationScreen({
   const [photoUri, setPhotoUri] = useState<string | null>(application.photoUrl);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [binding, setBinding] = useState(false);
-
-  const cardBound = !!application.cardBindingId;
-  // Платёж создан, банк ещё не ответил. Исход подтвердит сервер — вебхуком
-  // либо сверкой; до этого повторная попытка только создаст второй платёж.
-  const cardAwaiting = !cardBound && application.bindingState === 'pending';
-  const cardFailed =
-    !cardBound &&
-    (application.bindingState === 'failed' || application.bindingState === 'canceled');
   // Согласие на фотографию — отдельное и обязательно до съёмки: снимать
   // лицо, а потом спрашивать разрешение, поздно
   const [faceConsent, setFaceConsent] = useState(!!application.biometricConsent);
@@ -1077,20 +1067,6 @@ function MasterApplicationScreen({
     setLoading(false);
   };
 
-  const bindCard = async () => {
-    setError(null);
-    setBinding(true);
-    const result = await startCardBinding();
-    setBinding(false);
-    if (result === 'not-configured') {
-      setError('Привязка карты пока недоступна: не настроен платёжный провайдер');
-    } else if (result === 'failed') {
-      setError('Не удалось начать привязку карты. Попробуйте позже');
-    }
-    // 'awaiting', 'already-bound' и 'cancelled' ничего не показывают: исход
-    // подтверждает сервер, и подписка на заявку принесёт его сама
-  };
-
   const save = async (sendForReview: boolean) => {
     if (name.trim().length < 2) {
       setError('Напишите, как вас зовут');
@@ -1109,10 +1085,6 @@ function MasterApplicationScreen({
         setError('Сделайте фотографию лица — без неё заявку не проверить');
         return;
       }
-      // Карту здесь не требуем, хотя она обязательна: решает модератор, и он
-      // видит в очереди, привязана она или нет. Жёсткая проверка на этом шаге
-      // делала заявку неотправляемой, пока не настроен платёжный провайдер, —
-      // то есть отбирала у модератора право решать.
     }
 
     setError(null);
@@ -1231,10 +1203,6 @@ function MasterApplicationScreen({
             />
             <SummaryRow label="Телефон" value={phone || '—'} />
             <SummaryRow label="Фото" value={application.photoUrl ? 'загружено' : 'нет'} />
-            <SummaryRow
-              label="Карта"
-              value={application.cardLast4 ? `•••• ${application.cardLast4}` : 'нет'}
-            />
           </Animated.View>
         </ScrollView>
       </View>
@@ -1281,30 +1249,20 @@ function MasterApplicationScreen({
         </Animated.Text>
 
         {/* Чеклист готовности: анкета, брошенная на полпути, — потерянный
-            мастер. Прогресс показывает, сколько осталось, и что карта —
-            не тупик: без неё допуск решает модератор. */}
+            мастер. Прогресс показывает, сколько осталось. */}
         {!verified && (
           <Animated.View entering={FadeInDown.delay(120).duration(360)} style={styles.readyCard}>
             <View style={styles.readyHead}>
               <Text style={styles.readyTitle}>Готовность анкеты</Text>
               <Text style={styles.readyCount}>
-                {[!!photoUri, phoneValid(phone), cardBound].filter(Boolean).length} из 3
+                {[!!photoUri, phoneValid(phone)].filter(Boolean).length} из 2
               </Text>
             </View>
             <ChecklistItem done={!!photoUri} label="Фото лица" hint="снимается камерой ниже" />
             <ChecklistItem
               done={phoneValid(phone)}
               label="Телефон"
-              hint="по нему свяжется модератор"
-            />
-            <ChecklistItem
-              done={cardBound}
-              label="Банковская карта"
-              hint={
-                cardBound
-                  ? `•••• ${application.cardLast4 ?? ''}`
-                  : 'если привязка недоступна — допуск решит модератор'
-              }
+              hint="по нему свяжется модератор; на него же клиенты переводят оплату"
             />
           </Animated.View>
         )}
@@ -1505,60 +1463,6 @@ function MasterApplicationScreen({
                   )}
                 </View>
               </View>
-
-              <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Карта</Text>
-              {cardBound ? (
-                <View style={styles.cardBound}>
-                  <Text style={styles.cardBoundText}>
-                    {application.cardBrand ? `${application.cardBrand} ` : ''}
-                    •••• {application.cardLast4}
-                  </Text>
-                  <Text style={styles.cardBoundOk}>привязана</Text>
-                </View>
-              ) : cardAwaiting ? (
-                // Банк ответит не мгновенно, а уведомление от него может и не
-                // дойти — тогда исход доберёт сверка. Показываем ожидание, а
-                // не мнимый успех и не предложение платить второй раз.
-                <View style={styles.cardPending}>
-                  <Text style={styles.cardPendingText}>Проверяем оплату у банка…</Text>
-                  <Text style={styles.fieldHint}>
-                    Обычно занимает меньше минуты. Если банк ответит не сразу, мы завершим привязку
-                    сами — платить второй раз не нужно.
-                  </Text>
-                </View>
-              ) : (
-                <PressableScale
-                  style={[styles.faceBtn, binding && styles.loginBtnDim]}
-                  onPress={bindCard}
-                  disabled={binding || loading}
-                >
-                  <Text style={styles.faceBtnText}>
-                    {binding
-                      ? 'Открываем банк…'
-                      : cardFailed
-                        ? 'Попробовать снова'
-                        : 'Привязать карту'}
-                  </Text>
-                </PressableScale>
-              )}
-
-              {cardFailed && (
-                <Text style={styles.cardWarn}>
-                  {application.bindingState === 'canceled'
-                    ? 'Прошлая попытка не завершилась — карта не привязана.'
-                    : 'Прошлая попытка не удалась — карта не привязана.'}
-                </Text>
-              )}
-
-              <Text style={styles.fieldHint}>
-                Номер карты вводится на странице банка — приложение его не видит и не хранит. Нужна
-                для подтверждения личности и будущих выплат.
-              </Text>
-              {!cardBound && !cardAwaiting && (
-                <Text style={styles.cardWarn}>
-                  Без карты заявку отправить можно, но одобрят её вряд ли.
-                </Text>
-              )}
             </>
           )}
 
@@ -3163,29 +3067,6 @@ const makeStyles = (t: Palette) =>
       alignItems: 'center',
     },
     faceBtnText: { color: t.accent, fontWeight: '800', fontSize: 13 },
-    cardBound: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: t.accentBorder,
-      backgroundColor: t.accentFaint,
-      paddingHorizontal: 12,
-      paddingVertical: 11,
-    },
-    cardBoundText: { color: t.text, fontWeight: '800', fontSize: 13 },
-    cardBoundOk: { color: t.accent, fontWeight: '800', fontSize: 11.5 },
-    cardWarn: { color: t.warn, fontWeight: '700', fontSize: 11.5, marginTop: 6 },
-    cardPending: {
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: t.border,
-      backgroundColor: t.soft,
-      paddingHorizontal: 12,
-      paddingVertical: 11,
-    },
-    cardPendingText: { color: t.blue, fontWeight: '800', fontSize: 13 },
     consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginBottom: 12 },
     checkbox: {
       width: 21,

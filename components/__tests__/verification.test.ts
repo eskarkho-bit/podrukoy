@@ -37,17 +37,26 @@ describe('applicationFrom', () => {
       phone: '79991234567',
       about: 'Электрик',
       photoUrl: 'https://example.com/face.jpg',
-      cardLast4: '4242',
-      cardBrand: 'MasterCard',
-      cardBindingId: 'pm_1',
       status: 'pending',
       biometricConsent: '2026-08-06',
-      bindingState: 'succeeded',
     });
     expect(app.phone).toBe('79991234567');
-    expect(app.cardLast4).toBe('4242');
+    expect(app.about).toBe('Электрик');
     expect(app.status).toBe('pending');
-    expect(app.bindingState).toBe('succeeded');
+    expect(app.biometricConsent).toBe('2026-08-06');
+  });
+
+  // Заявки, поданные до отказа от платёжного провайдера, могли сохранить
+  // маску карты и токен — экрану они не нужны и в объект не попадают
+  test('поля старой привязки карты не протекают в интерфейс', () => {
+    const app = applicationFrom({
+      phone: '79991234567',
+      cardLast4: '4242',
+      cardBindingId: 'pm_1',
+      bindingState: 'succeeded',
+    });
+    expect(app).not.toHaveProperty('cardLast4');
+    expect(app).not.toHaveProperty('bindingState');
   });
 
   // Значения не из перечисления — это либо чужая запись, либо старая схема.
@@ -58,22 +67,15 @@ describe('applicationFrom', () => {
     expect(applicationFrom({ status: null }).status).toBe('draft');
   });
 
-  test('незнакомое состояние привязки обнуляется', () => {
-    expect(applicationFrom({ bindingState: 'что-то' }).bindingState).toBeNull();
-    expect(applicationFrom({ bindingState: true }).bindingState).toBeNull();
-  });
-
   test('поля не того типа не протекают в интерфейс', () => {
     const app = applicationFrom({
       phone: 12345,
       about: { текст: 'да' },
       photoUrl: false,
-      cardLast4: 4242,
     });
     expect(app.phone).toBe('');
     expect(app.about).toBe('');
     expect(app.photoUrl).toBeNull();
-    expect(app.cardLast4).toBeNull();
   });
 
   test('одобренная заявка читается как одобренная', () => {

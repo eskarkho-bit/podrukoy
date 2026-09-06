@@ -9,6 +9,10 @@ import { notePaymentMarks, paymentTermsOf } from '../orderPayment';
 initTestApp();
 const db = getFirestore();
 
+// Свой идентификатор заявки: журнал общий на все файлы, и записи ищутся по
+// нему, а не по «первая попавшаяся»
+const ORDER_ID = 'pay-order-1';
+
 const ORDER = {
   title: 'Не работает розетка',
   clientId: 'client-pay',
@@ -19,8 +23,10 @@ const ORDER = {
   masterPhone: '+79280001122',
 };
 
-const auditActions = async () =>
-  (await db.collection('audit').get()).docs.map((d) => d.get('action') as string);
+const entriesFor = async (action: string) =>
+  (await db.collection('audit').where('subjectId', '==', ORDER_ID).get()).docs.filter(
+    (d) => d.get('action') === action,
+  );
 
 beforeEach(async () => {
   await wipe('audit', 'users');
@@ -39,23 +45,23 @@ describe('paymentTermsOf', () => {
 
 describe('notePaymentMarks', () => {
   test('без новых отметок журнал молчит', async () => {
-    await notePaymentMarks('o1', ORDER, { ...ORDER, status: 'Завершена' }, 'test');
+    await notePaymentMarks(ORDER_ID, ORDER, { ...ORDER, status: 'Завершена' }, 'test');
     await notePaymentMarks(
-      'o1',
+      ORDER_ID,
       { ...ORDER, paidAt: new Date() },
       { ...ORDER, paidAt: new Date() },
       'test',
     );
-    expect(await auditActions()).toEqual([]);
+    expect(await entriesFor('order.paid_marked')).toHaveLength(0);
+    expect(await entriesFor('order.payment_received')).toHaveLength(0);
   });
 
   test('клиент отметил оплату — запись от его имени, только способ', async () => {
-    await notePaymentMarks('o1', ORDER, { ...ORDER, paidAt: new Date() }, 'test');
+    await notePaymentMarks(ORDER_ID, ORDER, { ...ORDER, paidAt: new Date() }, 'test');
 
-    const entries = await db.collection('audit').get();
-    expect(entries.size).toBe(1);
-    const entry = entries.docs[0];
-    expect(entry.get('action')).toBe('order.paid_marked');
+    const entries = await entriesFor('order.paid_marked');
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
     expect(entry.get('actorType')).toBe('user');
     expect(entry.get('actorUid')).toBe('client-pay');
     expect(entry.get('details')).toEqual({ method: 'transfer', masterId: 'master-pay' });
@@ -63,35 +69,37 @@ describe('notePaymentMarks', () => {
     const raw = JSON.stringify(entry.data());
     expect(raw).not.toContain('1122');
     expect(raw).not.toContain('3500');
+    expect(await entriesFor('order.payment_received')).toHaveLength(0);
   });
 
   test('мастер подтвердил получение — запись от его имени', async () => {
-    await notePaymentMarks('o1', ORDER, { ...ORDER, paymentReceivedAt: new Date() }, 'test');
+    await notePaymentMarks(ORDER_ID, ORDER, { ...ORDER, paymentReceivedAt: new Date() }, 'test');
 
-    const entries = await db.collection('audit').get();
-    expect(entries.size).toBe(1);
-    expect(entries.docs[0].get('action')).toBe('order.payment_received');
-    expect(entries.docs[0].get('actorType')).toBe('user');
-    expect(entries.docs[0].get('actorUid')).toBe('master-pay');
+    const entries = await entriesFor('order.payment_received');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].get('actorType')).toBe('user');
+    expect(entries[0].get('actorUid')).toBe('master-pay');
+    expect(await entriesFor('order.paid_marked')).toHaveLength(0);
   });
 
   // Клиент мог подтвердить работу и отметить оплату одним нажатием
   test('обе отметки в одном обновлении — две записи', async () => {
     await notePaymentMarks(
-      'o1',
+      ORDER_ID,
       ORDER,
       { ...ORDER, paidAt: new Date(), paymentReceivedAt: new Date() },
       'test',
     );
-    expect((await auditActions()).sort()).toEqual(['order.paid_marked', 'order.payment_received']);
+    expect(await entriesFor('order.paid_marked')).toHaveLength(1);
+    expect(await entriesFor('order.payment_received')).toHaveLength(1);
   });
 
   test('без способа оплаты след всё равно есть', async () => {
     const { paymentMethod, ...noMethod } = ORDER;
     void paymentMethod;
-    await notePaymentMarks('o1', noMethod, { ...noMethod, paidAt: new Date() }, 'test');
+    await notePaymentMarks(ORDER_ID, noMethod, { ...noMethod, paidAt: new Date() }, 'test');
 
-    const entries = await db.collection('audit').get();
-    expect(entries.docs[0].get('details')).toEqual({ method: null, masterId: 'master-pay' });
+    const [entry] = await entriesFor('order.paid_marked');
+    expect(entry.get('details')).toEqual({ method: null, masterId: 'master-pay' });
   });
 });

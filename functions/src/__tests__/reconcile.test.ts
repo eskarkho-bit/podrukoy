@@ -1,23 +1,15 @@
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
-import {
-  fakeProvider,
-  initTestApp,
-  succeededPayment,
-  wipe,
-  withProviderKeys,
-  withoutProviderKeys,
-} from './helpers';
+import { fakeProvider, initTestApp, wipe } from './helpers';
 import { reconcile } from '../reconcile';
 
 // Сверка добирает то, что не доехало событиями. Проверяется в первую очередь
-// блокировка: два прогона одновременно означали бы два возврата за один
-// платёж, то есть отданные дважды деньги.
+// блокировка: два прогона одновременно звали бы мастеров к одной заявке
+// дважды, а удаление аккаунта вели бы вперемешку.
 
 initTestApp();
 const db = getFirestore();
 
 const LOCK = db.doc('system/reconcile');
-const app = (uid: string) => db.doc(`masters/${uid}/verification/application`);
 
 const minutesAgo = (m: number) => Timestamp.fromMillis(Date.now() - m * 60 * 1000);
 
@@ -34,11 +26,8 @@ const actions = async () => {
 };
 
 beforeEach(async () => {
-  withProviderKeys();
   await wipe('masters', 'deletions', 'audit', 'system', 'users', 'orders');
 });
-
-afterAll(withoutProviderKeys);
 
 describe('блокировка прогона', () => {
   test('идущий прогон не даёт начать второй', async () => {
@@ -75,154 +64,32 @@ describe('блокировка прогона', () => {
     expect(lock.get('lastFinishedAt')).toBeTruthy();
   });
 
-  // Одна ошибка не должна останавливать сверку на десять минут — ради этого
-  // снятие блокировки и вынесено в finally
-  test('блокировка снимается и после сбоя провайдера', async () => {
+  // Сбой снаружи не должен останавливать сверку на десять минут: рассылка
+  // сама глотает ошибку сети, а на случай исключения внутри прогона снятие
+  // блокировки вынесено в finally
+  test('сбой сервиса пушей не роняет прогон и не оставляет блокировку', async () => {
     fakeProvider(() => {
-      throw new Error('провайдер недоступен');
+      throw new Error('сервис пушей недоступен');
     });
-    await app('m1').set({
-      bindingState: 'pending',
-      bindingPaymentId: 'pay_1',
-      lastBindingAt: minutesAgo(20),
+    // Молчащая заявка с подходящим мастером — единственный путь наружу
+    await db.doc('orders/o1').set({
+      status: 'Поиск мастера',
+      title: 'Не работает розетка',
+      city: 'грозный',
+      category: 'электрика',
+      clientId: 'client1',
+      createdAt: minutesAgo(180),
     });
+    await db.doc('masters/m1').set({ verified: true, cities: ['грозный'], skills: ['электрика'] });
+    await db.doc('users/m1').set({ pushTokens: ['ExponentPushToken[m1]'] });
 
     await run();
 
     const lock = await LOCK.get();
     expect(lock.get('runningSince')).toBeNull();
-    expect(lock.get('lastCounters').errors).toBe(1);
-    // Заявку не тронули: придём за ней в следующий прогон
-    expect((await app('m1').get()).get('bindingState')).toBe('pending');
-  });
-});
-
-describe('привязки, по которым вебхук не пришёл', () => {
-  test('оплаченная привязка доводится до конца', async () => {
-    const provider = fakeProvider((path) => ({
-      json: path.startsWith('/payments/') ? succeededPayment('m1') : { id: 'refund_1' },
-    }));
-    await app('m1').set({
-      bindingState: 'pending',
-      bindingPaymentId: 'pay_1',
-      lastBindingAt: minutesAgo(20),
-    });
-
-    await run();
-
-    const saved = await app('m1').get();
-    expect(saved.get('bindingState')).toBe('succeeded');
-    expect(saved.get('cardBindingId')).toBe('pm_saved_1');
-    expect(provider.of('/refunds')).toHaveLength(1);
-    expect((await LOCK.get()).get('lastCounters').bindingsSettled).toBe(1);
-  });
-
-  // Вебхук приходит за секунды. Трогать свежий платёж — верный способ
-  // столкнуться с ним лбами и сделать работу дважды.
-  test('свежий платёж не трогают — вебхук ещё в пути', async () => {
-    const provider = fakeProvider(() => ({ json: succeededPayment('m1') }));
-    await app('m1').set({
-      bindingState: 'pending',
-      bindingPaymentId: 'pay_1',
-      lastBindingAt: minutesAgo(2),
-    });
-
-    await run();
-
-    expect(provider.calls).toHaveLength(0);
-    expect((await app('m1').get()).get('bindingState')).toBe('pending');
-  });
-
-  test('состояние без идентификатора платежа закрывают, а не перебирают вечно', async () => {
-    fakeProvider(() => ({ json: {} }));
-    await app('m1').set({ bindingState: 'pending', lastBindingAt: minutesAgo(20) });
-
-    await run();
-
-    const saved = await app('m1').get();
-    expect(saved.get('bindingState')).toBe('failed');
-    expect(saved.get('bindingError')).toBe('no-payment-id');
-  });
-
-  test('человек не дошёл до банка за сутки — попытка закрывается', async () => {
-    fakeProvider(() => ({
-      json: {
-        id: 'pay_1',
-        status: 'pending',
-        metadata: { uid: 'm1', purpose: 'master-verification' },
-      },
-    }));
-    await app('m1').set({
-      bindingState: 'pending',
-      bindingPaymentId: 'pay_1',
-      lastBindingAt: minutesAgo(60 * 25),
-    });
-
-    await run();
-
-    const saved = await app('m1').get();
-    expect(saved.get('bindingState')).toBe('failed');
-    expect(saved.get('bindingError')).toBe('abandoned');
-    expect(await actions()).toContain('binding.failed');
-  });
-
-  test('до суток незавершённый платёж оставляют в ожидании', async () => {
-    fakeProvider(() => ({
-      json: {
-        id: 'pay_1',
-        status: 'pending',
-        metadata: { uid: 'm1', purpose: 'master-verification' },
-      },
-    }));
-    await app('m1').set({
-      bindingState: 'pending',
-      bindingPaymentId: 'pay_1',
-      lastBindingAt: minutesAgo(60),
-    });
-
-    await run();
-
-    expect((await app('m1').get()).get('bindingState')).toBe('pending');
-    expect((await LOCK.get()).get('lastCounters').bindingsStillPending).toBe(1);
-  });
-});
-
-describe('зависшие возвраты', () => {
-  // Это чужие деньги, застрявшие у провайдера. Единственное, что может их
-  // вернуть, — этот прогон.
-  test('неудавшийся возврат повторяется', async () => {
-    const provider = fakeProvider(() => ({ json: { id: 'refund_1' } }));
-    await app('m1').set({
-      bindingState: 'succeeded',
-      refundPending: true,
-      refundPendingPaymentId: 'pay_1',
-    });
-
-    await run();
-
-    expect(provider.of('/refunds')).toHaveLength(1);
-    const saved = await app('m1').get();
-    expect(saved.get('refundPending')).toBe(false);
-    expect(saved.get('refundedPaymentId')).toBe('pay_1');
-  });
-
-  test('ключ повтора тот же — провайдер не сделает второй возврат', async () => {
-    const provider = fakeProvider(() => ({ json: { id: 'refund_1' } }));
-    await app('m1').set({ refundPending: true, refundPendingPaymentId: 'pay_1' });
-
-    await run();
-
-    expect(provider.of('/refunds')[0].idempotenceKey).toBe('refund-pay_1');
-  });
-
-  test('отметка без идентификатора платежа снимается', async () => {
-    const provider = fakeProvider(() => ({ json: {} }));
-    await app('m1').set({ refundPending: true });
-
-    await run();
-
-    expect(provider.of('/refunds')).toHaveLength(0);
-    expect((await app('m1').get()).get('refundPending')).toBe(false);
+    // Заявку позвали повторно, хотя пуш не ушёл: отметка ставится до отправки
+    expect(lock.get('lastCounters')).toMatchObject({ ordersRepushed: 1, errors: 0 });
+    expect(await actions()).toContain('reconcile.finished');
   });
 });
 
@@ -325,21 +192,14 @@ describe('заявки без ответа', () => {
 
 describe('итоги прогона', () => {
   test('счётчики сохраняются для наблюдения', async () => {
-    fakeProvider((path) => ({
-      json: path.startsWith('/payments/') ? succeededPayment('m1') : { id: 'refund_1' },
-    }));
-    await app('m1').set({
-      bindingState: 'pending',
-      bindingPaymentId: 'pay_1',
-      lastBindingAt: minutesAgo(20),
-    });
+    fakeProvider(() => ({ json: {} }));
     await db.doc('deletions/u1').set({ status: 'pending', requestedAt: minutesAgo(30) });
 
     await run();
 
     expect((await LOCK.get()).get('lastCounters')).toMatchObject({
-      bindingsSettled: 1,
       deletionsResumed: 1,
+      ordersRepushed: 0,
       errors: 0,
     });
     expect(await actions()).toContain('reconcile.finished');

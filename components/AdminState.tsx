@@ -63,8 +63,6 @@ export type Pending = {
   phone: string;
   about: string;
   photoUrl: string | null;
-  cardLast4: string | null;
-  cardBrand: string | null;
   /** Когда подана — чтобы видеть, что залежалось */
   appliedMs: number | null;
 };
@@ -360,8 +358,6 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
               phone: String(v.phone ?? ''),
               about: String(v.about ?? ''),
               photoUrl: typeof v.photoUrl === 'string' ? v.photoUrl : null,
-              cardLast4: typeof v.cardLast4 === 'string' ? v.cardLast4 : null,
-              cardBrand: typeof v.cardBrand === 'string' ? v.cardBrand : null,
               appliedMs: ms(v.appliedAt),
             } as Pending;
           }),

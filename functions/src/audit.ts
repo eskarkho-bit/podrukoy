@@ -55,13 +55,6 @@ export type AuditAction =
   | 'master.blocked'
   | 'master.unblocked'
   | 'admin.user_lookup'
-  // привязка карты
-  | 'binding.started'
-  | 'binding.settled'
-  | 'binding.refunded'
-  | 'binding.refund_failed'
-  | 'binding.canceled'
-  | 'binding.failed'
   // вход по телефону
   | 'phone.code_sent'
   | 'phone.registered'
@@ -86,7 +79,7 @@ export type AuditActor =
   | { type: 'system'; uid: null };
 
 export type AuditSubject = {
-  type: 'order' | 'master' | 'user' | 'payment' | 'complaint' | 'system';
+  type: 'order' | 'master' | 'user' | 'complaint' | 'system';
   id: string;
 };
 

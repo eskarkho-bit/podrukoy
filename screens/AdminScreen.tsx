@@ -645,11 +645,6 @@ export function PendingCard({
   // Отказ без причины бесполезен: мастер не поймёт, что исправлять
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
-  // Карта обязательна, но требовать её до отправки нельзя — иначе заявку не
-  // подать, пока не настроен провайдер. Поэтому решение здесь, и допуск без
-  // карты требует второго касания: случайно так не одобришь.
-  const [confirmNoCard, setConfirmNoCard] = useState(false);
-  const cardMissing = !item.cardLast4;
 
   return (
     <View style={styles.card}>
@@ -672,11 +667,6 @@ export function PendingCard({
               ждёт {waitedText(item.appliedMs)}
             </Text>
           )}
-          <Text style={[styles.meta, item.cardLast4 ? styles.metaOk : styles.metaBad]}>
-            {item.cardLast4
-              ? `карта ${item.cardBrand ?? ''} •••• ${item.cardLast4}`
-              : 'карта не привязана'}
-          </Text>
         </View>
       </View>
 
@@ -716,31 +706,18 @@ export function PendingCard({
       ) : (
         <View style={styles.row}>
           <PressableScale
-            style={[
-              styles.btn,
-              styles.btnApprove,
-              confirmNoCard && styles.btnApproveWarn,
-              busy && styles.btnDim,
-            ]}
-            onPress={() => {
-              if (cardMissing && !confirmNoCard) {
-                setConfirmNoCard(true);
-                return;
-              }
-              onDecide(true, '');
-            }}
+            style={[styles.btn, styles.btnApprove, busy && styles.btnDim]}
+            onPress={() => onDecide(true, '')}
             disabled={busy}
           >
-            <Text style={styles.btnApproveText}>
-              {busy ? 'Сохраняем…' : confirmNoCard ? 'Допустить без карты?' : '✓  Допустить'}
-            </Text>
+            <Text style={styles.btnApproveText}>{busy ? 'Сохраняем…' : '✓  Допустить'}</Text>
           </PressableScale>
           <PressableScale
             style={[styles.btn, styles.btnGhost]}
-            onPress={() => (confirmNoCard ? setConfirmNoCard(false) : setRejecting(true))}
+            onPress={() => setRejecting(true)}
             disabled={busy}
           >
-            <Text style={styles.btnGhostText}>{confirmNoCard ? 'Отмена' : 'Отказать'}</Text>
+            <Text style={styles.btnGhostText}>Отказать</Text>
           </PressableScale>
         </View>
       )}
@@ -917,7 +894,6 @@ const makeStyles = (t: Palette) =>
     cardWho: { flex: 1 },
     name: { fontSize: 15, fontWeight: '800', color: t.text },
     meta: { fontSize: 12, fontWeight: '600', color: t.textMuted, marginTop: 3 },
-    metaOk: { color: t.accent, fontWeight: '700' },
     metaBad: { color: t.danger, fontWeight: '700' },
     skills: { fontSize: 12, fontWeight: '700', color: t.textSoft, marginTop: 10 },
     about: { fontSize: 12.5, fontWeight: '400', color: t.text, lineHeight: 17, marginTop: 8 },
@@ -925,7 +901,6 @@ const makeStyles = (t: Palette) =>
     btn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
     btnDim: { opacity: 0.6 },
     btnApprove: { backgroundColor: t.accent },
-    btnApproveWarn: { backgroundColor: t.warn },
     btnApproveText: { color: t.onAccent, fontWeight: '800', fontSize: 13.5 },
     btnReject: { backgroundColor: t.danger },
     btnRejectText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13.5 },
