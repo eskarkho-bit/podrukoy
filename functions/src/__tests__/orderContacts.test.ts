@@ -110,7 +110,50 @@ describe('shareOrderContacts', () => {
     const entries = await db.collection('audit').get();
     const entry = entries.docs.find((d) => d.get('action') === 'order.contacts_shared');
     expect(entry).toBeTruthy();
-    expect(entry?.get('details')).toEqual({ hasMasterPhone: true, hasClientPhone: true });
+    expect(entry?.get('details')).toEqual({
+      hasMasterPhone: true,
+      hasClientPhone: true,
+      hasPaymentTerms: false,
+    });
     expect(JSON.stringify(entry?.data())).not.toContain('1122');
+  });
+
+  // Как мастер принимает оплату, лежит в закрытой подколлекции — клиент
+  // видит только копию в своей заявке, и кладёт её тот же серверный шаг
+  test('вместе с номером в заявку едут банки и наличные мастера', async () => {
+    await db
+      .doc(`masters/${MASTER}/payment/details`)
+      .set({ banks: ['tbank', 'sber', 'чужой-банк'], acceptsCash: false });
+    await seedOrder();
+    await shareOrderContacts('o1', 'test');
+
+    const order = await db.doc('orders/o1').get();
+    expect(order.get('masterBanks')).toEqual(['tbank', 'sber']);
+    expect(order.get('masterAcceptsCash')).toBe(false);
+
+    const entries = await db.collection('audit').get();
+    const entry = entries.docs.find((d) => d.get('action') === 'order.contacts_shared');
+    expect(entry?.get('details')).toMatchObject({ hasPaymentTerms: true });
+  });
+
+  test('мастер без настроек оплаты — в заявке честные null, а не пустые списки', async () => {
+    await seedOrder();
+    await shareOrderContacts('o1', 'test');
+
+    const order = await db.doc('orders/o1').get();
+    expect(order.get('masterBanks')).toBeNull();
+    expect(order.get('masterAcceptsCash')).toBeNull();
+  });
+
+  // Телефонов нет, а условия оплаты есть: писать всё равно есть что
+  test('условия оплаты пишутся и без единого номера', async () => {
+    await db.doc(`masters/${MASTER}/verification/application`).set({ phone: '' });
+    await db.doc(`masters/${MASTER}/payment/details`).set({ banks: ['vtb'], acceptsCash: true });
+    await seedOrder({ clientId: 'client-nophone' });
+    await shareOrderContacts('o1', 'test');
+
+    const order = await db.doc('orders/o1').get();
+    expect(order.get('masterPhone')).toBeNull();
+    expect(order.get('masterBanks')).toEqual(['vtb']);
   });
 });

@@ -27,6 +27,15 @@ import { hapticImpact, hapticSuccess } from './haptics';
 import { PressableScale } from './PressableScale';
 import { SheetGrabber, useSheetDrag } from './sheetDrag';
 import { counted, ratingText, rub } from './format';
+import { dayLabel } from './masterStats';
+import {
+  availableMethods,
+  banksLine,
+  formatPhone,
+  PAYMENT_METHOD_LABELS,
+  PAYMENT_NOTICE,
+  type PaymentMethod,
+} from './payment';
 import { VerificationExplainer } from './VerificationExplainer';
 import type { Offer, Order } from '../screens/OrdersScreen';
 
@@ -36,6 +45,9 @@ type Props = {
   onCancel: () => void;
   // Пользователь подтверждает, что мастер закончил работу
   onConfirmDone: () => void;
+  // Расчёт напрямую: способ выбирает клиент, «оплатил» ставится один раз
+  onChoosePaymentMethod: (method: PaymentMethod) => void;
+  onMarkPaid: () => void;
   onChat: () => void;
   // Выбор предложения — именно он назначает мастера и делает цену согласованной
   onAcceptOffer: (masterId: string) => void;
@@ -48,6 +60,8 @@ type Props = {
 };
 
 const CANCELLABLE = ['Поиск мастера', 'Есть предложения', 'В работе'];
+// Статусы, в которых стороны рассчитываются: мастер выбран, заявка живая
+const SETTLING = ['В работе', 'Ждёт подтверждения', 'Завершена'];
 
 // Правило цвета: жёлтый — ждём других, зелёный — дело за вами. «Ждёт
 // подтверждения» — единственный статус, где от клиента требуется поступок
@@ -111,6 +125,8 @@ export function OrderSheet({
   onClose,
   onCancel,
   onConfirmDone,
+  onChoosePaymentMethod,
+  onMarkPaid,
   onChat,
   onAcceptOffer,
   onSubmitReview,
@@ -135,6 +151,8 @@ export function OrderSheet({
   const awaitingConfirm = order.status === 'Ждёт подтверждения';
   const canReview = order.status === 'Завершена' && !order.reviewed && !!order.masterId;
   const cancellable = CANCELLABLE.includes(order.status);
+  // Расчёт показываем, как только есть с кем рассчитываться
+  const settling = !!order.masterId && SETTLING.includes(order.status);
 
   // Телефон мастера сервер кладёт в заявку после выбора исполнителя — сделка
   // на этом рынке живёт в звонке, и прятать его за чатом значило бы, что
@@ -306,6 +324,12 @@ export function OrderSheet({
                 <Text style={styles.confirmBtnText}>✓ Работа выполнена — подтвердить</Text>
               </PressableScale>
             </Animated.View>
+          )}
+
+          {/* Расчёт напрямую: сервис денег не касается — только показывает,
+            как платить, и даёт отметить, что оплата состоялась */}
+          {settling && (
+            <PaymentBlock order={order} onChoose={onChoosePaymentMethod} onMarkPaid={onMarkPaid} />
           )}
 
           {/* Отзыв просим один раз и только после завершения: раньше оценивать
@@ -541,6 +565,131 @@ function ProfileRow({ label, value }: { label: string; value: string }) {
       <Text style={styles.profileLabel}>{label}</Text>
       <Text style={styles.profileValue}>{value}</Text>
     </View>
+  );
+}
+
+// ---------- Оплата напрямую ----------
+
+// Способ выбирает клиент; перевод идёт по СБП на телефон мастера — тот же,
+// что у кнопки «Позвонить», его видел модератор. Сервис в расчётах не
+// участвует, и карточка говорит это прямо: она не должна выглядеть
+// гарантией сделки.
+function PaymentBlock({
+  order,
+  onChoose,
+  onMarkPaid,
+}: {
+  order: Order;
+  onChoose: (method: PaymentMethod) => void;
+  onMarkPaid: () => void;
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const methods = availableMethods(order);
+  const chosen = order.paymentMethod ?? null;
+  const paid = order.paidMs != null;
+  const received = order.paymentReceivedMs != null;
+  // Способ заперт, как только кто-то из сторон отметил расчёт
+  const locked = paid || received;
+  // Отметка необратима — то же подтверждение в два касания, что у выбора
+  const { confirming, press: pressPaid } = useArmedConfirm(onMarkPaid);
+  const price = order.agreedPrice ?? order.price ?? null;
+  // До приёмки кнопка не зовёт платить: сначала работа, потом деньги
+  const emphasis = order.status === 'Завершена';
+  const banks = order.masterBanks ?? [];
+
+  return (
+    <Animated.View entering={FadeInDown.delay(190).duration(300)} style={styles.payCard}>
+      <Text style={styles.payTitle}>Оплата{price != null ? ` · ${rub(price)}` : ''}</Text>
+
+      <View style={styles.payMethods}>
+        {methods.map((m) => {
+          const on = chosen === m;
+          return (
+            <PressableScale
+              key={m}
+              style={[styles.payMethod, on && styles.payMethodOn, locked && !on && styles.payDim]}
+              onPress={() => {
+                if (!locked && !on) onChoose(m);
+              }}
+              disabled={locked}
+            >
+              <Text style={[styles.payMethodText, on && styles.payMethodTextOn]}>
+                {PAYMENT_METHOD_LABELS[m]}
+              </Text>
+            </PressableScale>
+          );
+        })}
+      </View>
+
+      {chosen === 'transfer' && (
+        <View style={styles.payDetails}>
+          <Text style={styles.payLabel}>Перевод по СБП на номер</Text>
+          {order.masterPhone ? (
+            // Выделяемый текст: скопировать номер в приложение банка
+            <Text style={styles.payPhone} selectable>
+              {formatPhone(order.masterPhone)}
+            </Text>
+          ) : (
+            <Text style={styles.payText}>
+              Номер появится в заявке через минуту — его кладёт сервер
+            </Text>
+          )}
+          <Text style={styles.payText}>
+            {banks.length > 0
+              ? `Банк получателя: ${banksLine(banks)}`
+              : 'Какой банк — уточните у мастера'}
+          </Text>
+          {!!order.masterName && (
+            <Text style={styles.payText}>
+              Перед отправкой сверьте имя получателя в приложении банка: {order.masterName}
+            </Text>
+          )}
+        </View>
+      )}
+      {chosen === 'cash' && (
+        <View style={styles.payDetails}>
+          <Text style={styles.payText}>
+            Наличными мастеру при встрече{price != null ? `, ${rub(price)}` : ''}.
+          </Text>
+        </View>
+      )}
+      {!chosen && (
+        <Text style={styles.payText}>
+          Выберите, как будете платить, — мастер увидит это в заявке.
+        </Text>
+      )}
+
+      {paid ? (
+        <Text style={styles.payState}>
+          ✓ Вы отметили оплату{order.paidMs != null ? ` ${dayLabel(order.paidMs)}` : ''}
+        </Text>
+      ) : chosen ? (
+        <PressableScale
+          style={[
+            styles.payBtn,
+            emphasis ? styles.payBtnPrimary : styles.payBtnSecondary,
+            confirming && styles.payBtnConfirm,
+          ]}
+          onPress={() => {
+            hapticImpact();
+            pressPaid();
+          }}
+        >
+          <Text
+            style={[
+              styles.payBtnText,
+              emphasis || confirming ? styles.payBtnTextOnAccent : styles.payBtnTextAccent,
+            ]}
+          >
+            {confirming ? 'Точно? Отметить оплату' : 'Я оплатил'}
+          </Text>
+        </PressableScale>
+      ) : null}
+      {received && <Text style={styles.payState}>✓ Мастер подтвердил получение</Text>}
+
+      <Text style={styles.payNotice}>{PAYMENT_NOTICE}</Text>
+    </Animated.View>
   );
 }
 
@@ -842,6 +991,49 @@ const makeStyles = (t: Palette) =>
     },
     chatBtnText: { fontWeight: '700', fontSize: 14.5, color: t.onAccent },
     chatBtnTextSecondary: { color: t.accent },
+    // ---------- оплата напрямую ----------
+    payCard: {
+      backgroundColor: t.soft,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginBottom: 10,
+    },
+    payTitle: { fontSize: 13.5, fontWeight: '800', color: t.text },
+    payMethods: { flexDirection: 'row', gap: 8, marginTop: 10 },
+    payMethod: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+      paddingVertical: 10,
+      alignItems: 'center',
+    },
+    payMethodOn: { backgroundColor: t.accentSoft, borderColor: t.accentBorder },
+    payDim: { opacity: 0.5 },
+    payMethodText: { fontSize: 12.5, fontWeight: '700', color: t.textSoft },
+    payMethodTextOn: { color: t.accent },
+    payDetails: { marginTop: 10 },
+    payLabel: { fontSize: 10.5, fontWeight: '800', color: t.textMuted },
+    payPhone: { fontSize: 20, fontFamily: FONTS.heading, color: t.text, marginTop: 2, ...TABULAR },
+    payText: { fontSize: 12, fontWeight: '400', color: t.textSoft, lineHeight: 17, marginTop: 6 },
+    payState: { fontSize: 12.5, fontWeight: '800', color: t.accent, marginTop: 10 },
+    payBtn: { borderRadius: 14, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
+    payBtnPrimary: { backgroundColor: t.accent },
+    payBtnSecondary: { backgroundColor: t.card, borderWidth: 1, borderColor: t.accentBorder },
+    payBtnConfirm: { backgroundColor: t.blue, borderColor: t.blue },
+    payBtnText: { fontWeight: '800', fontSize: 13.5 },
+    payBtnTextOnAccent: { color: t.onAccent },
+    payBtnTextAccent: { color: t.accent },
+    payNotice: {
+      fontSize: 11,
+      fontWeight: '400',
+      color: t.textMuted,
+      lineHeight: 15,
+      marginTop: 10,
+    },
     cancelBtn: {
       borderRadius: 16,
       paddingVertical: 13,

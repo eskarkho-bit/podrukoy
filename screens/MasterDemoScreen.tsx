@@ -56,6 +56,9 @@ const baseJob = {
   createdMs: null as number | null,
   completedMs: null as number | null,
   clientPhone: null as string | null,
+  paymentMethod: null as Job['paymentMethod'],
+  paidMs: null as number | null,
+  paymentReceivedMs: null as number | null,
   legacy: false,
   unread: false,
   messages: [] as Job['messages'],
@@ -377,6 +380,7 @@ export function MasterDemoScreen() {
             onWithdrawOffer={() => withdrawOffer(openJob.id)}
             onOfferLegacy={(price) => sendOffer(openJob.id, price)}
             onFinish={() => finishJob(openJob.id)}
+            onPaymentReceived={noop}
             onSend={(text) => pushMessage(openJob.id, text)}
             onSendImage={(uri, caption) => pushImage(openJob.id, uri, caption)}
           />

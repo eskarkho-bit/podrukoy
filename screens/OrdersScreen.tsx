@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import type { BankId } from '../components/banks';
+import type { PaymentMethod } from '../components/payment';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -69,6 +71,14 @@ export type Order = {
   // Телефон мастера. Появляется после выбора исполнителя — его кладёт сервер,
   // и только тогда у заявки есть кому звонить
   masterPhone?: string | null;
+  // Как мастер принимает оплату — копия его настроек на момент выбора,
+  // кладёт сервер вместе с телефоном. null — мастер их не задавал
+  masterBanks?: BankId[] | null;
+  masterAcceptsCash?: boolean | null;
+  // Расчёт напрямую: способ выбирает клиент, отметки ставят стороны
+  paymentMethod?: PaymentMethod | null;
+  paidMs?: number | null;
+  paymentReceivedMs?: number | null;
   // Объект дома и вид работы — по ним «Повторить» собирает новую заявку.
   // У заявок, созданных до появления этих полей, их нет — тогда кнопки нет.
   objectId?: string;
@@ -93,6 +103,9 @@ type Props = {
   onCreateOrder: (draft: OrderDraft) => void;
   onCancelOrder: (orderId: string) => void;
   onConfirmOrder: (orderId: string) => void;
+  // Расчёт напрямую: клиент выбирает способ и отмечает, что оплатил
+  onChoosePaymentMethod: (orderId: string, method: PaymentMethod) => void;
+  onMarkPaid: (orderId: string) => void;
   // Клиент выбирает одно из предложений — этот выбор и назначает мастера
   onAcceptOffer: (orderId: string, masterId: string) => void;
   onSubmitReview: (orderId: string, stars: number, text: string) => void;
@@ -119,6 +132,8 @@ export function OrdersScreen({
   onCreateOrder,
   onCancelOrder,
   onConfirmOrder,
+  onChoosePaymentMethod,
+  onMarkPaid,
   onAcceptOffer,
   onSubmitReview,
   onAcceptPrice,
@@ -440,6 +455,8 @@ export function OrdersScreen({
             setOpenedOrderId(null);
           }}
           onConfirmDone={() => onConfirmOrder(openedOrder.id)}
+          onChoosePaymentMethod={(method) => onChoosePaymentMethod(openedOrder.id, method)}
+          onMarkPaid={() => onMarkPaid(openedOrder.id)}
           onAcceptOffer={(masterId) => onAcceptOffer(openedOrder.id, masterId)}
           onSubmitReview={(stars, text) => onSubmitReview(openedOrder.id, stars, text)}
           onAcceptPrice={() => onAcceptPrice(openedOrder.id)}

@@ -432,7 +432,8 @@ service cloud.firestore {
         && request.resource.data.city is string
         && validCategory(request.resource.data.category)
         && !request.resource.data.keys().hasAny([
-          'masterPhone', 'clientPhone',
+          'masterPhone', 'clientPhone', 'masterBanks', 'masterAcceptsCash',
+          'paymentMethod', 'paidAt', 'paymentReceivedAt',
           'firstOfferAt', 'closedByAdmin', 'adminCloseReason',
         ])
         && (request.resource.data.get('preferredMasterId', null) == null
@@ -461,7 +462,46 @@ service cloud.firestore {
         return changed().hasOnly([
           'status', 'masterId', 'masterName', 'agreedPrice', 'agreedAt',
           'reviewed', 'priceStatus', 'priceHistory', 'photoUrl', 'completedAt',
+          'paymentMethod', 'paidAt',
         ]);
+      }
+
+      // ---------- расчёт между сторонами ----------
+      // Деньги идут мимо сервиса, и в заявке о них только отметки: способ,
+      // который выбрал клиент, «оплатил» от клиента и «получил» от мастера.
+      // Обе отметки ставятся один раз, серверным временем, и не снимаются:
+      // это единственный след расчёта для разбора спора. Способ выбирается и
+      // меняется, пока никто ничего не отметил. Как мастер принимает оплату
+      // (masterBanks, masterAcceptsCash), кладёт только сервер — вместе с
+      // телефоном, при выборе исполнителя.
+
+      function settling() {
+        return request.resource.data.status in ['В работе', 'Ждёт подтверждения', 'Завершена'];
+      }
+
+      function paymentMethodUntouchedOrChosen() {
+        return unchanged('paymentMethod')
+          || (settling()
+            && request.resource.data.get('masterId', null) != null
+            && resource.data.get('paidAt', null) == null
+            && resource.data.get('paymentReceivedAt', null) == null
+            && request.resource.data.get('paymentMethod', null) in ['cash', 'transfer']);
+      }
+
+      function paidAtUntouchedOrNow() {
+        return unchanged('paidAt')
+          || (settling()
+            && resource.data.get('paidAt', null) == null
+            && request.resource.data.paidAt == request.time
+            && resource.data.get('masterId', null) != null
+            && request.resource.data.get('paymentMethod', null) in ['cash', 'transfer']);
+      }
+
+      // Отметки без смены статуса — отдельный путь: остальные требуют
+      // перехода либо конкретного поля. Пустое изменение сюда не проходит:
+      // иначе любая запись «ничего не поменялось» стала бы разрешённой.
+      function clientMarksPayment() {
+        return changed().hasOnly(['paymentMethod', 'paidAt']) && changed().size() > 0;
       }
 
       // Дата завершения пишется одним способом: вместе с подтверждением и
@@ -544,17 +584,19 @@ service cloud.firestore {
       }
 
       allow update: if isClient() && clientFields() && completedAtUntouchedOrNow()
+        && paymentMethodUntouchedOrChosen() && paidAtUntouchedOrNow()
         && (clientPicksOffer() || clientConfirms() || clientCancels()
-          || clientMarksReviewed() || clientAttachesPhoto()
+          || clientMarksReviewed() || clientAttachesPhoto() || clientMarksPayment()
           || clientAcceptsLegacy() || clientDeclinesLegacy());
 
       // ---------- что вправе изменить мастер ----------
       // В новой схеме почти ничего: цену он называет в offers, заявку ему
-      // отдаёт клиент. Остаётся отметка о выполненной работе.
+      // отдаёт клиент. Остаются отметка о выполненной работе и «оплату
+      // получил».
 
       function masterFields() {
         return changed().hasOnly([
-          'status', 'price', 'priceStatus', 'priceHistory', 'masterName',
+          'status', 'price', 'priceStatus', 'priceHistory', 'masterName', 'paymentReceivedAt',
         ]);
       }
 
@@ -562,6 +604,21 @@ service cloud.firestore {
         return isAssignedMaster()
           && statusIs('В работе', 'Ждёт подтверждения')
           && unchanged('agreedPrice') && unchanged('masterId');
+      }
+
+      // «Получил» — один раз, серверным временем, пока заявка живая.
+      // Наличные клиент мог и не отмечать в приложении, поэтому от paidAt
+      // отметка мастера не зависит.
+      function receivedAtUntouchedOrNow() {
+        return unchanged('paymentReceivedAt')
+          || (settling()
+            && resource.data.get('paymentReceivedAt', null) == null
+            && request.resource.data.paymentReceivedAt == request.time);
+      }
+
+      function masterMarksReceived() {
+        return isAssignedMaster() && changed().hasAll(['paymentReceivedAt'])
+          && changed().hasOnly(['paymentReceivedAt']);
       }
 
       // Пересмотр цены у старой заявки, где предложение лежит в ней самой
@@ -573,7 +630,8 @@ service cloud.firestore {
           && unchanged('agreedPrice') && unchanged('masterId');
       }
 
-      allow update: if masterFields() && (masterFinishes() || masterReoffersLegacy());
+      allow update: if masterFields() && receivedAtUntouchedOrNow()
+        && (masterFinishes() || masterReoffersLegacy() || masterMarksReceived());
 
       // ---------- предложения мастеров ----------
       //

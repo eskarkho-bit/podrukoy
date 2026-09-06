@@ -738,6 +738,139 @@ describe('Завершение работы', () => {
   });
 });
 
+describe('Расчёт между сторонами', () => {
+  // Деньги идут мимо сервиса; в заявке о них только отметки. Правила
+  // держат три вещи: способ выбирает клиент и только после выбора мастера,
+  // обе отметки ставятся один раз серверным временем и не снимаются, а
+  // условия оплаты мастера в заявку кладёт только сервер.
+  const settled = async (patch) => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), patch);
+    });
+  };
+
+  test('клиент выбирает способ у заявки с мастером и может передумать', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/working'), { paymentMethod: 'transfer' }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/working'), { paymentMethod: 'cash' }),
+    );
+  });
+
+  test('способ — из двух; до выбора мастера и мастером не выбирается', async () => {
+    await assertFails(updateDoc(doc(as('client1'), 'orders/working'), { paymentMethod: 'card' }));
+    await assertFails(updateDoc(doc(as('client1'), 'orders/open'), { paymentMethod: 'cash' }));
+    await assertFails(updateDoc(doc(as('master1'), 'orders/working'), { paymentMethod: 'cash' }));
+  });
+
+  // Выбор способа и выбор мастера — одно нажатие, если приложение так решит
+  test('способ можно выбрать вместе с мастером', async () => {
+    const db = as('client1');
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'orders/open'), {
+      masterId: 'master1',
+      masterName: 'Иван',
+      agreedPrice: 3500,
+      agreedAt: serverTimestamp(),
+      status: 'В работе',
+      paymentMethod: 'cash',
+    });
+    batch.update(doc(db, 'orders/open/offers/master1'), { status: 'accepted' });
+    await assertSucceeds(batch.commit());
+  });
+
+  test('«оплатил» — после выбора способа, один раз, серверным временем', async () => {
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { paidAt: serverTimestamp() }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/working'), {
+        paymentMethod: 'cash',
+        paidAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { paidAt: serverTimestamp() }),
+    );
+    await assertFails(updateDoc(doc(as('client1'), 'orders/working'), { paidAt: null }));
+  });
+
+  test('произвольную дату оплаты не подставить', async () => {
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), {
+        paymentMethod: 'cash',
+        paidAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    );
+  });
+
+  test('после отметки способ не меняется', async () => {
+    await settled({ paymentMethod: 'cash', paidAt: new Date() });
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { paymentMethod: 'transfer' }),
+    );
+  });
+
+  test('оплату можно отметить вместе с подтверждением работы', async () => {
+    await settled({ status: 'Ждёт подтверждения', paymentMethod: 'transfer' });
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'orders/working'), {
+        status: 'Завершена',
+        completedAt: serverTimestamp(),
+        paidAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('мастер подтверждает получение — один раз, и только назначенный', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('master1'), 'orders/working'), { paymentReceivedAt: serverTimestamp() }),
+    );
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), { paymentReceivedAt: serverTimestamp() }),
+    );
+    await assertFails(
+      updateDoc(doc(as('master2'), 'orders/blockedWork'), {
+        paymentReceivedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('клиент не отмечает получение за мастера, мастер не подставляет дату', async () => {
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { paymentReceivedAt: serverTimestamp() }),
+    );
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), {
+        paymentReceivedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    );
+  });
+
+  test('на отменённой заявке расчёт не отмечают', async () => {
+    await settled({ status: 'Отменена', paymentMethod: 'cash' });
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { paidAt: serverTimestamp() }),
+    );
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), { paymentReceivedAt: serverTimestamp() }),
+    );
+  });
+
+  // Условия оплаты мастера — копия закрытой подколлекции; кладёт её сервер
+  test('банки и наличные мастера в заявку пишет только сервер', async () => {
+    await assertFails(updateDoc(doc(as('client1'), 'orders/working'), { masterBanks: ['sber'] }));
+    await assertFails(updateDoc(doc(as('master1'), 'orders/working'), { masterAcceptsCash: true }));
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/withTerms'), order({ masterBanks: ['sber'] })),
+    );
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/prepaid'), order({ paidAt: serverTimestamp() })),
+    );
+  });
+});
+
 describe('Отзывы и рейтинг', () => {
   const review = (patch = {}) => ({
     orderId: 'finished',

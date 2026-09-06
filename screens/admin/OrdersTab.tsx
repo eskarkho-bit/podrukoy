@@ -143,6 +143,25 @@ export function OrderAdminCard({
         Клиент: {order.clientName || '—'} · Мастер: {order.masterName ?? 'не выбран'}
         {order.agreedPrice != null ? ` · ${rub(order.agreedPrice)}` : ''}
       </Text>
+      {/* Расчёт идёт мимо сервиса; в споре модератору важно, кто что отметил */}
+      {(order.paymentMethod || order.paidMs != null || order.paymentReceivedMs != null) && (
+        <Text style={styles.cardLine}>
+          Оплата:{' '}
+          {[
+            order.paymentMethod === 'cash'
+              ? 'наличными'
+              : order.paymentMethod === 'transfer'
+                ? 'переводом'
+                : 'способ не выбран',
+            order.paidMs != null ? `клиент отметил ${dayLabel(order.paidMs)}` : null,
+            order.paymentReceivedMs != null
+              ? `мастер подтвердил ${dayLabel(order.paymentReceivedMs)}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      )}
       {!!order.address && <Text style={styles.cardLine}>Адрес: {order.address}</Text>}
       {!!order.comment && <Text style={styles.cardComment}>{order.comment}</Text>}
       {order.photoUrl && <Image source={{ uri: order.photoUrl }} style={styles.cardPhoto} />}

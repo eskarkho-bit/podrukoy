@@ -30,6 +30,9 @@ export type AuditAction =
   | 'order.reminder_sent'
   | 'order.anonymized'
   | 'order.contacts_shared'
+  // расчёт между сторонами: клиент отметил оплату, мастер — получение
+  | 'order.paid_marked'
+  | 'order.payment_received'
   // мастера
   | 'master.applied'
   | 'master.approved'

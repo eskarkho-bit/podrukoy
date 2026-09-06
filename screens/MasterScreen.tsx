@@ -49,6 +49,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
+import { useArmedConfirm } from '../components/armedConfirm';
 import { useBackClose } from '../components/backClose';
 import { EdgeBackLayer, useEdgeBack } from '../components/edgeBack';
 import { ConfettiBurst } from '../components/ConfettiBurst';
@@ -85,8 +86,11 @@ import { BANKS, type BankId } from '../components/banks';
 import {
   EMPTY_PAYMENT_DETAILS,
   formatPhone,
+  PAYMENT_METHOD_LABELS,
   paymentDetailsFrom,
+  paymentMethodFrom,
   type PaymentDetails,
+  type PaymentMethod,
 } from '../components/payment';
 import { LegalScreen } from './LegalScreen';
 import {
@@ -147,6 +151,11 @@ export type Job = {
   // Телефон клиента. Кладёт сервер после выбора мастера; у почтовых
   // аккаунтов его может не быть — тогда кнопки звонка нет
   clientPhone: string | null;
+  // Расчёт напрямую: способ выбрал клиент; отметки «оплатил» (клиент) и
+  // «получил» (мастер). null — ещё нет
+  paymentMethod: PaymentMethod | null;
+  paidMs: number | null;
+  paymentReceivedMs: number | null;
   date: string;
   desc: string;
   status: JobStatus;
@@ -443,6 +452,9 @@ export function MasterScreen({ open, onClose }: Props) {
         client: v.clientName ?? 'Клиент',
         address: v.address ?? '',
         clientPhone: typeof v.clientPhone === 'string' ? v.clientPhone : null,
+        paymentMethod: paymentMethodFrom(v.paymentMethod),
+        paidMs: v.paidAt?.toMillis?.() ?? null,
+        paymentReceivedMs: v.paymentReceivedAt?.toMillis?.() ?? null,
         date: v.date ?? '',
         desc: v.comment || 'Клиент не оставил комментарий.',
         status,
@@ -483,6 +495,9 @@ export function MasterScreen({ open, onClose }: Props) {
           client: '',
           address: '',
           clientPhone: null,
+          paymentMethod: null,
+          paidMs: null,
+          paymentReceivedMs: null,
           date: '',
           desc: '',
           status: 'closed',
@@ -804,6 +819,15 @@ export function MasterScreen({ open, onClose }: Props) {
     pushMessage(jobId, 'Работа выполнена. Спасибо, что выбрали меня!');
   };
 
+  // «Оплату получил» — один раз, серверным временем; отметка не снимается.
+  // От отметки клиента не зависит: наличные в приложении отмечают не все
+  const confirmPaymentReceived = (jobId: string) => {
+    updateDoc(doc(db, 'orders', jobId), { paymentReceivedAt: serverTimestamp() }).catch((e) => {
+      console.warn('Не удалось отметить получение оплаты:', e);
+      showNotice(firestoreErrorText(e, 'Не удалось отметить оплату. Проверьте связь'));
+    });
+  };
+
   // Ответ клиента здесь больше не подделывается: на том конце живой человек
   const sendMessage = (jobId: string, text: string) => {
     pushMessage(jobId, text);
@@ -930,6 +954,7 @@ export function MasterScreen({ open, onClose }: Props) {
                   onWithdrawOffer={() => withdrawOffer(openJob.id)}
                   onOfferLegacy={(price) => offerPriceLegacy(openJob.id, price)}
                   onFinish={() => finishJob(openJob.id)}
+                  onPaymentReceived={() => confirmPaymentReceived(openJob.id)}
                   onSend={(text) => sendMessage(openJob.id, text)}
                   onSendImage={(uri, caption) => pushImage(openJob.id, uri, caption)}
                 />
@@ -2491,6 +2516,7 @@ export function JobDetail({
   onWithdrawOffer,
   onOfferLegacy,
   onFinish,
+  onPaymentReceived,
   onSend,
   onSendImage,
 }: {
@@ -2501,6 +2527,8 @@ export function JobDetail({
   onWithdrawOffer: () => void;
   onOfferLegacy: (price: number) => void;
   onFinish: () => void;
+  // «Оплату получил» — ставится один раз
+  onPaymentReceived: () => void;
   onSend: (text: string) => void;
   onSendImage: (localUri: string, caption: string) => Promise<void>;
 }) {
@@ -2785,6 +2813,14 @@ export function JobDetail({
                   </PressableScale>
                 )}
 
+                {/* Расчёт напрямую: клиент выбрал способ и, возможно, отметил
+                    оплату; мастер подтверждает получение один раз */}
+                {(job.status === 'accepted' ||
+                  job.status === 'awaiting' ||
+                  job.status === 'done') && (
+                  <SettlementRow job={job} onReceived={onPaymentReceived} />
+                )}
+
                 {/* Пока клиент не выбрал, предложение можно забрать назад */}
                 {job.status === 'offered' && !job.legacy && (
                   <PressableScale style={styles.withdrawBtn} onPress={onWithdrawOffer}>
@@ -2892,6 +2928,44 @@ export function JobDetail({
 }
 
 // Три точки, «дышащие» по очереди — клиент набирает текст
+// Расчёт с клиентом внутри карточки статуса. Деньги идут напрямую, сервис
+// их не видит — поэтому «получил» ставит сам мастер, один раз и навсегда:
+// это единственный след для спора, и отметка спрашивает дважды.
+export function SettlementRow({ job, onReceived }: { job: Job; onReceived: () => void }) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const { confirming, press } = useArmedConfirm(onReceived);
+  const line = [
+    job.paymentMethod
+      ? `Клиент платит ${PAYMENT_METHOD_LABELS[job.paymentMethod].toLowerCase()}`
+      : 'Клиент ещё не выбрал способ оплаты',
+    job.paidMs != null ? `отметил оплату ${dayLabel(job.paidMs)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <View style={styles.settleBox}>
+      <Text style={styles.settleText}>{line}</Text>
+      {job.paymentReceivedMs != null ? (
+        <Text style={styles.settleDone}>✓ Оплата получена {dayLabel(job.paymentReceivedMs)}</Text>
+      ) : (
+        <PressableScale
+          style={[styles.settleBtn, confirming && styles.settleBtnConfirm]}
+          onPress={press}
+        >
+          <Text style={[styles.settleBtnText, confirming && styles.settleBtnTextConfirm]}>
+            {confirming ? 'Точно? Отметить получение' : 'Оплату получил'}
+          </Text>
+        </PressableScale>
+      )}
+      <Text style={styles.settleHint}>
+        Деньги идут напрямую от клиента — сервис их не удерживает и не возвращает.
+      </Text>
+    </View>
+  );
+}
+
 function TypingDots() {
   const { mode } = useTheme();
   const styles = themed[mode];
@@ -3612,6 +3686,29 @@ const makeStyles = (t: Palette) =>
       backgroundColor: t.card,
     },
     callBtnText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+    // ---------- расчёт с клиентом ----------
+    settleBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: t.border },
+    settleText: { fontSize: 12.5, fontWeight: '700', color: t.textSoft, lineHeight: 17 },
+    settleDone: { fontSize: 12.5, fontWeight: '800', color: t.accent, marginTop: 8 },
+    settleBtn: {
+      marginTop: 10,
+      borderRadius: 12,
+      paddingVertical: 11,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: t.accentBorder,
+      backgroundColor: t.card,
+    },
+    settleBtnConfirm: { backgroundColor: t.blue, borderColor: t.blue },
+    settleBtnText: { color: t.accent, fontWeight: '800', fontSize: 13 },
+    settleBtnTextConfirm: { color: t.onAccent },
+    settleHint: {
+      fontSize: 11,
+      fontWeight: '400',
+      color: t.textMuted,
+      lineHeight: 15,
+      marginTop: 8,
+    },
     offerCommentInput: {
       borderWidth: 1,
       borderColor: t.inputBorder,

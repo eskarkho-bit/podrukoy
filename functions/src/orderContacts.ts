@@ -1,6 +1,7 @@
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { audit, SYSTEM } from './audit';
+import { loadPaymentTerms } from './orderPayment';
 
 // Телефоны сторон в заявке.
 //
@@ -11,6 +12,10 @@ import { audit, SYSTEM } from './audit';
 // обеим сторонам трогать эти поля. Звонок — главный канал сделки на этом
 // рынке: без кнопки «Позвонить» стороны просто обменялись бы номерами первым
 // сообщением чата.
+//
+// Тем же путём в заявку попадает, как мастер принимает оплату: банки для
+// перевода по СБП и наличные. Сам перевод идёт на тот же телефон, поэтому
+// отдельных реквизитов у заявки нет.
 
 /** Приводит номер к виду для звонилки: +7XXXXXXXXXX либо null. */
 export function normalizePhone(raw: unknown): string | null {
@@ -46,6 +51,10 @@ export async function shareOrderContacts(orderId: string, correlationId: string)
   const application = await db.doc(`masters/${masterId}/verification/application`).get();
   const masterPhone = normalizePhone(application.get('phone'));
 
+  // Как мастер принимает оплату — снимок на момент выбора. Мастер может
+  // поменять банки позже, но клиент видел именно это; для спора важен снимок
+  const terms = await loadPaymentTerms(masterId);
+
   // Номер клиента живёт в Auth: при входе по телефону он и есть логин.
   // У почтового аккаунта номера может не быть — тогда мастеру кнопки
   // звонка просто не покажут.
@@ -59,12 +68,21 @@ export async function shareOrderContacts(orderId: string, correlationId: string)
     }
   }
 
-  if (masterPhone == null && clientPhone == null) return;
+  if (masterPhone == null && clientPhone == null && terms == null) return;
 
   const written = await db.runTransaction(async (tx) => {
     const fresh = await tx.get(ref);
     if (!fresh.exists || fresh.get('masterId') !== masterId) return false;
-    tx.set(ref, { masterPhone, clientPhone }, { merge: true });
+    tx.set(
+      ref,
+      {
+        masterPhone,
+        clientPhone,
+        masterBanks: terms?.banks ?? null,
+        masterAcceptsCash: terms?.acceptsCash ?? null,
+      },
+      { merge: true },
+    );
     return true;
   });
   if (!written) return;
@@ -75,6 +93,10 @@ export async function shareOrderContacts(orderId: string, correlationId: string)
     actor: SYSTEM,
     subject: { type: 'order', id: orderId },
     correlationId,
-    details: { hasMasterPhone: masterPhone != null, hasClientPhone: clientPhone != null },
+    details: {
+      hasMasterPhone: masterPhone != null,
+      hasClientPhone: clientPhone != null,
+      hasPaymentTerms: terms != null,
+    },
   });
 }

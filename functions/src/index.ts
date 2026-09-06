@@ -10,6 +10,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { pushTo, pushToAdmins } from './push';
 import { notifyMastersAbout } from './orderPush';
 import { shareOrderContacts } from './orderContacts';
+import { notePaymentMarks } from './orderPayment';
 import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
 import { recomputeRating, recountCompletedOrders } from './masterStats';
@@ -155,7 +156,12 @@ export const onMessageCreated = onDocumentCreated(
 export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async (event) => {
   const before = event.data?.before.data();
   const after = event.data?.after.data();
-  if (!before || !after || before.status === after.status) return;
+  if (!before || !after) return;
+
+  // Отметки о расчёте («оплатил», «получил») приходят тем же событием, но
+  // статус при этом обычно не меняется — смотрим на них до проверки статуса
+  await notePaymentMarks(event.params.orderId, before, after, event.id);
+  if (before.status === after.status) return;
 
   const title = String(after.title ?? 'Заявка');
   const clientId = after.clientId as string | undefined;

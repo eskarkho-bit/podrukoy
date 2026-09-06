@@ -20,6 +20,8 @@ import { ReactNode, createContext, useContext, useEffect, useRef, useState } fro
 import { db } from '../firebaseConfig';
 import { ChatMessage, Thread } from '../screens/MessagesScreen';
 import { Offer, Order } from '../screens/OrdersScreen';
+import { banksFrom } from './banks';
+import { paymentMethodFrom, type PaymentMethod } from './payment';
 import { cityKey } from './serviceOptions';
 import { educationFrom } from './education';
 import { palettes, ThemeContext, ThemeMode } from '../theme';
@@ -44,6 +46,8 @@ export const SUPPORT_THREAD_ID = 'support';
 // Незакрытые статусы заявки: их можно отменить, и они же считаются активными.
 // Перечень должен совпадать с clientCancels() в firestore.rules.
 const CANCELLABLE = ['Поиск мастера', 'Есть предложения', 'В работе'];
+// Статусы, в которых стороны рассчитываются: мастер уже есть, заявка живая
+const SETTLING = ['В работе', 'Ждёт подтверждения', 'Завершена'];
 const CLOSED = ['Завершена', 'Отменена'];
 
 function today() {
@@ -105,6 +109,9 @@ type AppState = {
   clearOpenThreadRequest: () => void;
   createOrder: (draft: OrderDraft) => void;
   confirmOrderDone: (orderId: string) => void;
+  // Расчёт напрямую между сторонами: способ и отметка «оплатил»
+  choosePaymentMethod: (orderId: string, method: PaymentMethod) => void;
+  markOrderPaid: (orderId: string) => void;
   cancelOrder: (orderId: string) => void;
   // Выбор предложения — он же назначение мастера
   acceptOffer: (orderId: string, masterId: string) => void;
@@ -345,6 +352,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
                 masterId: v.masterId ?? null,
                 masterName: v.masterName ?? null,
                 masterPhone: v.masterPhone ?? null,
+                masterBanks: Array.isArray(v.masterBanks) ? banksFrom(v.masterBanks) : null,
+                masterAcceptsCash:
+                  typeof v.masterAcceptsCash === 'boolean' ? v.masterAcceptsCash : null,
+                paymentMethod: paymentMethodFrom(v.paymentMethod),
+                paidMs: v.paidAt?.toMillis?.() ?? null,
+                paymentReceivedMs: v.paymentReceivedAt?.toMillis?.() ?? null,
                 objectId: v.objectId ?? undefined,
                 serviceLabel: v.serviceLabel ?? undefined,
                 agreedPrice: v.agreedPrice ?? null,
@@ -792,6 +805,30 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }).catch(failed('Не удалось подтвердить выполнение. Проверьте связь'));
   };
 
+  // ---------- расчёт напрямую ----------
+
+  // Способ выбирает клиент после выбора мастера и может передумать, пока
+  // никто не отметил расчёт; правила держат то же самое
+  const choosePaymentMethod = (orderId: string, method: PaymentMethod) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order || !order.masterId || !SETTLING.includes(order.status)) return;
+    if (order.paidMs != null || order.paymentReceivedMs != null) return;
+    updateDoc(doc(db, 'orders', orderId), { paymentMethod: method }).catch(
+      failed('Не удалось сохранить способ оплаты. Проверьте связь'),
+    );
+  };
+
+  // «Оплатил» — один раз, серверным временем: отметка не снимается, это
+  // след расчёта для спора. Сами деньги через сервис не проходят
+  const markOrderPaid = (orderId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order || !order.masterId || !order.paymentMethod || order.paidMs != null) return;
+    if (!SETTLING.includes(order.status)) return;
+    updateDoc(doc(db, 'orders', orderId), { paidAt: serverTimestamp() }).catch(
+      failed('Не удалось отметить оплату. Проверьте связь'),
+    );
+  };
+
   const cancelOrder = (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order || !CANCELLABLE.includes(order.status)) return;
@@ -1159,6 +1196,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setAdminOpen,
     createOrder,
     confirmOrderDone,
+    choosePaymentMethod,
+    markOrderPaid,
     cancelOrder,
     acceptOffer,
     submitReview,

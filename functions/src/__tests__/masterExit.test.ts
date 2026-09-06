@@ -31,6 +31,8 @@ beforeEach(async () => {
     status: 'Ждёт подтверждения',
     masterPhone: '+79280001122',
     clientPhone: '+79991234567',
+    masterBanks: ['sber'],
+    masterAcceptsCash: true,
   });
   await db.doc('orders/done').set({
     clientId: 'c3',
@@ -38,6 +40,17 @@ beforeEach(async () => {
     masterName: 'Иван',
     status: 'Завершена',
     masterPhone: '+79280001122',
+    masterBanks: ['sber'],
+    masterAcceptsCash: true,
+  });
+  // Номер уже снят прежним прогоном, условия оплаты остались
+  await db.doc('orders/done-terms-only').set({
+    clientId: 'c5',
+    masterId: MASTER,
+    status: 'Завершена',
+    masterPhone: null,
+    masterBanks: ['tbank'],
+    masterAcceptsCash: false,
   });
   await db.doc('orders/foreign').set({
     clientId: 'c4',
@@ -68,13 +81,20 @@ describe('detachMasterFromOrders', () => {
     expect(order.get('status')).toBe('Ждёт подтверждения');
     expect(order.get('masterName')).toBe('Иван');
     expect(order.get('masterPhone')).toBeNull();
+    // Переводить тоже некому — условия оплаты уходят вместе с номером
+    expect(order.get('masterBanks')).toBeNull();
+    expect(order.get('masterAcceptsCash')).toBeNull();
     // Номер клиента остаётся: заявку читают только он сам и никто больше
     expect(order.get('clientPhone')).toBe('+79991234567');
   });
 
-  test('из завершённых заявок номер мастера тоже уходит', async () => {
+  test('из завершённых заявок номер и условия оплаты мастера тоже уходят', async () => {
     await detachMasterFromOrders(MASTER);
-    expect((await db.doc('orders/done').get()).get('masterPhone')).toBeNull();
+    const done = await db.doc('orders/done').get();
+    expect(done.get('masterPhone')).toBeNull();
+    expect(done.get('masterBanks')).toBeNull();
+    // Заявка, где номера уже не было, а условия ещё лежали
+    expect((await db.doc('orders/done-terms-only').get()).get('masterBanks')).toBeNull();
   });
 
   test('чужие заявки не тронуты', async () => {

@@ -38,8 +38,9 @@ export async function dropPendingOffers(masterId: string): Promise<number> {
  *
  * «В работе» возвращаются в поиск: клиент не должен сидеть с
  * мастером-призраком. «Ждёт подтверждения» и завершённые остаются — работа
- * сделана, — но телефон мастера из них уходит: человека больше нет, звонить
- * некому, а чужой номер без владельца — это уже не контакт, а утечка.
+ * сделана, — но телефон мастера и условия оплаты из них уходят: человека
+ * больше нет, звонить и переводить некому, а чужой номер без владельца —
+ * это уже не контакт, а утечка.
  * Телефон клиента у возвращённой в поиск заявки тоже снимается: открытую
  * заявку снова читают все мастера города.
  *
@@ -62,6 +63,8 @@ export async function detachMasterFromOrders(masterId: string): Promise<number> 
           agreedAt: null,
           masterPhone: null,
           clientPhone: null,
+          masterBanks: null,
+          masterAcceptsCash: null,
           reopenedAt: new Date(),
         },
         { merge: true },
@@ -77,8 +80,12 @@ export async function detachMasterFromOrders(masterId: string): Promise<number> 
           { href: '/' },
         );
       }
-    } else if (d.get('masterPhone') != null) {
-      await d.ref.set({ masterPhone: null }, { merge: true });
+    } else if (d.get('masterPhone') != null || d.get('masterBanks') != null) {
+      // Вместе с номером уходят и условия оплаты: переводить больше некому
+      await d.ref.set(
+        { masterPhone: null, masterBanks: null, masterAcceptsCash: null },
+        { merge: true },
+      );
     }
   }
   return reopened;

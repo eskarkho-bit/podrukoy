@@ -100,6 +100,10 @@ export type AdminOrder = {
   completedMs: number | null;
   closedByAdmin: boolean;
   adminCloseReason: string | null;
+  // Расчёт напрямую — только отметки сторон, денег сервис не видит
+  paymentMethod: string | null;
+  paidMs: number | null;
+  paymentReceivedMs: number | null;
 };
 
 export type AdminOffer = {
@@ -303,6 +307,9 @@ function toAdminOrder(d: QueryDocumentSnapshot | DocumentSnapshot): AdminOrder {
     completedMs: ms(v.completedAt),
     closedByAdmin: v.closedByAdmin === true,
     adminCloseReason: typeof v.adminCloseReason === 'string' ? v.adminCloseReason : null,
+    paymentMethod: typeof v.paymentMethod === 'string' ? v.paymentMethod : null,
+    paidMs: ms(v.paidAt),
+    paymentReceivedMs: ms(v.paymentReceivedAt),
   };
 }
 

@@ -108,6 +108,8 @@ export default function DemoRoute() {
       onCreateOrder={noop}
       onCancelOrder={noop}
       onConfirmOrder={noop}
+      onChoosePaymentMethod={noop}
+      onMarkPaid={noop}
       onAcceptOffer={noop}
       onSubmitReview={noop}
       onAcceptPrice={noop}
