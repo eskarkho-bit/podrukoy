@@ -46,8 +46,11 @@ import {
   where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
+import { useBackClose } from '../components/backClose';
+import { EdgeBackLayer, useEdgeBack } from '../components/edgeBack';
 import { ConfettiBurst } from '../components/ConfettiBurst';
 import { EmptyScene } from '../components/illustrations';
 import { Glyph, themedIconColors } from '../components/glyphIcons';
@@ -778,6 +781,18 @@ export function MasterScreen({ open, onClose }: Props) {
     setOpenJobId(null);
   };
 
+  // Системный «назад» снимает слои по одному: открытая заявка → правка
+  // анкеты → сам раздел мастера. Вложенные оверлеи (документы, выбор города)
+  // вешают свои обработчики позже и потому перехватывают раньше.
+  useBackClose(open, () => {
+    if (openJobId) handleBackFromJob();
+    else if (editingProfile) setEditingProfile(false);
+    else onClose();
+  });
+
+  // Заявка въезжает справа — выезжать обязана и свайпом от края
+  const edge = useEdgeBack(!!openJob, handleBackFromJob);
+
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, styles.root, layerStyle]}
@@ -860,20 +875,23 @@ export function MasterScreen({ open, onClose }: Props) {
           {openJob && (
             <Animated.View
               entering={SlideInRight.springify().damping(20).stiffness(160)}
-              exiting={SlideOutRight.duration(280)}
-              style={StyleSheet.absoluteFill}
+              // Экран, уехавший пальцем, не провожаем второй анимацией
+              exiting={edge.dragDismissed ? undefined : SlideOutRight.duration(280)}
+              style={[StyleSheet.absoluteFill, edge.screenStyle]}
             >
-              <JobDetail
-                job={openJob}
-                typing={typingJobId === openJob.id}
-                onBack={handleBackFromJob}
-                onSendOffer={(price, comment) => sendOffer(openJob.id, price, comment)}
-                onWithdrawOffer={() => withdrawOffer(openJob.id)}
-                onOfferLegacy={(price) => offerPriceLegacy(openJob.id, price)}
-                onFinish={() => finishJob(openJob.id)}
-                onSend={(text) => sendMessage(openJob.id, text)}
-                onSendImage={(uri, caption) => pushImage(openJob.id, uri, caption)}
-              />
+              <EdgeBackLayer gesture={edge.gesture}>
+                <JobDetail
+                  job={openJob}
+                  typing={typingJobId === openJob.id}
+                  onBack={handleBackFromJob}
+                  onSendOffer={(price, comment) => sendOffer(openJob.id, price, comment)}
+                  onWithdrawOffer={() => withdrawOffer(openJob.id)}
+                  onOfferLegacy={(price) => offerPriceLegacy(openJob.id, price)}
+                  onFinish={() => finishJob(openJob.id)}
+                  onSend={(text) => sendMessage(openJob.id, text)}
+                  onSendImage={(uri, caption) => pushImage(openJob.id, uri, caption)}
+                />
+              </EdgeBackLayer>
             </Animated.View>
           )}
         </View>
@@ -904,6 +922,7 @@ function MasterApplicationScreen({
 }) {
   const { mode: themeMode, colors: t } = useTheme();
   const styles = themed[themeMode];
+  const insets = useSafeAreaInsets();
 
   const verified = !!profile?.verified;
   const pending = application.status === 'pending';
@@ -1114,8 +1133,12 @@ function MasterApplicationScreen({
   if (pending) {
     return (
       <View style={styles.fill}>
-        <View style={styles.topBar}>
-          <PressableScale style={styles.backChip} onPress={onClose}>
+        <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+          <PressableScale
+            style={styles.backChip}
+            onPress={onClose}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Text style={styles.backText}>‹ Профиль</Text>
           </PressableScale>
           <View style={styles.backChipGhost} />
@@ -1164,8 +1187,12 @@ function MasterApplicationScreen({
       style={styles.fill}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
@@ -1562,6 +1589,7 @@ export function JobList({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   // Стаггер положен первой пачке — она представляет список целиком. Заявка,
   // пришедшая из подписки позже, должна появляться сразу, а не ждать очереди
   // по своему номеру в списке.
@@ -1580,8 +1608,12 @@ export function JobList({
 
   return (
     <View style={styles.fill}>
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
@@ -1735,6 +1767,7 @@ export function StatsTab({
 }) {
   const { mode } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const income = incomeSummary(orders);
   const bars = monthlyIncome(orders);
   const maxBar = Math.max(...bars.map((b) => b.sum), 1);
@@ -1745,8 +1778,12 @@ export function StatsTab({
 
   return (
     <View style={styles.fill}>
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
@@ -1918,6 +1955,7 @@ export function HistoryTab({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   // Свежее сверху: по дате подтверждения, у старых заказов — по дате создания
   const sorted = [...jobs].sort(
     (a, b) =>
@@ -1927,8 +1965,12 @@ export function HistoryTab({
 
   return (
     <View style={styles.fill}>
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
@@ -2015,6 +2057,7 @@ export function ProfileTab({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   // Жалоба на отзыв: раскрытое поле причины у одного отзыва за раз.
   // Отправленные помечаются локально — грузить свои жалобы ради галочки
   // не стоит, а при перезаходе кнопка просто вернётся.
@@ -2040,11 +2083,19 @@ export function ProfileTab({
 
   return (
     <View style={styles.fill}>
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
-        <PressableScale style={styles.backChip} onPress={onLogout}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onLogout}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.logoutText}>Выйти из раздела</Text>
         </PressableScale>
       </View>
@@ -2209,6 +2260,7 @@ export function MasterTabs({
 }) {
   const { mode } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const [barW, setBarW] = useState(0);
   const pillW = barW > 0 ? (barW - 12) / MASTER_TABS.length : 0;
   const idx = MASTER_TABS.findIndex((t) => t.id === active);
@@ -2239,7 +2291,10 @@ export function MasterTabs({
   }));
 
   return (
-    <Animated.View style={[styles.tabsWrap, wrapStyle]} pointerEvents={hidden ? 'none' : 'auto'}>
+    <Animated.View
+      style={[styles.tabsWrap, { bottom: Math.max(insets.bottom, 16) }, wrapStyle]}
+      pointerEvents={hidden ? 'none' : 'auto'}
+    >
       <View style={styles.tabsBar} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
         {barW > 0 && <Animated.View style={[styles.tabsPill, pillStyle]} pointerEvents="none" />}
         {MASTER_TABS.map((tabItem) => (
@@ -2328,6 +2383,10 @@ export function JobDetail({
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [sendingImage, setSendingImage] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+  // Позиция прокрутки принадлежит пальцу: лента сама уезжает вниз, только
+  // если мастер и так был внизу, а не выдёргивает его из чтения
+  const atBottom = useRef(true);
 
   const price = parseInt(priceDraft.replace(/\D/g, ''), 10);
   const priceValid = Number.isFinite(price) && price > 0;
@@ -2343,6 +2402,7 @@ export function JobDetail({
     else onSendOffer(price, offerComment);
     setPriceDraft('');
     setOfferComment('');
+    atBottom.current = true;
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   };
 
@@ -2355,6 +2415,8 @@ export function JobDetail({
         await onSendImage(pendingImage, trimmed);
         setPendingImage(null);
         setText('');
+        // Своё сообщение возвращает ленту вниз, даже если читали историю
+        atBottom.current = true;
         requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
       } finally {
         setSendingImage(false);
@@ -2364,6 +2426,7 @@ export function JobDetail({
     if (!trimmed) return;
     onSend(trimmed);
     setText('');
+    atBottom.current = true;
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   };
 
@@ -2380,8 +2443,12 @@ export function JobDetail({
       style={[styles.fill, styles.detailRoot]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onBack}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onBack}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Заявки</Text>
         </PressableScale>
         <Animated.View entering={FadeIn.delay(80).duration(280)} style={styles.detailTitleWrap}>
@@ -2399,7 +2466,14 @@ export function JobDetail({
         ref={scrollRef}
         style={styles.fill}
         contentContainerStyle={styles.detailContent}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          atBottom.current = contentOffset.y >= contentSize.height - layoutMeasurement.height - 40;
+        }}
+        scrollEventThrottle={16}
+        onContentSizeChange={() => {
+          if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: true });
+        }}
       >
         <Animated.View entering={FadeInDown.delay(40).duration(360)} style={styles.detailCard}>
           <View style={styles.detailHead}>
@@ -2644,12 +2718,13 @@ export function JobDetail({
                 style={styles.pendingCancel}
                 onPress={() => setPendingImage(null)}
                 disabled={sendingImage}
+                hitSlop={8}
               >
                 <Text style={styles.pendingCancelText}>✕</Text>
               </PressableScale>
             </View>
           )}
-          <View style={styles.inputRow}>
+          <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 16) }]}>
             <PressableScale
               accessibilityLabel="Прикрепить фото"
               style={[styles.attachBtn, sendingImage && styles.sendBtnDisabled]}
@@ -2732,12 +2807,12 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { backgroundColor: t.bg },
     fill: { flex: 1 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
     topBar: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: 16,
-      paddingTop: 60,
       paddingBottom: 12,
     },
     backChip: {
@@ -2767,7 +2842,7 @@ const makeStyles = (t: Palette) =>
     loginTitle: { fontSize: 20, fontWeight: '800', color: t.text },
     loginSub: {
       color: t.textSoft,
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 12.5,
       textAlign: 'center',
       marginTop: 6,
@@ -2857,7 +2932,7 @@ const makeStyles = (t: Palette) =>
     },
     rejectTitle: { fontWeight: '800', fontSize: 13.5, color: t.danger },
     rejectText: {
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 12.5,
       color: t.text,
       lineHeight: 17,
@@ -2919,7 +2994,7 @@ const makeStyles = (t: Palette) =>
     },
     checkboxOn: { backgroundColor: t.accent, borderColor: t.accent },
     checkboxTick: { color: t.onAccent, fontSize: 13, fontWeight: '800', lineHeight: 15 },
-    consentText: { flex: 1, fontSize: 11.5, fontWeight: '600', color: t.textMuted, lineHeight: 17 },
+    consentText: { flex: 1, fontSize: 11.5, fontWeight: '400', color: t.textMuted, lineHeight: 17 },
     consentLink: { color: t.accent, fontWeight: '800' },
     revokeBtn: { paddingVertical: 8, marginTop: 4 },
     revokeText: { color: t.danger, fontWeight: '700', fontSize: 11.5 },
@@ -3002,7 +3077,7 @@ const makeStyles = (t: Palette) =>
     milestoneFill: { height: '100%', borderRadius: 3, backgroundColor: t.accent },
     awaitingHint: {
       color: t.textSoft,
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 12,
       marginTop: -8,
       marginBottom: 16,
@@ -3033,7 +3108,7 @@ const makeStyles = (t: Palette) =>
     },
     marketHint: {
       color: t.textMuted,
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 11,
       marginTop: -12,
       lineHeight: 15,
@@ -3101,8 +3176,8 @@ const makeStyles = (t: Palette) =>
     },
     reviewStars: { color: t.warn, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
     reviewMeta: { color: t.textMuted, fontWeight: '600', fontSize: 11 },
-    reviewText: { color: t.text, fontWeight: '600', fontSize: 13, lineHeight: 18 },
-    reviewsEmpty: { color: t.textMuted, fontWeight: '600', fontSize: 12.5, lineHeight: 18 },
+    reviewText: { color: t.text, fontWeight: '400', fontSize: 13, lineHeight: 18 },
+    reviewsEmpty: { color: t.textMuted, fontWeight: '400', fontSize: 12.5, lineHeight: 18 },
     // Жалоба на отзыв
     complainLinkWrap: { marginTop: 8, alignSelf: 'flex-start' },
     complainLink: { fontSize: 11.5, fontWeight: '800', color: t.textMuted },
@@ -3164,7 +3239,6 @@ const makeStyles = (t: Palette) =>
       position: 'absolute',
       left: 16,
       right: 16,
-      bottom: Platform.OS === 'ios' ? 28 : 16,
     },
     tabsBar: {
       flexDirection: 'row',
@@ -3267,7 +3341,7 @@ const makeStyles = (t: Palette) =>
     emptyTitle: { fontWeight: '800', fontSize: 14, color: t.text },
     emptySub: {
       color: t.textMuted,
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 11.5,
       marginTop: 4,
       textAlign: 'center',
@@ -3459,7 +3533,6 @@ const makeStyles = (t: Palette) =>
       flexDirection: 'row',
       alignItems: 'flex-end',
       paddingHorizontal: 16,
-      paddingBottom: Platform.OS === 'ios' ? 28 : 16,
       paddingTop: 8,
       gap: 8,
     },
@@ -3475,18 +3548,19 @@ const makeStyles = (t: Palette) =>
       color: t.text,
       maxHeight: 100,
     },
+    // 44×44 — минимальная цель касания
     sendBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: t.accent,
       alignItems: 'center',
       justifyContent: 'center',
     },
     attachBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: t.card,
       borderWidth: 1,
       borderColor: t.border,

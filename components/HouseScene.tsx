@@ -58,6 +58,13 @@ type ScenePalette = {
   crowns: [string, string, string];
   label: string;
   objectLabel: string;
+  // Кружки чипов и чип «Назад» — тоже часть сцены: ночью им нельзя
+  // оставаться дневными белыми пятнами
+  chipBg: string;
+  chipBorder: string;
+  focusRing: string;
+  backBg: string;
+  backBorder: string;
 };
 
 const DAY: ScenePalette = {
@@ -82,6 +89,11 @@ const DAY: ScenePalette = {
   crowns: ['#9CB88C', '#8AA97A', '#A9C29A'],
   label: '#5E7A56',
   objectLabel: '#3C4A37',
+  chipBg: '#FFFFFF',
+  chipBorder: '#FFFFFF',
+  focusRing: '#5E7A56',
+  backBg: '#FFFFFF',
+  backBorder: '#E6E9E1',
 };
 
 const NIGHT: ScenePalette = {
@@ -107,6 +119,11 @@ const NIGHT: ScenePalette = {
   crowns: ['#3F5A44', '#354E3A', '#4A6850'],
   label: '#A9C29A',
   objectLabel: '#DEE5D8',
+  chipBg: '#26332A',
+  chipBorder: '#3A4A3E',
+  focusRing: '#A9C29A',
+  backBg: '#243026',
+  backBorder: '#33413A',
 };
 
 // Комнаты на плане ночью — те же цвета, приглушённые до «света ламп»
@@ -303,6 +320,9 @@ export function HouseScene({
   const breathOn = useSharedValue(1);
   const sway = useSharedValue(0);
   const drift = useSharedValue(0);
+  // Ответ дома на касание: чуть проседает под пальцем ещё до открытия —
+  // отклик живёт на нажатии, а не на отпускании
+  const pressP = useSharedValue(0);
   const prevStage = useRef<Stage>('exterior');
 
   const reduceMotion = useReducedMotion();
@@ -376,7 +396,12 @@ export function HouseScene({
 
   const houseStyle = useAnimatedStyle(() => {
     const b = wave(breath.value) * breathOn.value;
-    return { transform: [{ translateY: -2.6 * b * k }, { scale: 1 + 0.005 * b }] };
+    return {
+      transform: [
+        { translateY: -2.6 * b * k },
+        { scale: (1 + 0.005 * b) * (1 - 0.015 * pressP.value) },
+      ],
+    };
   });
 
   // Непрозрачность самой тени задаёт градиент в разметке; здесь только
@@ -599,6 +624,7 @@ export function HouseScene({
                   k={k}
                   index={i}
                   labelColor={P.label}
+                  chipBg={P.chipBg}
                   visible={stage !== 'room'}
                   onPress={() => onSelectRoom(room)}
                 />
@@ -613,6 +639,9 @@ export function HouseScene({
                   k={k}
                   index={i}
                   labelColor={P.objectLabel}
+                  chipBg={P.chipBg}
+                  chipBorder={P.chipBorder}
+                  focusRing={P.focusRing}
                   focused={focusedObjectId === obj.id}
                   onPress={() => onSelectObject(obj)}
                 />
@@ -625,6 +654,12 @@ export function HouseScene({
             <Pressable
               style={styles.houseTap}
               onPress={onOpenHouse}
+              onPressIn={() => {
+                pressP.value = withTiming(1, { duration: 70 });
+              }}
+              onPressOut={() => {
+                pressP.value = withSpring(0, springs.micro);
+              }}
               accessibilityRole="button"
               accessibilityLabel="Открыть план дома"
             />
@@ -637,8 +672,12 @@ export function HouseScene({
               exiting={FadeOut.duration(180)}
               style={styles.backWrap}
             >
-              <PressableScale style={styles.backChip} onPress={onBack}>
-                <Text style={styles.backText}>‹ Назад</Text>
+              <PressableScale
+                style={[styles.backChip, { backgroundColor: P.backBg, borderColor: P.backBorder }]}
+                onPress={onBack}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={[styles.backText, { color: P.label }]}>‹ Назад</Text>
               </PressableScale>
             </Animated.View>
           )}
@@ -706,6 +745,7 @@ function RoomChip({
   k,
   index,
   labelColor,
+  chipBg,
   visible,
   onPress,
 }: {
@@ -713,6 +753,7 @@ function RoomChip({
   k: number;
   index: number;
   labelColor: string;
+  chipBg: string;
   visible: boolean;
   onPress: () => void;
 }) {
@@ -738,7 +779,7 @@ function RoomChip({
         accessibilityRole="button"
         accessibilityLabel={`Комната: ${room.title}`}
       >
-        <View style={styles.roomCircle}>
+        <View style={[styles.roomCircle, { backgroundColor: chipBg }]}>
           <Glyph glyph={room.icon} size={22} textStyle={styles.roomIcon} />
         </View>
         <Text style={[styles.roomLabel, { color: labelColor }]}>{room.title}</Text>
@@ -752,6 +793,9 @@ function ObjectChip({
   k,
   index,
   labelColor,
+  chipBg,
+  chipBorder,
+  focusRing,
   focused,
   onPress,
 }: {
@@ -759,6 +803,9 @@ function ObjectChip({
   k: number;
   index: number;
   labelColor: string;
+  chipBg: string;
+  chipBorder: string;
+  focusRing: string;
   focused: boolean;
   onPress: () => void;
 }) {
@@ -788,7 +835,12 @@ function ObjectChip({
         accessibilityRole="button"
         accessibilityLabel={`${obj.title} — ${obj.place}`}
       >
-        <View style={[styles.objectCircle, focused && styles.objectCircleFocused]}>
+        <View
+          style={[
+            styles.objectCircle,
+            { backgroundColor: chipBg, borderColor: focused ? focusRing : chipBorder },
+          ]}
+        >
           {hasObjectIcon(obj.id) ? (
             <ObjectIcon id={obj.id} size={20} />
           ) : (
@@ -911,26 +963,24 @@ const styles = StyleSheet.create({
     height: '58%',
   },
   backWrap: { position: 'absolute', top: 12, left: 12 },
+  // Цвета чипов приходят из палитры сцены (день/ночь) на месте использования
   backChip: {
-    backgroundColor: '#FFFFFF',
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderWidth: 1,
-    borderColor: '#E6E9E1',
     shadowColor: '#1F2B1C',
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
-  backText: { fontWeight: '700', fontSize: 12.5, color: '#5E7A56' },
+  backText: { fontWeight: '700', fontSize: 12.5 },
   roomChipInner: { alignItems: 'center' },
   roomCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#1F2B1C',
@@ -944,7 +994,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 10,
     fontWeight: '700',
-    color: '#5E7A56',
     textAlign: 'center',
   },
   objectChipInner: { alignItems: 'center' },
@@ -952,24 +1001,20 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#FFFFFF',
     shadowColor: '#1F2B1C',
     shadowOpacity: 0.12,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
-  objectCircleFocused: { borderColor: '#5E7A56' },
   objectIcon: { fontSize: 15 },
   objectText: {
     marginTop: 3,
     fontSize: 9.5,
     fontWeight: '700',
-    color: '#3C4A37',
     textAlign: 'center',
   },
 });

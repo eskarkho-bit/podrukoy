@@ -1,6 +1,8 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../theme';
+import { useBackClose } from '../components/backClose';
 import { PressableScale } from '../components/PressableScale';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 
@@ -15,12 +17,22 @@ type Props = {
 export function LegalScreen({ docId, onClose }: Props) {
   const { mode } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const doc = LEGAL_DOCS[docId];
+  useBackClose(true, onClose);
 
   return (
-    <Animated.View entering={FadeIn.duration(220)} style={[StyleSheet.absoluteFill, styles.root]}>
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+    <Animated.View
+      entering={FadeIn.duration(220)}
+      exiting={FadeOut.duration(180)}
+      style={[StyleSheet.absoluteFill, styles.root]}
+    >
+      <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
@@ -45,12 +57,12 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { backgroundColor: t.bg },
     fill: { flex: 1 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
     topBar: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
       paddingHorizontal: 14,
-      paddingTop: 54,
       paddingBottom: 6,
     },
     backChip: { paddingVertical: 8, paddingHorizontal: 10 },
@@ -65,7 +77,7 @@ const makeStyles = (t: Palette) =>
       marginTop: 4,
       marginBottom: 18,
     },
-    body: { fontSize: 13, fontWeight: '500', color: t.text, lineHeight: 20 },
+    body: { fontSize: 13, fontWeight: '400', color: t.text, lineHeight: 20 },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

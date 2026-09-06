@@ -23,6 +23,7 @@ import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { palettes, Palette, useTheme } from '../theme';
 import { AnimatedCheck } from './AnimatedCheck';
+import { useBackClose } from './backClose';
 import { hapticSuccess } from './haptics';
 import { PressableScale } from './PressableScale';
 import { Glyph, themedIconColors } from './glyphIcons';
@@ -101,7 +102,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
 
   // Пока показываем «Заявка создана», шторка закрывается сама — забирать её
   // из-под руки пользователя в этот момент нечестно, поэтому жест выключен
-  const { gesture, cardStyle } = useSheetDrag(onClose, step !== 'done');
+  const { gesture, cardStyle, dragDismissed } = useSheetDrag(onClose, step !== 'done');
 
   useEffect(
     () => () => {
@@ -109,6 +110,33 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
     },
     [],
   );
+
+  // Завершение одно на два пути — таймер и нетерпеливый тап. Пауза с галочкой
+  // существует ради глаза, а не как замок: ждать её досмотра не обязательно.
+  const completed = useRef(false);
+  const finish = () => {
+    if (completed.current) return;
+    completed.current = true;
+    if (timer.current) clearTimeout(timer.current);
+    onComplete({
+      id: draftId,
+      // У пути через «Другое» уточнения нет — пустые части не попадают в заголовок
+      title: [object.title, serviceType?.label, serviceSub].filter(Boolean).join(' · '),
+      comment: comment.trim(),
+      photoUri,
+      category: categoryFor(object.id),
+      objectId: object.id,
+      serviceLabel: serviceType?.label ?? OTHER_LABEL,
+    });
+  };
+
+  // Системный «назад» ведёт по шагам, как стрелка в шапке, и лишь с первого
+  // шага закрывает шторку
+  useBackClose(true, () => {
+    if (step === 'done') finish();
+    else if (step === 'sub' || step === 'form') goBack();
+    else onClose();
+  });
 
   const goForward = (next: Step) => {
     setDir('forward');
@@ -164,19 +192,9 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
 
     hapticSuccess();
     goForward('done');
-    // Даём «галочке» отыграть, затем закрываем и создаём заявку
-    timer.current = setTimeout(() => {
-      onComplete({
-        id: draftId,
-        // У пути через «Другое» уточнения нет — пустые части не попадают в заголовок
-        title: [object.title, serviceType?.label, serviceSub].filter(Boolean).join(' · '),
-        comment: comment.trim(),
-        photoUri,
-        category: categoryFor(object.id),
-        objectId: object.id,
-        serviceLabel: serviceType?.label ?? OTHER_LABEL,
-      });
-    }, 1400);
+    // Даём «галочке» отыграть, затем закрываем и создаём заявку.
+    // Тап в любом месте завершает то же самое сразу — см. finish().
+    timer.current = setTimeout(finish, 1400);
   };
 
   const enterAnim = (i = 0) =>
@@ -205,7 +223,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
         />
         <Pressable
           style={[StyleSheet.absoluteFill, styles.dim]}
-          onPress={step === 'done' ? undefined : onClose}
+          onPress={step === 'done' ? finish : onClose}
         />
       </Animated.View>
 
@@ -215,7 +233,9 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
       >
         <Animated.View
           entering={SlideInDown.springify().damping(19).stiffness(150).mass(1)}
-          exiting={SlideOutDown.duration(280)}
+          // Уехавшую пальцем карточку не провожаем второй анимацией: exiting
+          // стартовал бы от позиции вёрстки и мигнул бы ею обратно на экран
+          exiting={dragDismissed ? undefined : SlideOutDown.duration(280)}
           layout={LinearTransition.springify().damping(20).stiffness(170)}
           style={[styles.card, cardStyle]}
         >
@@ -256,16 +276,19 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
           </Animated.View>
 
           {step === 'done' ? (
-            <Animated.View
-              entering={ZoomIn.springify().damping(14).stiffness(180)}
-              style={styles.doneWrap}
-            >
-              <View style={styles.checkCircle}>
-                <AnimatedCheck size={30} color={t.accent} />
-              </View>
-              <Text style={styles.doneTitle}>Заявка создана</Text>
-              <Text style={styles.doneSub}>Мастер скоро свяжется с вами</Text>
-            </Animated.View>
+            // Пауза прерываема: тап по карточке (и по фону) закрывает сразу
+            <Pressable onPress={finish} accessibilityRole="button" accessibilityLabel="Продолжить">
+              <Animated.View
+                entering={ZoomIn.springify().damping(14).stiffness(180)}
+                style={styles.doneWrap}
+              >
+                <View style={styles.checkCircle}>
+                  <AnimatedCheck size={30} color={t.accent} />
+                </View>
+                <Text style={styles.doneTitle}>Заявка создана</Text>
+                <Text style={styles.doneSub}>Мастер скоро свяжется с вами</Text>
+              </Animated.View>
+            </Pressable>
           ) : (
             // key по шагу: старый контент растворяется, новый въезжает по направлению
             <Animated.View key={step} exiting={FadeOut.duration(140)}>
@@ -320,6 +343,10 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                         <PressableScale
                           style={styles.photoRemove}
                           onPress={() => setPhotoUri(null)}
+                          // Крестик 28×28 — слоп добивает цель до 44pt
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel="Убрать фото"
                         >
                           <Text style={styles.photoRemoveText}>✕</Text>
                         </PressableScale>
@@ -506,7 +533,7 @@ const makeStyles = (t: Palette) =>
     },
     privacyHint: {
       fontSize: 11,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       textAlign: 'center',
       lineHeight: 15,

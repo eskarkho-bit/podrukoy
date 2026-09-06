@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, SlideInRight, SlideOutRight } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../../theme';
+import { useBackClose } from '../../components/backClose';
 import { PressableScale } from '../../components/PressableScale';
 import { FONTS } from '../../components/typography';
 import { Glyph, themedIconColors } from '../../components/glyphIcons';
@@ -320,6 +322,9 @@ export function PeopleTab() {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<FoundUser[] | null>(null);
   const [openUid, setOpenUid] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  // Системный «назад» закрывает карточку, а не всю модерацию
+  useBackClose(openUid != null, () => setOpenUid(null));
   const [card, setCard] = useState<UserCardData | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -397,8 +402,12 @@ export function PeopleTab() {
           exiting={SlideOutRight.duration(280)}
           style={[StyleSheet.absoluteFill, styles.layer]}
         >
-          <View style={styles.layerBar}>
-            <PressableScale style={styles.backChip} onPress={() => setOpenUid(null)}>
+          <View style={[styles.layerBar, { paddingTop: insets.top + 6 }]}>
+            <PressableScale
+              style={styles.backChip}
+              onPress={() => setOpenUid(null)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Text style={styles.backText}>‹ Поиск</Text>
             </PressableScale>
           </View>
@@ -425,7 +434,7 @@ const makeStyles = (t: Palette) =>
     fill: { flex: 1 },
     content: { padding: 16, paddingBottom: 130 },
     header: { fontSize: 20, fontFamily: FONTS.display, color: t.text, marginBottom: 12 },
-    hint: { fontSize: 11.5, fontWeight: '600', color: t.textMuted, lineHeight: 16, marginTop: 8 },
+    hint: { fontSize: 11.5, fontWeight: '400', color: t.textMuted, lineHeight: 16, marginTop: 8 },
     searchRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
     searchInput: {
       flex: 1,
@@ -464,7 +473,8 @@ const makeStyles = (t: Palette) =>
     emptyWrap: { alignItems: 'center', paddingVertical: 40, gap: 10 },
     emptyTitle: { fontSize: 14, fontWeight: '800', color: t.textMuted },
     layer: { backgroundColor: t.bg },
-    layerBar: { flexDirection: 'row', paddingHorizontal: 14, paddingTop: 54, paddingBottom: 6 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
+    layerBar: { flexDirection: 'row', paddingHorizontal: 14, paddingBottom: 6 },
     backChip: { paddingVertical: 8, paddingHorizontal: 10 },
     backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
     layerContent: { padding: 16, paddingBottom: 60 },
@@ -477,7 +487,7 @@ const makeStyles = (t: Palette) =>
     },
     cardTitle: { fontSize: 16, fontFamily: FONTS.heading, color: t.text },
     cardMeta: { fontSize: 11.5, fontWeight: '700', color: t.textMuted, marginTop: 4 },
-    cardLine: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 8, lineHeight: 17 },
+    cardLine: { fontSize: 12.5, fontWeight: '400', color: t.text, marginTop: 8, lineHeight: 17 },
     blockedLine: {
       fontSize: 12,
       fontWeight: '700',
@@ -512,7 +522,7 @@ const makeStyles = (t: Palette) =>
     miniTitle: { fontSize: 12.5, fontWeight: '800', color: t.text },
     miniMeta: { fontSize: 11, fontWeight: '600', color: t.textMuted, marginTop: 3 },
     reviewStars: { fontSize: 12, fontWeight: '800', color: t.warn },
-    reviewText: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
+    reviewText: { fontSize: 12.5, fontWeight: '400', color: t.text, marginTop: 6, lineHeight: 17 },
     reviewAction: { marginTop: 8 },
     reviewActionText: { fontSize: 12, fontWeight: '800', color: t.accent },
     row: { flexDirection: 'row', gap: 8, marginTop: 12 },

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Animated, {
   interpolateColor,
   useAnimatedStyle,
@@ -7,6 +7,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { springs } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { Glyph, themedIconColors } from './glyphIcons';
@@ -15,8 +16,10 @@ import { PulseDot } from './PulseDot';
 
 export type TabId = 'orders' | 'messages' | 'profile';
 
+// Первая вкладка называется по содержимому, а не по разделу данных: тап по
+// ней открывает дом, и заказы живут в нём же, ниже сцены
 const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'orders', label: 'Заказы', icon: '🧾' },
+  { id: 'orders', label: 'Дом', icon: '🏠' },
   { id: 'messages', label: 'Сообщения', icon: '💬' },
   { id: 'profile', label: 'Профиль', icon: '👤' },
 ];
@@ -33,6 +36,7 @@ type Props = {
 export function BottomTabs({ active, onSelect, hasUnreadMessages, hidden }: Props) {
   const { mode } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const [barW, setBarW] = useState(0);
   const pillW = barW > 0 ? (barW - 12) / 3 : 0;
   const idx = TABS.findIndex((t) => t.id === active);
@@ -70,7 +74,12 @@ export function BottomTabs({ active, onSelect, hasUnreadMessages, hidden }: Prop
   }));
 
   return (
-    <Animated.View style={[styles.wrap, wrapStyle]} pointerEvents={hidden ? 'none' : 'auto'}>
+    <Animated.View
+      // Отступ от системной зоны считается от прибора, а не от «среднего
+      // айфона»: у кого-то там индикатор «домой», у кого-то ничего
+      style={[styles.wrap, { bottom: Math.max(insets.bottom, 16) }, wrapStyle]}
+      pointerEvents={hidden ? 'none' : 'auto'}
+    >
       <View style={styles.bar} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
         {barW > 0 && <Animated.View style={[styles.pill, pillStyle]} pointerEvents="none" />}
         {TABS.map((tab) => (
@@ -134,7 +143,6 @@ const makeStyles = (t: Palette) =>
       position: 'absolute',
       left: 16,
       right: 16,
-      bottom: Platform.OS === 'ios' ? 28 : 16,
     },
     bar: {
       flexDirection: 'row',

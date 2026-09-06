@@ -23,7 +23,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { springs, STAGGER } from '../motion';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../theme';
+import { useBackClose } from '../components/backClose';
 import { PressableScale } from '../components/PressableScale';
 import { FONTS } from '../components/typography';
 import { Glyph, themedIconColors } from '../components/glyphIcons';
@@ -120,6 +122,10 @@ export function AdminScreen({ open, onClose }: Props) {
     opacity: shown.value,
     transform: [{ translateX: slide.value }],
   }));
+  const insets = useSafeAreaInsets();
+  // Системный «назад» закрывает раздел; вложенные слои (карточки,
+  // журнал, чат обращения) вешают свои обработчики позже и берут раньше
+  useBackClose(open, onClose);
 
   // Стаггер положен первой пачке — она представляет очередь целиком. Заявка,
   // приехавшая из подписки позже, должна появляться сразу: ей незачем ждать
@@ -163,8 +169,12 @@ export function AdminScreen({ open, onClose }: Props) {
       style={[StyleSheet.absoluteFill, styles.root, layerStyle]}
       pointerEvents={open ? 'auto' : 'none'}
     >
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Профиль</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
@@ -399,14 +409,19 @@ export function SupportChat({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const scrollRef = useRef<ScrollView>(null);
+  // Позиция прокрутки принадлежит читающему: вниз — только если он и так внизу
+  const atBottom = useRef(true);
+  useBackClose(true, onBack);
 
   const send = async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     if (await onSend(trimmed)) {
       setText('');
+      atBottom.current = true;
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     }
   };
@@ -416,8 +431,12 @@ export function SupportChat({
       style={[styles.fill, styles.root]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onBack}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onBack}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Обращения</Text>
         </PressableScale>
         <Text style={styles.chatTitle}>Клиент {uid.slice(0, 6)}…</Text>
@@ -445,7 +464,14 @@ export function SupportChat({
         ref={scrollRef}
         style={styles.fill}
         contentContainerStyle={styles.chatContent}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          atBottom.current = contentOffset.y >= contentSize.height - layoutMeasurement.height - 40;
+        }}
+        scrollEventThrottle={16}
+        onContentSizeChange={() => {
+          if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: true });
+        }}
       >
         {messages.map((m) => (
           <View
@@ -793,12 +819,12 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { backgroundColor: t.bg },
     fill: { flex: 1 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
     topBar: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
       paddingHorizontal: 14,
-      paddingTop: 54,
       paddingBottom: 6,
     },
     backChip: { paddingVertical: 8, paddingHorizontal: 10 },
@@ -841,7 +867,7 @@ const makeStyles = (t: Palette) =>
     },
     statsAlert: { fontSize: 12, fontWeight: '700', color: t.warn, marginTop: 12, lineHeight: 17 },
     statsTitle: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginTop: 16 },
-    statsLine: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
+    statsLine: { fontSize: 12.5, fontWeight: '400', color: t.text, marginTop: 6, lineHeight: 17 },
     statsHint: {
       fontSize: 11.5,
       fontWeight: '600',
@@ -894,7 +920,7 @@ const makeStyles = (t: Palette) =>
     metaOk: { color: t.accent, fontWeight: '700' },
     metaBad: { color: t.danger, fontWeight: '700' },
     skills: { fontSize: 12, fontWeight: '700', color: t.textSoft, marginTop: 10 },
-    about: { fontSize: 12.5, fontWeight: '600', color: t.text, lineHeight: 17, marginTop: 8 },
+    about: { fontSize: 12.5, fontWeight: '400', color: t.text, lineHeight: 17, marginTop: 8 },
     row: { flexDirection: 'row', gap: 8, marginTop: 12 },
     btn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
     btnDim: { opacity: 0.6 },
@@ -967,8 +993,8 @@ const makeStyles = (t: Palette) =>
       borderWidth: 1,
       borderColor: t.border,
     },
-    bubbleMineText: { color: t.onAccent, fontSize: 13.5, fontWeight: '600', lineHeight: 19 },
-    bubbleTheirsText: { color: t.text, fontSize: 13.5, fontWeight: '600', lineHeight: 19 },
+    bubbleMineText: { color: t.onAccent, fontSize: 13.5, fontWeight: '400', lineHeight: 19 },
+    bubbleTheirsText: { color: t.text, fontSize: 13.5, fontWeight: '400', lineHeight: 19 },
     bubbleTime: { fontSize: 10, fontWeight: '600', color: t.textMuted, marginTop: 3 },
     bubbleMineTime: { color: t.onAccent, opacity: 0.75 },
     chatInputRow: {

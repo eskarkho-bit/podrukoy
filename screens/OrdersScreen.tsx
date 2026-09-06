@@ -13,8 +13,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useIsFocused } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
+import { useBackClose } from '../components/backClose';
 import { AreaId, HouseScene, ROOMS, Room, SceneObject, Stage } from '../components/HouseScene';
 import { ActionSheet, OrderDraft } from '../components/ActionSheet';
 import { ObjectListSheet } from '../components/ObjectListSheet';
@@ -129,6 +131,7 @@ export function OrdersScreen({
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const [area, setArea] = useState<AreaId>('Дом');
   // Стадия сцены: снаружи → дом открыт (виден план) → выбрана комната
   const [stage, setStage] = useState<Stage>('exterior');
@@ -197,6 +200,9 @@ export function OrdersScreen({
     setAddrDraft('');
   };
 
+  // Системный «назад» закрывает дропдаун, а не уводит с экрана
+  useBackClose(addrOpen, closeAddrDropdown);
+
   const submitNewAddress = () => {
     const trimmed = addrDraft.trim();
     if (!trimmed) return;
@@ -206,68 +212,21 @@ export function OrdersScreen({
 
   return (
     <View style={styles.root}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+      >
         <Animated.View entering={FadeInDown.duration(420)}>
-          <Pressable
+          <PressableScale
             style={styles.headerRow}
             onPress={() => (addrOpen ? closeAddrDropdown() : setAddrOpen(true))}
+            accessibilityRole="button"
+            accessibilityLabel="Выбрать адрес"
           >
             <Text style={styles.header}>Мой дом</Text>
             <HeaderChevron open={addrOpen} />
-          </Pressable>
+          </PressableScale>
         </Animated.View>
-
-        {/* Дропдаун адреса: список адресов с галочкой на активном + добавление нового */}
-        {addrOpen && (
-          <Animated.View
-            entering={FadeInDown.duration(240)}
-            exiting={FadeOutUp.duration(180)}
-            style={styles.addrCard}
-          >
-            {addresses.map((addr) => (
-              <Pressable
-                key={addr}
-                style={styles.addrRow}
-                onPress={() => {
-                  onSelectAddress(addr);
-                  closeAddrDropdown();
-                }}
-              >
-                <Glyph glyph="🏡" size={18} colors={themedIconColors(t)} />
-                <Text style={styles.addrText}>{addr}</Text>
-                {addr === activeAddress && <Text style={styles.addrCheck}>✓</Text>}
-              </Pressable>
-            ))}
-            <View style={styles.addrDivider} />
-            {addrAdding ? (
-              <Animated.View entering={FadeIn.duration(200)} style={styles.addrRow}>
-                <Glyph glyph="🏡" size={18} colors={themedIconColors(t)} />
-                <TextInput
-                  style={styles.addrInput}
-                  value={addrDraft}
-                  onChangeText={setAddrDraft}
-                  placeholder="ул. Пушкина, 10"
-                  placeholderTextColor={t.textMuted}
-                  autoFocus
-                  onSubmitEditing={submitNewAddress}
-                  returnKeyType="done"
-                />
-                <Pressable
-                  onPress={submitNewAddress}
-                  disabled={!addrDraft.trim()}
-                  style={[styles.addrSaveBtn, !addrDraft.trim() && styles.addrSaveBtnDim]}
-                >
-                  <Text style={styles.addrSaveText}>✓</Text>
-                </Pressable>
-              </Animated.View>
-            ) : (
-              <Pressable style={styles.addrRow} onPress={() => setAddrAdding(true)}>
-                <Text style={styles.addrIcon}>＋</Text>
-                <Text style={[styles.addrText, styles.addrTextAdd]}>Добавить адрес</Text>
-              </Pressable>
-            )}
-          </Animated.View>
-        )}
 
         {/* Дом остаётся живым и осмотримым — закрыто только создание заявок */}
         {blocked && (
@@ -389,6 +348,69 @@ export function OrdersScreen({
           })
         )}
       </ScrollView>
+
+      {/* Дропдаун адреса — поверх экрана, с прозрачным скримом: любое
+          касание мимо закрывает его, как принято у всплывающих меню */}
+      {addrOpen && (
+        <>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={closeAddrDropdown}
+            accessibilityLabel="Закрыть список адресов"
+          />
+          <Animated.View
+            entering={FadeInDown.duration(240)}
+            exiting={FadeOutUp.duration(180)}
+            style={[styles.addrCard, { top: insets.top + 46 }]}
+          >
+            {addresses.map((addr) => (
+              <PressableScale
+                key={addr}
+                style={styles.addrRow}
+                onPress={() => {
+                  onSelectAddress(addr);
+                  closeAddrDropdown();
+                }}
+              >
+                <Glyph glyph="🏡" size={18} colors={themedIconColors(t)} />
+                <Text style={styles.addrText}>{addr}</Text>
+                {addr === activeAddress && <Text style={styles.addrCheck}>✓</Text>}
+              </PressableScale>
+            ))}
+            <View style={styles.addrDivider} />
+            {addrAdding ? (
+              <Animated.View entering={FadeIn.duration(200)} style={styles.addrRow}>
+                <Glyph glyph="🏡" size={18} colors={themedIconColors(t)} />
+                <TextInput
+                  style={styles.addrInput}
+                  value={addrDraft}
+                  onChangeText={setAddrDraft}
+                  placeholder="ул. Пушкина, 10"
+                  placeholderTextColor={t.textMuted}
+                  autoFocus
+                  onSubmitEditing={submitNewAddress}
+                  returnKeyType="done"
+                />
+                <PressableScale
+                  onPress={submitNewAddress}
+                  disabled={!addrDraft.trim()}
+                  style={[styles.addrSaveBtn, !addrDraft.trim() && styles.addrSaveBtnDim]}
+                  hitSlop={5}
+                  accessibilityRole="button"
+                  accessibilityLabel="Сохранить адрес"
+                >
+                  <Text style={styles.addrSaveText}>✓</Text>
+                </PressableScale>
+              </Animated.View>
+            ) : (
+              <PressableScale style={styles.addrRow} onPress={() => setAddrAdding(true)}>
+                <Text style={styles.addrIcon}>＋</Text>
+                <Text style={[styles.addrText, styles.addrTextAdd]}>Добавить адрес</Text>
+              </PressableScale>
+            )}
+          </Animated.View>
+        </>
+      )}
 
       {listOpen && (
         <ObjectListSheet
@@ -522,9 +544,9 @@ function TabLabel({
     color: interpolateColor(on.value, [0, 1], [t.textSoft, t.accentStrong]),
   }));
   return (
-    <Pressable style={styles.tab} onPress={onPress}>
+    <PressableScale style={styles.tab} onPress={onPress}>
       <Animated.Text style={[styles.tabText, style]}>{label}</Animated.Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -532,7 +554,8 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { flex: 1, backgroundColor: t.bg },
     container: { flex: 1 },
-    content: { padding: 16, paddingTop: 60, paddingBottom: 120 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
+    content: { padding: 16, paddingBottom: 120 },
     headerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
     header: { fontSize: 20, fontFamily: FONTS.display, color: t.text },
     headerChevron: { fontSize: 15, color: t.accent, fontWeight: '800', marginTop: 2 },
@@ -547,14 +570,13 @@ const makeStyles = (t: Palette) =>
     blockedBannerTitle: { fontSize: 13, fontWeight: '800', color: t.danger },
     blockedBannerText: {
       fontSize: 12,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.text,
       marginTop: 5,
       lineHeight: 17,
     },
     addrCard: {
       position: 'absolute',
-      top: 94,
       left: 16,
       right: 16,
       zIndex: 20,
@@ -593,9 +615,9 @@ const makeStyles = (t: Palette) =>
       backgroundColor: t.inputBg,
     },
     addrSaveBtn: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
+      width: 34,
+      height: 34,
+      borderRadius: 17,
       backgroundColor: t.accent,
       alignItems: 'center',
       justifyContent: 'center',
@@ -629,7 +651,7 @@ const makeStyles = (t: Palette) =>
       marginTop: 12,
       marginBottom: 20,
     },
-    houseCaption: { position: 'absolute', color: t.textMuted, fontWeight: '600', fontSize: 12.5 },
+    houseCaption: { position: 'absolute', color: t.textMuted, fontWeight: '500', fontSize: 12.5 },
     listLinkWrap: { alignItems: 'center', marginTop: -8, marginBottom: 16 },
     listLink: {
       flexDirection: 'row',
@@ -679,7 +701,7 @@ const makeStyles = (t: Palette) =>
     emptyTitle: { fontWeight: '800', fontSize: 14, color: t.text },
     emptySub: {
       color: t.textMuted,
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 11.5,
       marginTop: 4,
       textAlign: 'center',

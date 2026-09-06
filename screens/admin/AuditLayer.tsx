@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../../theme';
+import { useBackClose } from '../../components/backClose';
 import { PressableScale } from '../../components/PressableScale';
 import { FONTS } from '../../components/typography';
 import { useAdminState, type AuditEntry, type AuditFilter } from '../../components/AdminState';
@@ -123,10 +125,17 @@ export function AuditLayer({
     load(true);
   }, [load]);
 
+  const insets = useSafeAreaInsets();
+  useBackClose(true, onBack);
+
   return (
     <View style={styles.fill}>
-      <View style={styles.layerBar}>
-        <PressableScale style={styles.backChip} onPress={onBack}>
+      <View style={[styles.layerBar, { paddingTop: insets.top + 6 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onBack}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
       </View>
@@ -175,7 +184,8 @@ export function AuditLayer({
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
     fill: { flex: 1, backgroundColor: t.bg },
-    layerBar: { flexDirection: 'row', paddingHorizontal: 14, paddingTop: 54, paddingBottom: 6 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
+    layerBar: { flexDirection: 'row', paddingHorizontal: 14, paddingBottom: 6 },
     backChip: { paddingVertical: 8, paddingHorizontal: 10 },
     backText: { color: t.accent, fontWeight: '800', fontSize: 13 },
     content: { padding: 16, paddingBottom: 60 },

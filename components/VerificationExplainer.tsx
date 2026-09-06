@@ -1,7 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeOut, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { palettes, Palette, space, useTheme } from '../theme';
+import { useBackClose } from './backClose';
 import { FONTS } from './typography';
 import { Glyph, themedIconColors } from './glyphIcons';
 import { PressableScale } from './PressableScale';
@@ -39,6 +40,7 @@ type Props = {
 export function VerificationExplainer({ open, onClose }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  useBackClose(open, onClose);
   if (!open) return null;
 
   return (
@@ -57,7 +59,13 @@ export function VerificationExplainer({ open, onClose }: Props) {
         <Pressable style={[StyleSheet.absoluteFill, styles.dim]} onPress={onClose} />
       </Animated.View>
 
-      <Animated.View entering={ZoomIn.springify().damping(18).stiffness(180)} style={styles.card}>
+      {/* Каким путём пришла, тем и уходит: вход пружиной из центра,
+          выход — зеркальным сжатием, а не исчезновением в один кадр */}
+      <Animated.View
+        entering={ZoomIn.springify().damping(18).stiffness(180)}
+        exiting={ZoomOut.duration(160)}
+        style={styles.card}
+      >
         <View style={styles.badge}>
           <Glyph glyph="🛡️" size={30} colors={themedIconColors(t)} />
         </View>
@@ -118,7 +126,7 @@ const makeStyles = (t: Palette) =>
     },
     sub: {
       fontSize: 12.5,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textSoft,
       textAlign: 'center',
       lineHeight: 17,
@@ -138,7 +146,7 @@ const makeStyles = (t: Palette) =>
     stepTitle: { fontSize: 13.5, fontFamily: FONTS.heading, color: t.text },
     stepText: {
       fontSize: 12,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textSoft,
       lineHeight: 16.5,
       marginTop: 2,

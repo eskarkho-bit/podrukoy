@@ -21,6 +21,7 @@ import Animated, {
 import { BlurView } from 'expo-blur';
 import { palettes, Palette, useTheme } from '../theme';
 import { AnimatedCheck } from './AnimatedCheck';
+import { useBackClose } from './backClose';
 import { hapticSuccess } from './haptics';
 import { PressableScale } from './PressableScale';
 import { Glyph, themedIconColors } from './glyphIcons';
@@ -61,7 +62,7 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
   // перезапишет ту же заявку, а не создаст вторую
   const [draftId] = useState(newOrderId);
 
-  const { gesture, cardStyle } = useSheetDrag(onClose, !done);
+  const { gesture, cardStyle, dragDismissed } = useSheetDrag(onClose, !done);
 
   useEffect(
     () => () => {
@@ -70,11 +71,38 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
     [],
   );
 
+  // Завершение одно на таймер и нетерпеливый тап; страховка от двойного
+  // вызова — в completed
+  const completed = useRef(false);
+  const finish = () => {
+    if (completed.current) return;
+    completed.current = true;
+    if (timer.current) clearTimeout(timer.current);
+    const objectId = order.objectId;
+    const serviceLabel = order.serviceLabel;
+    if (!objectId || !serviceLabel) return;
+    onSubmit({
+      id: draftId,
+      title: order.title,
+      comment: comment.trim(),
+      // Фото прошлой поломки к новой не прикладываем: оно про тот случай
+      photoUri: null,
+      category: categoryFor(objectId),
+      objectId,
+      serviceLabel,
+      address: order.address,
+      preferredMasterId: callMaster && order.masterId ? order.masterId : null,
+    });
+  };
+
+  // Системный «назад» — как тап по фону: до отправки закрывает, после —
+  // завершает сразу
+  useBackClose(true, () => (done ? finish() : onClose()));
+
   // Без объекта и вида работы повторять нечего — кнопка в OrderSheet
   // прячется раньше, это лишь страховка от прямого вызова
+  if (!order.objectId || !order.serviceLabel) return null;
   const objectId = order.objectId;
-  const serviceLabel = order.serviceLabel;
-  if (!objectId || !serviceLabel) return null;
 
   const submit = () => {
     if (submitted.current) return;
@@ -82,20 +110,8 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
 
     hapticSuccess();
     setDone(true);
-    timer.current = setTimeout(() => {
-      onSubmit({
-        id: draftId,
-        title: order.title,
-        comment: comment.trim(),
-        // Фото прошлой поломки к новой не прикладываем: оно про тот случай
-        photoUri: null,
-        category: categoryFor(objectId),
-        objectId,
-        serviceLabel,
-        address: order.address,
-        preferredMasterId: callMaster && order.masterId ? order.masterId : null,
-      });
-    }, 1200);
+    // Тап в любом месте завершает то же самое сразу — см. finish()
+    timer.current = setTimeout(finish, 1200);
   };
 
   return (
@@ -113,7 +129,7 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
         />
         <Pressable
           style={[StyleSheet.absoluteFill, styles.dim]}
-          onPress={done ? undefined : onClose}
+          onPress={done ? finish : onClose}
         />
       </Animated.View>
 
@@ -123,7 +139,8 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
       >
         <Animated.View
           entering={SlideInDown.springify().damping(19).stiffness(150).mass(1)}
-          exiting={SlideOutDown.duration(280)}
+          // Уехавшую пальцем карточку не провожаем второй анимацией
+          exiting={dragDismissed ? undefined : SlideOutDown.duration(280)}
           layout={LinearTransition.springify().damping(20).stiffness(170)}
           style={[styles.card, cardStyle]}
         >
@@ -150,20 +167,23 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
           </Animated.View>
 
           {done ? (
-            <Animated.View
-              entering={ZoomIn.springify().damping(14).stiffness(180)}
-              style={styles.doneWrap}
-            >
-              <View style={styles.checkCircle}>
-                <AnimatedCheck size={30} color={t.accent} />
-              </View>
-              <Text style={styles.doneTitle}>Заявка создана</Text>
-              <Text style={styles.doneSub}>
-                {callMaster && order.masterName
-                  ? `${order.masterName} узнает о ней первым`
-                  : 'Мастера вашего города уже видят её'}
-              </Text>
-            </Animated.View>
+            // Пауза прерываема: тап по карточке (и по фону) закрывает сразу
+            <Pressable onPress={finish} accessibilityRole="button" accessibilityLabel="Продолжить">
+              <Animated.View
+                entering={ZoomIn.springify().damping(14).stiffness(180)}
+                style={styles.doneWrap}
+              >
+                <View style={styles.checkCircle}>
+                  <AnimatedCheck size={30} color={t.accent} />
+                </View>
+                <Text style={styles.doneTitle}>Заявка создана</Text>
+                <Text style={styles.doneSub}>
+                  {callMaster && order.masterName
+                    ? `${order.masterName} узнает о ней первым`
+                    : 'Мастера вашего города уже видят её'}
+                </Text>
+              </Animated.View>
+            </Pressable>
           ) : (
             <>
               {canCallMaster && (
@@ -268,7 +288,7 @@ const makeStyles = (t: Palette) =>
     masterTitle: { fontWeight: '700', fontSize: 13.5, color: t.text },
     masterSub: {
       fontSize: 11,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       marginTop: 2,
       lineHeight: 15,
@@ -296,7 +316,7 @@ const makeStyles = (t: Palette) =>
     submitText: { fontWeight: '700', fontSize: 14.5, color: t.onAccent, textAlign: 'center' },
     privacyHint: {
       fontSize: 11,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       textAlign: 'center',
       lineHeight: 15,

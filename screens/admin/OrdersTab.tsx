@@ -7,7 +7,9 @@ import Animated, {
   SlideInRight,
   SlideOutRight,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../../theme';
+import { useBackClose } from '../../components/backClose';
 import { PressableScale } from '../../components/PressableScale';
 import { FONTS, TABULAR } from '../../components/typography';
 import { Glyph, themedIconColors } from '../../components/glyphIcons';
@@ -266,6 +268,9 @@ export function OrdersTab({ onShowHistory }: { onShowHistory: (orderId: string) 
 
   const [searchId, setSearchId] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
+  // Системный «назад» закрывает карточку, а не всю модерацию
+  useBackClose(openId != null, () => setOpenId(null));
   const [card, setCard] = useState<OrderCardData | null>(null);
   const [busy, setBusy] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -351,8 +356,12 @@ export function OrdersTab({ onShowHistory }: { onShowHistory: (orderId: string) 
           exiting={SlideOutRight.duration(280)}
           style={[StyleSheet.absoluteFill, styles.layer]}
         >
-          <View style={styles.layerBar}>
-            <PressableScale style={styles.backChip} onPress={() => setOpenId(null)}>
+          <View style={[styles.layerBar, { paddingTop: insets.top + 6 }]}>
+            <PressableScale
+              style={styles.backChip}
+              onPress={() => setOpenId(null)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Text style={styles.backText}>‹ Заявки</Text>
             </PressableScale>
           </View>
@@ -464,10 +473,10 @@ const makeStyles = (t: Palette) =>
     emptyWrap: { alignItems: 'center', paddingVertical: 50, gap: 10 },
     emptyTitle: { fontSize: 14, fontWeight: '800', color: t.textMuted },
     layer: { backgroundColor: t.bg },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
     layerBar: {
       flexDirection: 'row',
       paddingHorizontal: 14,
-      paddingTop: 54,
       paddingBottom: 6,
     },
     backChip: { paddingVertical: 8, paddingHorizontal: 10 },
@@ -482,7 +491,7 @@ const makeStyles = (t: Palette) =>
     },
     cardTitle: { fontSize: 16, fontFamily: FONTS.heading, color: t.text },
     cardMeta: { fontSize: 11.5, fontWeight: '700', color: t.textMuted, marginTop: 4 },
-    cardLine: { fontSize: 12.5, fontWeight: '600', color: t.text, marginTop: 8, lineHeight: 17 },
+    cardLine: { fontSize: 12.5, fontWeight: '400', color: t.text, marginTop: 8, lineHeight: 17 },
     cardComment: {
       fontSize: 12.5,
       fontWeight: '600',
@@ -507,7 +516,7 @@ const makeStyles = (t: Palette) =>
     },
     offerName: { fontSize: 12.5, fontWeight: '700', color: t.text },
     offerPrice: { fontSize: 12.5, fontWeight: '800', color: t.text },
-    messageLine: { fontSize: 12, fontWeight: '600', color: t.text, marginTop: 6, lineHeight: 17 },
+    messageLine: { fontSize: 12, fontWeight: '400', color: t.text, marginTop: 6, lineHeight: 17 },
     messageWho: { color: t.textMuted, fontWeight: '800' },
     messageImage: {
       width: 140,

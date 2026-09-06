@@ -27,8 +27,11 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
+import { useBackClose } from '../components/backClose';
+import { EdgeBackLayer, useEdgeBack } from '../components/edgeBack';
 import { PressableScale } from '../components/PressableScale';
 import { Glyph, themedIconColors } from '../components/glyphIcons';
 import { FONTS } from '../components/typography';
@@ -96,6 +99,11 @@ export function MessagesScreen({
     onThreadOpenChange(false);
   };
 
+  // Экран въехал справа как push — выезжать обязан и свайпом от края,
+  // и системной кнопкой «назад», а не только чипом в шапке
+  const edge = useEdgeBack(openId != null, handleBack);
+  useBackClose(openId != null, handleBack);
+
   // Другой экран попросил открыть чат (профиль → поддержка, заказ → мастер).
   //
   // Обработчики держим в ссылках, а не в зависимостях: они пересоздаются на
@@ -126,16 +134,19 @@ export function MessagesScreen({
       {openThread && (
         <Animated.View
           entering={SlideInRight.springify().damping(20).stiffness(160)}
-          exiting={SlideOutRight.duration(280)}
-          style={StyleSheet.absoluteFill}
+          // Экран, уехавший пальцем, не провожаем второй анимацией
+          exiting={edge.dragDismissed ? undefined : SlideOutRight.duration(280)}
+          style={[StyleSheet.absoluteFill, edge.screenStyle]}
         >
-          <ThreadDetail
-            thread={openThread}
-            typing={typingThreadId === openThread.id}
-            onBack={handleBack}
-            onSend={(text) => onSendMessage(openThread.id, text)}
-            onSendImage={(uri, caption) => onSendImage(openThread.id, uri, caption)}
-          />
+          <EdgeBackLayer gesture={edge.gesture}>
+            <ThreadDetail
+              thread={openThread}
+              typing={typingThreadId === openThread.id}
+              onBack={handleBack}
+              onSend={(text) => onSendMessage(openThread.id, text)}
+              onSendImage={(uri, caption) => onSendImage(openThread.id, uri, caption)}
+            />
+          </EdgeBackLayer>
         </Animated.View>
       )}
     </View>
@@ -153,6 +164,7 @@ function ThreadList({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   // Стаггер — это представление списка при первом появлении экрана. Дальше
   // треды приходят по одному из подписки, и задержка «по номеру в списке»
   // означала бы, что новое сообщение показывается спустя полсекунды.
@@ -160,7 +172,10 @@ function ThreadList({
   const mountedWithStagger = firstMount.current;
   firstMount.current = false;
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+    >
       <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
         Сообщения
       </Animated.Text>
@@ -231,6 +246,7 @@ function ThreadDetail({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   // Выбранное фото не уходит сразу: сначала предпросмотр у поля ввода,
   // отправка — той же кнопкой, что и текст. Случайный тап по галерее не
@@ -238,6 +254,10 @@ function ThreadDetail({
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [sendingImage, setSendingImage] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  // Позиция прокрутки принадлежит пальцу: новое сообщение (и пузырь
+  // «печатает…») уводит ленту вниз, только если человек и так был внизу,
+  // а не выдёргивает его из чтения истории
+  const atBottom = useRef(true);
 
   const send = async () => {
     if (sendingImage) return;
@@ -250,6 +270,8 @@ function ThreadDetail({
         await onSendImage(pendingImage, trimmed);
         setPendingImage(null);
         setText('');
+        // Своё сообщение возвращает ленту вниз, даже если читали историю
+        atBottom.current = true;
         requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
       } finally {
         setSendingImage(false);
@@ -259,6 +281,7 @@ function ThreadDetail({
     if (!trimmed) return;
     onSend(trimmed);
     setText('');
+    atBottom.current = true;
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   };
 
@@ -275,8 +298,12 @@ function ThreadDetail({
       style={styles.detailRoot}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.detailHeader}>
-        <PressableScale style={styles.backChip} onPress={onBack}>
+      <View style={[styles.detailHeader, { paddingTop: insets.top + 12 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onBack}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.detailTitleWrap}>
@@ -295,7 +322,14 @@ function ThreadDetail({
         ref={scrollRef}
         style={styles.messagesScroll}
         contentContainerStyle={styles.messagesContent}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          atBottom.current = contentOffset.y >= contentSize.height - layoutMeasurement.height - 40;
+        }}
+        scrollEventThrottle={16}
+        onContentSizeChange={() => {
+          if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: true });
+        }}
       >
         {thread.messages.map((m) => (
           <Animated.View
@@ -339,13 +373,14 @@ function ThreadDetail({
             style={styles.pendingCancel}
             onPress={() => setPendingImage(null)}
             disabled={sendingImage}
+            hitSlop={8}
           >
             <Text style={styles.pendingCancelText}>✕</Text>
           </PressableScale>
         </View>
       )}
 
-      <View style={styles.inputRow}>
+      <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         {thread.canAttach && (
           <PressableScale
             accessibilityLabel="Прикрепить фото"
@@ -424,7 +459,8 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { flex: 1, backgroundColor: t.bg },
     container: { flex: 1 },
-    content: { padding: 16, paddingTop: 60, paddingBottom: 120 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
+    content: { padding: 16, paddingBottom: 120 },
     header: { fontSize: 20, fontFamily: FONTS.display, marginBottom: 16, color: t.text },
     emptyWrap: {
       alignItems: 'center',
@@ -438,7 +474,7 @@ const makeStyles = (t: Palette) =>
     emptyTitle: { fontWeight: '800', fontSize: 14, color: t.text },
     emptySub: {
       color: t.textMuted,
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 11.5,
       marginTop: 4,
       textAlign: 'center',
@@ -491,7 +527,6 @@ const makeStyles = (t: Palette) =>
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: 16,
-      paddingTop: 60,
       paddingBottom: 12,
     },
     backChip: {
@@ -539,7 +574,6 @@ const makeStyles = (t: Palette) =>
       flexDirection: 'row',
       alignItems: 'flex-end',
       paddingHorizontal: 16,
-      paddingBottom: Platform.OS === 'ios' ? 28 : 16,
       paddingTop: 8,
       gap: 8,
     },
@@ -555,10 +589,11 @@ const makeStyles = (t: Palette) =>
       color: t.text,
       maxHeight: 100,
     },
+    // 44×44 — минимальная цель касания
     sendBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: t.accent,
       alignItems: 'center',
       justifyContent: 'center',
@@ -566,9 +601,9 @@ const makeStyles = (t: Palette) =>
     sendBtnDisabled: { backgroundColor: t.disabled },
     sendIcon: { color: t.onAccent, fontSize: 17, fontWeight: '800' },
     attachBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: t.card,
       borderWidth: 1,
       borderColor: t.border,

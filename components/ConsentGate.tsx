@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
 import { Glyph, themedIconColors } from './glyphIcons';
@@ -20,6 +21,7 @@ type Props = {
 export function ConsentGate({ onAccept, onLogout }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const [accepted, setAccepted] = useState(false);
   const [openDoc, setOpenDoc] = useState<LegalDocId | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +39,7 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
 
   return (
     <Animated.View entering={FadeIn.duration(240)} style={[StyleSheet.absoluteFill, styles.root]}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 42 }]}>
         <Animated.View entering={FadeInDown.duration(420)} style={styles.badge}>
           <Glyph glyph="📄" size={32} colors={themedIconColors(t)} />
         </Animated.View>
@@ -66,6 +68,10 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
               style={[styles.checkbox, accepted && styles.checkboxOn]}
               onPress={() => setAccepted((v) => !v)}
               disabled={busy}
+              // Квадратик мал, а согласие важно — слоп добивает цель до 44pt
+              hitSlop={12}
+              accessibilityRole="checkbox"
+              accessibilityLabel="Прочитал и принимаю обе редакции"
             >
               {accepted && <Text style={styles.checkboxTick}>✓</Text>}
             </PressableScale>
@@ -95,7 +101,8 @@ export function ConsentGate({ onAccept, onLogout }: Props) {
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { backgroundColor: t.bg },
-    content: { padding: 20, paddingTop: 90, paddingBottom: 60 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
+    content: { padding: 20, paddingBottom: 60 },
     badge: {
       alignSelf: 'center',
       width: 60,
@@ -110,7 +117,7 @@ const makeStyles = (t: Palette) =>
     title: { fontSize: 20, fontWeight: '800', color: t.text, textAlign: 'center' },
     sub: {
       fontSize: 12.5,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       textAlign: 'center',
       lineHeight: 18,

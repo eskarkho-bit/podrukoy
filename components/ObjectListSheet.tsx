@@ -8,6 +8,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { palettes, Palette, useTheme } from '../theme';
+import { useBackClose } from './backClose';
 import { PressableScale } from './PressableScale';
 import { FONTS } from './typography';
 import { hasObjectIcon, ObjectIcon } from './objectIcons';
@@ -27,7 +28,8 @@ type Props = {
 export function ObjectListSheet({ onClose, onPick }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
-  const { gesture, cardStyle } = useSheetDrag(onClose);
+  const { gesture, cardStyle, dragDismissed } = useSheetDrag(onClose);
+  useBackClose(true, onClose);
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.wrap]}>
@@ -47,7 +49,8 @@ export function ObjectListSheet({ onClose, onPick }: Props) {
 
       <Animated.View
         entering={SlideInDown.springify().damping(19).stiffness(150).mass(1)}
-        exiting={SlideOutDown.duration(280)}
+        // Уехавшую пальцем карточку не провожаем второй анимацией
+        exiting={dragDismissed ? undefined : SlideOutDown.duration(280)}
         layout={LinearTransition.springify().damping(20).stiffness(170)}
         style={[styles.card, cardStyle]}
       >

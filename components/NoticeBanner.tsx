@@ -1,26 +1,23 @@
-import { useEffect } from 'react';
-import { Platform, StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Palette, palettes, useTheme } from '../theme';
 import { PressableScale } from './PressableScale';
 
-// Плашка о сбое. Появляется сверху, гаснет сама через несколько секунд или
-// по нажатию. Нужна затем, что молча не сохранённая заявка выглядит для
-// человека точно так же, как сохранённая.
+// Плашка о сбое. Появляется сверху и висит, пока её не закроют нажатием:
+// ошибка — не статус, сама она не гаснет. Телефон мог лежать экраном вверх
+// без присмотра, и молча не сохранённая заявка выглядит для человека точно
+// так же, как сохранённая.
 export function NoticeBanner({ text, onDismiss }: { text: string; onDismiss: () => void }) {
   const { mode } = useTheme();
   const styles = themed[mode];
-
-  useEffect(() => {
-    const timer = setTimeout(onDismiss, 6000);
-    return () => clearTimeout(timer);
-  }, [text, onDismiss]);
+  const insets = useSafeAreaInsets();
 
   return (
     <Animated.View
       entering={FadeInUp.duration(260)}
       exiting={FadeOutUp.duration(220)}
-      style={styles.wrap}
+      style={[styles.wrap, { top: insets.top + 8 }]}
       pointerEvents="box-none"
     >
       <PressableScale style={styles.banner} onPress={onDismiss}>
@@ -35,7 +32,6 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     wrap: {
       position: 'absolute',
-      top: Platform.OS === 'ios' ? 56 : 36,
       left: 16,
       right: 16,
       // Выше сплэша (zIndex 10): сбой при холодном старте важнее заставки,
@@ -54,7 +50,7 @@ const makeStyles = (t: Palette) =>
       elevation: 10,
     },
     text: { color: '#FFFFFF', fontWeight: '800', fontSize: 13, lineHeight: 18 },
-    hint: { color: 'rgba(255,255,255,0.75)', fontWeight: '700', fontSize: 10.5, marginTop: 4 },
+    hint: { color: 'rgba(255,255,255,0.85)', fontWeight: '500', fontSize: 10.5, marginTop: 4 },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

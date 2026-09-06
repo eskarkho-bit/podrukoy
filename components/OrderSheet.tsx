@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { Image, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Image,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -10,6 +19,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { palettes, Palette, useTheme } from '../theme';
+import { useArmedConfirm } from './armedConfirm';
+import { useBackClose } from './backClose';
 import { Glyph, themedIconColors } from './glyphIcons';
 import { FONTS, TABULAR } from './typography';
 import { hapticImpact, hapticSuccess } from './haptics';
@@ -109,10 +120,13 @@ export function OrderSheet({
 }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
-  const [confirming, setConfirming] = useState(false);
+  // Отмена необратима — подтверждение взводится отдельно и не ловит
+  // случайный двойной тап
+  const { confirming, press: pressCancel } = useArmedConfirm(onCancel);
   // «Как мы проверяем мастеров» — открывается с бейджа на предложении
   const [verifOpen, setVerifOpen] = useState(false);
-  const { gesture, cardStyle } = useSheetDrag(onClose);
+  const { gesture, cardStyle, dragDismissed } = useSheetDrag(onClose);
+  useBackClose(true, onClose);
 
   const offers = (order.offers ?? []).filter((o) => o.status === 'pending');
   // Пока мастер не выбран, заявка собирает предложения
@@ -153,7 +167,8 @@ export function OrderSheet({
 
       <Animated.View
         entering={SlideInDown.springify().damping(19).stiffness(150).mass(1)}
-        exiting={SlideOutDown.duration(280)}
+        // Уехавшую пальцем карточку не провожаем второй анимацией
+        exiting={dragDismissed ? undefined : SlideOutDown.duration(280)}
         layout={LinearTransition.springify().damping(20).stiffness(170)}
         style={[styles.card, cardStyle]}
       >
@@ -175,226 +190,239 @@ export function OrderSheet({
           </View>
         </Animated.View>
 
-        <StatusStepper status={order.status} />
+        {/* Фото, предложения и форма отзыва вместе выше экрана: заголовок
+            остаётся на месте, остальное прокручивается внутри карточки */}
+        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+          <StatusStepper status={order.status} />
 
-        {order.photoUri ? (
-          <Animated.View entering={FadeInDown.delay(120).duration(300)}>
-            <Image source={{ uri: order.photoUri }} style={styles.photo} />
-          </Animated.View>
-        ) : null}
+          {order.photoUri ? (
+            <Animated.View entering={FadeInDown.delay(120).duration(300)}>
+              <Image source={{ uri: order.photoUri }} style={styles.photo} />
+            </Animated.View>
+          ) : null}
 
-        {order.comment ? (
-          <Animated.View entering={FadeInDown.delay(160).duration(300)} style={styles.commentBox}>
-            <Text style={styles.commentLabel}>Комментарий</Text>
-            <Text style={styles.commentText}>{order.comment}</Text>
-          </Animated.View>
-        ) : null}
+          {order.comment ? (
+            <Animated.View entering={FadeInDown.delay(160).duration(300)} style={styles.commentBox}>
+              <Text style={styles.commentLabel}>Комментарий</Text>
+              <Text style={styles.commentText}>{order.comment}</Text>
+            </Animated.View>
+          ) : null}
 
-        {/* Предложения мастеров. Выбирает клиент — и этот выбор назначает
+          {/* Предложения мастеров. Выбирает клиент — и этот выбор назначает
             исполнителя, поэтому цена и рейтинг стоят рядом. */}
-        {collecting && !legacyOffer && (
-          <Animated.View entering={FadeInDown.delay(170).duration(300)}>
-            {offers.length === 0 ? (
-              <View style={styles.waitingBox}>
-                <Text style={styles.waitingTitle}>Ждём предложений</Text>
-                <Text style={styles.waitingText}>
-                  Мастера рядом видят вашу заявку. Как только кто-то назовёт цену, она появится
-                  здесь.
-                </Text>
+          {collecting && !legacyOffer && (
+            <Animated.View entering={FadeInDown.delay(170).duration(300)}>
+              {offers.length === 0 ? (
+                <View style={styles.waitingBox}>
+                  <Text style={styles.waitingTitle}>Ждём предложений</Text>
+                  <Text style={styles.waitingText}>
+                    Мастера рядом видят вашу заявку. Как только кто-то назовёт цену, она появится
+                    здесь.
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.offersTitle}>
+                    {counted(offers.length, 'предложение', 'предложения', 'предложений')}
+                  </Text>
+                  {offers.map((offer) => (
+                    <OfferCard
+                      key={offer.masterId}
+                      offer={offer}
+                      onPick={() => {
+                        hapticSuccess();
+                        onAcceptOffer(offer.masterId);
+                      }}
+                      onVerifiedInfo={() => setVerifOpen(true)}
+                    />
+                  ))}
+                </>
+              )}
+            </Animated.View>
+          )}
+
+          {/* Старая схема: одно предложение внутри самой заявки */}
+          {legacyOffer && (
+            <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.offerCard}>
+              <Text style={styles.offerLabel}>
+                {order.masterName ? `Мастер ${order.masterName} предлагает` : 'Мастер предлагает'}
+              </Text>
+              <Text style={styles.offerPrice}>{rub(order.price as number)}</Text>
+
+              <View style={styles.offerRow}>
+                <PressableScale
+                  style={[styles.offerBtn, styles.offerAccept]}
+                  onPress={onAcceptPrice}
+                >
+                  <Text style={styles.offerAcceptText}>✓ Принять</Text>
+                </PressableScale>
+                <PressableScale
+                  style={[styles.offerBtn, styles.offerDecline]}
+                  onPress={onDeclinePrice}
+                >
+                  <Text style={styles.offerDeclineText}>✕ Отклонить</Text>
+                </PressableScale>
               </View>
-            ) : (
-              <>
-                <Text style={styles.offersTitle}>
-                  {counted(offers.length, 'предложение', 'предложения', 'предложений')}
-                </Text>
-                {offers.map((offer) => (
-                  <OfferCard
-                    key={offer.masterId}
-                    offer={offer}
-                    onPick={() => {
-                      hapticSuccess();
-                      onAcceptOffer(offer.masterId);
-                    }}
-                    onVerifiedInfo={() => setVerifOpen(true)}
-                  />
-                ))}
-              </>
-            )}
-          </Animated.View>
-        )}
 
-        {/* Старая схема: одно предложение внутри самой заявки */}
-        {legacyOffer && (
-          <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.offerCard}>
-            <Text style={styles.offerLabel}>
-              {order.masterName ? `Мастер ${order.masterName} предлагает` : 'Мастер предлагает'}
-            </Text>
-            <Text style={styles.offerPrice}>{rub(order.price as number)}</Text>
-
-            <View style={styles.offerRow}>
-              <PressableScale style={[styles.offerBtn, styles.offerAccept]} onPress={onAcceptPrice}>
-                <Text style={styles.offerAcceptText}>✓ Принять</Text>
+              <PressableScale style={[styles.offerDiscuss, styles.iconLabelRow]} onPress={onChat}>
+                <Glyph glyph="💬" size={16} colors={themedIconColors(t)} />
+                <Text style={styles.offerDiscussText}>Обговорить цену</Text>
               </PressableScale>
-              <PressableScale
-                style={[styles.offerBtn, styles.offerDecline]}
-                onPress={onDeclinePrice}
-              >
-                <Text style={styles.offerDeclineText}>✕ Отклонить</Text>
-              </PressableScale>
-            </View>
+            </Animated.View>
+          )}
 
-            <PressableScale style={[styles.offerDiscuss, styles.iconLabelRow]} onPress={onChat}>
-              <Glyph glyph="💬" size={16} colors={themedIconColors(t)} />
-              <Text style={styles.offerDiscussText}>Обговорить цену</Text>
-            </PressableScale>
-          </Animated.View>
-        )}
+          {/* Цена согласована — показываем именно ту, на которую человек согласился */}
+          {agreed && (
+            <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.agreedCard}>
+              <Text style={styles.agreedText}>
+                {order.masterName ? `${order.masterName} · ` : ''}
+                {rub(order.agreedPrice as number)}
+              </Text>
+              <Text style={styles.agreedSub}>Цена согласована</Text>
+            </Animated.View>
+          )}
 
-        {/* Цена согласована — показываем именно ту, на которую человек согласился */}
-        {agreed && (
-          <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.agreedCard}>
-            <Text style={styles.agreedText}>
-              {order.masterName ? `${order.masterName} · ` : ''}
-              {rub(order.agreedPrice as number)}
-            </Text>
-            <Text style={styles.agreedSub}>Цена согласована</Text>
-          </Animated.View>
-        )}
-
-        {legacyDeclined && (
-          <Animated.View entering={FadeInDown.delay(170).duration(300)} style={styles.declinedCard}>
-            <Text style={styles.declinedText}>
-              Вы отклонили {rub(order.price as number)} — мастер может предложить другую цену
-            </Text>
-          </Animated.View>
-        )}
-
-        {/* Мастер сообщил, что закончил — просим подтвердить результат */}
-        {awaitingConfirm && (
-          <Animated.View entering={FadeInDown.delay(180).duration(300)}>
-            <PressableScale
-              style={styles.confirmBtn}
-              onPress={() => {
-                hapticSuccess();
-                onConfirmDone();
-              }}
+          {legacyDeclined && (
+            <Animated.View
+              entering={FadeInDown.delay(170).duration(300)}
+              style={styles.declinedCard}
             >
-              <Text style={styles.confirmBtnText}>✓ Работа выполнена — подтвердить</Text>
-            </PressableScale>
-          </Animated.View>
-        )}
+              <Text style={styles.declinedText}>
+                Вы отклонили {rub(order.price as number)} — мастер может предложить другую цену
+              </Text>
+            </Animated.View>
+          )}
 
-        {/* Отзыв просим один раз и только после завершения: раньше оценивать
+          {/* Мастер сообщил, что закончил — просим подтвердить результат */}
+          {awaitingConfirm && (
+            <Animated.View entering={FadeInDown.delay(180).duration(300)}>
+              <PressableScale
+                style={styles.confirmBtn}
+                onPress={() => {
+                  hapticSuccess();
+                  onConfirmDone();
+                }}
+              >
+                <Text style={styles.confirmBtnText}>✓ Работа выполнена — подтвердить</Text>
+              </PressableScale>
+            </Animated.View>
+          )}
+
+          {/* Отзыв просим один раз и только после завершения: раньше оценивать
             нечего, позже — уже неинтересно */}
-        {canReview && <ReviewForm onSubmit={onSubmitReview} />}
+          {canReview && <ReviewForm onSubmit={onSubmitReview} />}
 
-        {/* Писать некому, пока мастер не выбран: до этого у заявки нет
+          {/* Писать некому, пока мастер не выбран: до этого у заявки нет
             собеседника, и сообщение осталось бы без ответа. Как только сервер
             положил в заявку телефон, рядом с чатом встаёт звонок. */}
-        {(order.masterId || legacyOffer) &&
-          (canCall ? (
-            <Animated.View entering={FadeInDown.delay(200).duration(300)} style={styles.contactRow}>
-              <PressableScale
-                style={[
-                  styles.chatBtn,
-                  styles.contactBtn,
-                  styles.iconLabelRow,
-                  (awaitingConfirm || canReview) && styles.chatBtnSecondary,
-                ]}
-                onPress={dial}
+          {(order.masterId || legacyOffer) &&
+            (canCall ? (
+              <Animated.View
+                entering={FadeInDown.delay(200).duration(300)}
+                style={styles.contactRow}
               >
-                {/* На акцентной кнопке зелёная иконка слилась бы с фоном —
+                <PressableScale
+                  style={[
+                    styles.chatBtn,
+                    styles.contactBtn,
+                    styles.iconLabelRow,
+                    (awaitingConfirm || canReview) && styles.chatBtnSecondary,
+                  ]}
+                  onPress={dial}
+                >
+                  {/* На акцентной кнопке зелёная иконка слилась бы с фоном —
                     контур берёт цвет текста кнопки */}
-                <Glyph
-                  glyph="📞"
-                  size={17}
-                  colors={
-                    awaitingConfirm || canReview
-                      ? themedIconColors(t)
-                      : { stroke: t.onAccent, fill: t.accent, glass: t.accentSoft }
-                  }
-                />
-                <Text
+                  <Glyph
+                    glyph="📞"
+                    size={17}
+                    colors={
+                      awaitingConfirm || canReview
+                        ? themedIconColors(t)
+                        : { stroke: t.onAccent, fill: t.accent, glass: t.accentSoft }
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.chatBtnText,
+                      (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
+                    ]}
+                  >
+                    Позвонить
+                  </Text>
+                </PressableScale>
+                <PressableScale
                   style={[
-                    styles.chatBtnText,
-                    (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
+                    styles.chatBtn,
+                    styles.contactBtn,
+                    styles.iconLabelRow,
+                    styles.chatBtnSecondary,
                   ]}
+                  onPress={onChat}
                 >
-                  Позвонить
-                </Text>
-              </PressableScale>
-              <PressableScale
-                style={[
-                  styles.chatBtn,
-                  styles.contactBtn,
-                  styles.iconLabelRow,
-                  styles.chatBtnSecondary,
-                ]}
-                onPress={onChat}
-              >
-                <Glyph glyph="💬" size={17} colors={themedIconColors(t)} />
-                <Text style={[styles.chatBtnText, styles.chatBtnTextSecondary]}>Написать</Text>
-              </PressableScale>
-            </Animated.View>
-          ) : (
-            <Animated.View entering={FadeInDown.delay(200).duration(300)}>
-              <PressableScale
-                style={[
-                  styles.chatBtn,
-                  styles.iconLabelRow,
-                  (awaitingConfirm || canReview) && styles.chatBtnSecondary,
-                ]}
-                onPress={onChat}
-              >
-                <Glyph
-                  glyph="💬"
-                  size={17}
-                  colors={
-                    awaitingConfirm || canReview
-                      ? themedIconColors(t)
-                      : { stroke: t.onAccent, fill: t.accent, glass: t.accentSoft }
-                  }
-                />
-                <Text
+                  <Glyph glyph="💬" size={17} colors={themedIconColors(t)} />
+                  <Text style={[styles.chatBtnText, styles.chatBtnTextSecondary]}>Написать</Text>
+                </PressableScale>
+              </Animated.View>
+            ) : (
+              <Animated.View entering={FadeInDown.delay(200).duration(300)}>
+                <PressableScale
                   style={[
-                    styles.chatBtnText,
-                    (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
+                    styles.chatBtn,
+                    styles.iconLabelRow,
+                    (awaitingConfirm || canReview) && styles.chatBtnSecondary,
                   ]}
+                  onPress={onChat}
                 >
-                  Написать мастеру
-                </Text>
-              </PressableScale>
-            </Animated.View>
-          ))}
+                  <Glyph
+                    glyph="💬"
+                    size={17}
+                    colors={
+                      awaitingConfirm || canReview
+                        ? themedIconColors(t)
+                        : { stroke: t.onAccent, fill: t.accent, glass: t.accentSoft }
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.chatBtnText,
+                      (awaitingConfirm || canReview) && styles.chatBtnTextSecondary,
+                    ]}
+                  >
+                    Написать мастеру
+                  </Text>
+                </PressableScale>
+              </Animated.View>
+            ))}
 
-        {/* Повторить завершённую работу — та же услуга и адрес без похода по
+          {/* Повторить завершённую работу — та же услуга и адрес без похода по
             дому; прошлого мастера можно позвать первым */}
-        {order.status === 'Завершена' && onRepeat && (
-          <Animated.View entering={FadeInDown.delay(230).duration(300)}>
-            <PressableScale
-              style={[styles.chatBtn, styles.chatBtnSecondary, styles.iconLabelRow]}
-              onPress={onRepeat}
-            >
-              <Glyph glyph="🔄" size={16} colors={themedIconColors(t)} />
-              <Text style={[styles.chatBtnText, styles.chatBtnTextSecondary]}>
-                Повторить заявку
-              </Text>
-            </PressableScale>
-          </Animated.View>
-        )}
+          {order.status === 'Завершена' && onRepeat && (
+            <Animated.View entering={FadeInDown.delay(230).duration(300)}>
+              <PressableScale
+                style={[styles.chatBtn, styles.chatBtnSecondary, styles.iconLabelRow]}
+                onPress={onRepeat}
+              >
+                <Glyph glyph="🔄" size={16} colors={themedIconColors(t)} />
+                <Text style={[styles.chatBtnText, styles.chatBtnTextSecondary]}>
+                  Повторить заявку
+                </Text>
+              </PressableScale>
+            </Animated.View>
+          )}
 
-        {cancellable && (
-          <Animated.View entering={FadeInDown.delay(250).duration(300)}>
-            <PressableScale
-              style={[styles.cancelBtn, confirming && styles.cancelBtnConfirm]}
-              onPress={() => (confirming ? onCancel() : setConfirming(true))}
-            >
-              <Text style={[styles.cancelText, confirming && styles.cancelTextConfirm]}>
-                {confirming ? 'Точно отменить заявку?' : 'Отменить заявку'}
-              </Text>
-            </PressableScale>
-          </Animated.View>
-        )}
+          {cancellable && (
+            <Animated.View entering={FadeInDown.delay(250).duration(300)}>
+              <PressableScale
+                style={[styles.cancelBtn, confirming && styles.cancelBtnConfirm]}
+                onPress={pressCancel}
+              >
+                <Text style={[styles.cancelText, confirming && styles.cancelTextConfirm]}>
+                  {confirming ? 'Точно отменить заявку?' : 'Отменить заявку'}
+                </Text>
+              </PressableScale>
+            </Animated.View>
+          )}
+        </ScrollView>
       </Animated.View>
 
       <VerificationExplainer open={verifOpen} onClose={() => setVerifOpen(false)} />
@@ -415,7 +443,8 @@ function OfferCard({
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
-  const [confirming, setConfirming] = useState(false);
+  // Выбор назначает исполнителя — то же защищённое подтверждение, что у отмены
+  const { confirming, press: pressPick } = useArmedConfirm(onPick);
   // Профиль мастера раскрывается на месте, а не отдельным экраном: шторка
   // поверх шторки перекрыла бы кнопку выбора — то, ради чего всё открыто
   const [profileOpen, setProfileOpen] = useState(false);
@@ -431,16 +460,21 @@ function OfferCard({
       style={styles.offerCard}
     >
       <View style={styles.offerHead}>
-        <Pressable style={styles.offerWho} onPress={() => setProfileOpen((v) => !v)}>
+        <PressableScale style={styles.offerWho} onPress={() => setProfileOpen((v) => !v)}>
           <View style={styles.offerNameRow}>
             <Text style={styles.offerName}>{fullName}</Text>
             {/* Предложение может прислать только проверенный мастер — правила
                 не пускают остальных. Бейдж делает это видимым и объясняет,
                 что стоит за словом «проверен». */}
-            <Pressable style={styles.verifiedChip} onPress={onVerifiedInfo}>
+            <PressableScale
+              style={styles.verifiedChip}
+              onPress={onVerifiedInfo}
+              // Бейдж ниже 44pt — слоп добивает зону касания
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+            >
               <Glyph glyph="🛡️" size={11} colors={themedIconColors(t)} />
               <Text style={styles.verifiedText}>Проверен</Text>
-            </Pressable>
+            </PressableScale>
           </View>
           <Text style={styles.offerRating}>
             {offer.rating != null
@@ -450,7 +484,7 @@ function OfferCard({
           <Text style={styles.offerProfileToggle}>
             {profileOpen ? 'Свернуть профиль' : 'Профиль мастера ›'}
           </Text>
-        </Pressable>
+        </PressableScale>
         {/* Цена — то, что клиент сравнивает между предложениями: ей самый
             крупный кегль в карточке и цифры одной ширины */}
         <Text style={styles.offerPriceSmall}>{rub(offer.price)}</Text>
@@ -488,7 +522,7 @@ function OfferCard({
       <View style={styles.offerRow}>
         <PressableScale
           style={[styles.offerBtn, styles.offerAccept, confirming && styles.offerAcceptConfirm]}
-          onPress={() => (confirming ? onPick() : setConfirming(true))}
+          onPress={pressPick}
         >
           <Text style={styles.offerAcceptText}>
             {confirming ? 'Точно выбрать этого мастера?' : '✓  Выбрать'}
@@ -524,7 +558,14 @@ function ReviewForm({ onSubmit }: { onSubmit: (stars: number, text: string) => v
 
       <View style={styles.starsRow}>
         {[1, 2, 3, 4, 5].map((n) => (
-          <PressableScale key={n} style={styles.starHit} onPress={() => setStars(n)}>
+          <PressableScale
+            key={n}
+            style={styles.starHit}
+            onPress={() => setStars(n)}
+            hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Оценка ${n}`}
+          >
             <Text style={[styles.star, n <= stars && styles.starOn]}>★</Text>
           </PressableScale>
         ))}
@@ -563,6 +604,9 @@ const makeStyles = (t: Palette) =>
     dim: { backgroundColor: t.dim },
     card: {
       margin: 12,
+      // Контент бывает длиннее экрана — карточка держит рост,
+      // остальное прокручивается внутри (см. scroll)
+      maxHeight: '82%',
       borderRadius: 28,
       backgroundColor: t.card,
       padding: 20,
@@ -573,6 +617,7 @@ const makeStyles = (t: Palette) =>
       shadowOffset: { width: 0, height: 8 },
       elevation: 8,
     },
+    scroll: { flexGrow: 0 },
     headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
     stepperRow: { flexDirection: 'row', marginBottom: 14, marginTop: 2 },
     // Первая ячейка без соединителя не растягивается — иначе линия к второй
@@ -627,7 +672,7 @@ const makeStyles = (t: Palette) =>
       marginBottom: 10,
     },
     commentLabel: { fontSize: 10.5, fontWeight: '800', color: t.textMuted, marginBottom: 4 },
-    commentText: { fontSize: 13, fontWeight: '600', color: t.text, lineHeight: 18 },
+    commentText: { fontSize: 13, fontWeight: '400', color: t.text, lineHeight: 18 },
     waitingBox: {
       backgroundColor: t.soft,
       borderRadius: 16,
@@ -639,7 +684,7 @@ const makeStyles = (t: Palette) =>
     waitingTitle: { fontSize: 13, fontWeight: '800', color: t.text },
     waitingText: {
       fontSize: 12,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       lineHeight: 17,
       marginTop: 4,
@@ -690,7 +735,7 @@ const makeStyles = (t: Palette) =>
     profileValue: { fontSize: 12.5, fontWeight: '800', color: t.text, flexShrink: 1 },
     offerComment: {
       fontSize: 12.5,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textSoft,
       lineHeight: 17,
       marginTop: 8,
@@ -735,7 +780,7 @@ const makeStyles = (t: Palette) =>
       marginBottom: 10,
       alignItems: 'center',
     },
-    declinedText: { color: t.textSoft, fontWeight: '700', fontSize: 12, textAlign: 'center' },
+    declinedText: { color: t.textSoft, fontWeight: '500', fontSize: 12, textAlign: 'center' },
     reviewCard: {
       backgroundColor: t.soft,
       borderRadius: 18,
@@ -746,7 +791,7 @@ const makeStyles = (t: Palette) =>
     },
     reviewTitle: { fontSize: 13.5, fontWeight: '800', color: t.text },
     starsRow: { flexDirection: 'row', gap: 2, marginTop: 8, marginBottom: 10 },
-    starHit: { padding: 3 },
+    starHit: { padding: 6 },
     star: { fontSize: 26, color: t.toggleOff },
     starOn: { color: t.warn },
     reviewInput: {

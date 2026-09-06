@@ -199,7 +199,7 @@ service cloud.firestore {
 
       allow create: if isOwner(uid)
         && !request.resource.data.keys().hasAny([
-          'verified', 'rating', 'reviewsCount', 'completedOrders',
+          'verified', 'rating', 'reviewsCount', 'completedOrders', 'blocked',
         ]);
 
       // Отказаться от собственного допуска можно самому — понижение прав ничем
@@ -215,7 +215,12 @@ service cloud.firestore {
         && verifiedKeptOrDropped()
         && keepsServerField('rating', 0)
         && keepsServerField('reviewsCount', 0)
-        && keepsServerField('completedOrders', 0);
+        && keepsServerField('completedOrders', 0)
+        // Блокировку ставит и снимает только сервер (setMasterBlocked). Без
+        // этого замка отстранённый мастер снимал бы её правкой собственной
+        // анкеты и возвращал себе ленту с адресами клиентов — тот же замок,
+        // что стоит на blocked у профиля клиента.
+        && keepsServerField('blocked', false);
 
       // Модератор трогает ровно один флаг — тот, что открывает доступ к заявкам
       allow update: if isAdmin()

@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Oswald_400Regular, useFonts } from '@expo-google-fonts/oswald';
 import { PressableScale } from '../components/PressableScale';
 import { DomioLogo } from '../components/DomioLogo';
@@ -26,6 +27,7 @@ import { Palette, palettes, useTheme } from '../theme';
 export function AuthScreen() {
   const { mode: themeMode, colors: t } = useTheme();
   const styles = themed[themeMode];
+  const insets = useSafeAreaInsets();
   const { signIn, register, resetPassword, requestPhoneCode, signInWithPhone } = useAuth();
   // Фирменный Oswald — только для слова «domio». Пока файл не загрузился,
   // слово стоит системным шрифтом: неизвестное семейство уронило бы iOS
@@ -249,7 +251,10 @@ export function AuthScreen() {
       style={styles.fill}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 48 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Animated.View entering={FadeInDown.duration(420)} style={styles.badge}>
           {/* Окна — цветом плашки: в знаке это дырки, сквозь них виден фон */}
           <DomioLogo height={40} color={t.accent} windowColor={t.accentSoft} />
@@ -420,6 +425,10 @@ export function AuthScreen() {
                 style={[styles.checkbox, accepted && styles.checkboxOn]}
                 onPress={() => setAccepted((v) => !v)}
                 disabled={loading}
+                // Квадратик мал, а согласие важно — слоп добивает цель до 44pt
+                hitSlop={12}
+                accessibilityRole="checkbox"
+                accessibilityLabel="Принимаю соглашение и политику"
               >
                 {accepted && <Text style={styles.checkboxTick}>✓</Text>}
               </PressableScale>
@@ -473,7 +482,11 @@ export function AuthScreen() {
           {/* Повторная отправка — с обратным отсчётом: сервер всё равно
               не отправит раньше минуты */}
           {isPhone && codeSent && (
-            <PressableScale onPress={sendCode} disabled={loading || cooldownLeft > 0}>
+            <PressableScale
+              onPress={sendCode}
+              disabled={loading || cooldownLeft > 0}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+            >
               <Text style={styles.forgot}>
                 {cooldownLeft > 0
                   ? `Отправить код ещё раз через ${cooldownLeft} с`
@@ -484,7 +497,11 @@ export function AuthScreen() {
 
           {/* Без восстановления пароля забывший его теряет доступ навсегда */}
           {!isPhone && !isRegister && (
-            <PressableScale onPress={forgotPassword} disabled={loading}>
+            <PressableScale
+              onPress={forgotPassword}
+              disabled={loading}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+            >
               <Text style={styles.forgot}>Забыли пароль?</Text>
             </PressableScale>
           )}
@@ -492,7 +509,11 @@ export function AuthScreen() {
 
         <Animated.View entering={FadeIn.delay(240).duration(360)} style={styles.switchRow}>
           <Text style={styles.hint}>{isRegister ? 'Уже есть аккаунт?' : 'Впервые здесь?'}</Text>
-          <PressableScale onPress={switchMode} disabled={loading}>
+          <PressableScale
+            onPress={switchMode}
+            disabled={loading}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 12 }}
+          >
             <Text style={styles.switchText}>{isRegister ? 'Войти' : 'Создать аккаунт'}</Text>
           </PressableScale>
         </Animated.View>
@@ -518,7 +539,8 @@ export function AuthScreen() {
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
     fill: { flex: 1, backgroundColor: t.bg },
-    content: { padding: 24, paddingTop: 96, alignItems: 'center' },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
+    content: { padding: 24, alignItems: 'center' },
     badge: {
       width: 64,
       height: 64,
@@ -543,7 +565,7 @@ const makeStyles = (t: Palette) =>
     sub: {
       color: t.textSoft,
       fontSize: 12.5,
-      fontWeight: '600',
+      fontWeight: '400',
       textAlign: 'center',
       marginTop: 6,
       marginBottom: 20,
@@ -589,7 +611,7 @@ const makeStyles = (t: Palette) =>
       fontSize: 13.5,
       color: t.text,
     },
-    fieldHint: { color: t.textMuted, fontWeight: '600', fontSize: 11, marginTop: 6 },
+    fieldHint: { color: t.textMuted, fontWeight: '400', fontSize: 11, marginTop: 6 },
     pickerField: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -620,7 +642,7 @@ const makeStyles = (t: Palette) =>
     consentText: {
       flex: 1,
       fontSize: 11.5,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       lineHeight: 17,
     },
@@ -628,7 +650,7 @@ const makeStyles = (t: Palette) =>
     fieldError: { color: t.danger, fontWeight: '700', fontSize: 11.5, marginTop: 10 },
     fieldNotice: {
       color: t.accent,
-      fontWeight: '700',
+      fontWeight: '600',
       fontSize: 11.5,
       marginTop: 10,
       lineHeight: 16,

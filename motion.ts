@@ -8,6 +8,9 @@ import { Easing } from 'react-native-reanimated';
 export const springs = {
   // Микро-отклики: нажатия, выделения
   micro: { duration: 180, dampingRatio: 0.9 },
+  // Отпущенная кнопка: недодемпфированная пружина сама даёт лёгкий перелёт —
+  // вместо расписанной последовательности «вверх, потом сесть»
+  pop: { duration: 300, dampingRatio: 0.5 },
   // Карточки, переключатели
   card: { duration: 320, dampingRatio: 0.85 },
   // Нижняя шторка — с едва заметным перелётом
@@ -25,3 +28,20 @@ export const timings = {
 
 // Пауза между элементами списка (stagger), мс
 export const STAGGER = 55;
+
+// Куда «долетел» бы жест, отпусти его свободно: проекция импульса той же
+// экспоненциальной формулой, что у инерции скролла. Отпуская палец, решение
+// «закрыть или вернуть» принимают по этой точке и по знаку скорости,
+// а не по тому, где палец случайно остановился.
+export function projectMomentum(velocity: number, decelerationRate = 0.998) {
+  'worklet';
+  return ((velocity / 1000) * decelerationRate) / (1 - decelerationRate);
+}
+
+// Сопротивление за границей: чем дальше тянут, тем меньше следует элемент.
+// Жёсткий стоп читается как «зависло», нарастающее сопротивление — как
+// «живое, но дальше ничего нет».
+export function rubberband(overshoot: number, dimension: number, constant = 0.55) {
+  'worklet';
+  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
+}

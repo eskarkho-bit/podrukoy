@@ -423,6 +423,18 @@ const GLYPHS: Record<string, (c: ObjectIconColors) => ReactElement> = {
     </>
   ),
   // ---------- вкладки и статусы ----------
+  '🏠': (c) => (
+    <>
+      <Path
+        d="M8 16 L17 7.5 L26 16 V25 a2 2 0 0 1 -2 2 H10 a2 2 0 0 1 -2 -2 Z"
+        fill={c.fill}
+        stroke={c.stroke}
+        strokeWidth={2}
+        strokeLinejoin="round"
+      />
+      <Rect x={14.5} y={19.5} width={5} height={7.5} rx={1} fill={c.stroke} />
+    </>
+  ),
   '🧾': (c) => (
     <>
       <Path

@@ -102,3 +102,10 @@ jest.mock('react-native-reanimated', () => ({
   ...require('react-native-reanimated/mock'),
   useReducedMotion: () => false,
 }));
+
+// Экраны читают отступы системных зон (useSafeAreaInsets); в тестовой среде
+// провайдера нет — штатный мок пакета отдаёт нулевые отступы.
+jest.mock(
+  'react-native-safe-area-context',
+  () => require('react-native-safe-area-context/jest/mock').default,
+);

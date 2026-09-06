@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../theme';
+import { useBackClose } from './backClose';
 import { PressableScale } from './PressableScale';
 import { counted } from './format';
 import { OPEN_SETTLEMENTS, searchSettlements, settlementKey, type Settlement } from './cities';
@@ -42,8 +44,10 @@ export function CityPicker(props: Props) {
   const { onClose, title } = props;
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
+  const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const multi = props.mode === 'multi';
+  useBackClose(true, onClose);
 
   const found = useMemo(() => searchSettlements(query), [query]);
 
@@ -86,8 +90,12 @@ export function CityPicker(props: Props) {
       exiting={FadeOut.duration(160)}
       style={[StyleSheet.absoluteFill, styles.root]}
     >
-      <View style={styles.topBar}>
-        <PressableScale style={styles.backChip} onPress={onClose}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
+        <PressableScale
+          style={styles.backChip}
+          onPress={onClose}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.backText}>‹ Назад</Text>
         </PressableScale>
         <View style={styles.backChipGhost} />
@@ -150,12 +158,12 @@ export function CityPicker(props: Props) {
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { backgroundColor: t.bg },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
     topBar: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
       paddingHorizontal: 14,
-      paddingTop: 54,
       paddingBottom: 6,
     },
     backChip: { paddingVertical: 8, paddingHorizontal: 10 },
@@ -165,7 +173,7 @@ const makeStyles = (t: Palette) =>
     title: { fontSize: 19, fontWeight: '800', color: t.text, marginBottom: 8 },
     hint: {
       fontSize: 12,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       lineHeight: 17,
       marginBottom: 12,
@@ -219,7 +227,7 @@ const makeStyles = (t: Palette) =>
     emptyTitle: { fontSize: 14, fontWeight: '800', color: t.text },
     emptyText: {
       fontSize: 12.5,
-      fontWeight: '600',
+      fontWeight: '400',
       color: t.textMuted,
       lineHeight: 18,
       textAlign: 'center',
@@ -238,7 +246,7 @@ const makeStyles = (t: Palette) =>
       gap: 4,
     },
     noteTitle: { fontSize: 12.5, fontWeight: '800', color: t.text, lineHeight: 18 },
-    noteText: { fontSize: 12.5, fontWeight: '600', color: t.textMuted, lineHeight: 18 },
+    noteText: { fontSize: 12.5, fontWeight: '400', color: t.textMuted, lineHeight: 18 },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

@@ -1,10 +1,9 @@
 import { ReactNode } from 'react';
-import { AccessibilityRole, Pressable, StyleProp, ViewStyle } from 'react-native';
+import { AccessibilityRole, Insets, Pressable, StyleProp, ViewStyle } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
   useSharedValue,
-  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -21,10 +20,14 @@ type Props = {
   // «группа». Задаются там, где содержимое кнопки не текст.
   accessibilityRole?: AccessibilityRole;
   accessibilityLabel?: string;
+  // Мелким кнопкам зона касания добивается до 44pt слопом, а не размером:
+  // видимая часть остаётся компактной, промахнуться — сложнее
+  hitSlop?: Insets | number;
 };
 
-// «Физическая» кнопка: при нажатии сжимается до 96%,
-// при отпускании чуть «перелетает» до 101% и пружиной садится на 100%.
+// «Физическая» кнопка: при нажатии сжимается до 96%, при отпускании садится
+// на место одной недодемпфированной пружиной — перелёт даёт сама физика,
+// поэтому движение можно перехватить новым нажатием в любой точке.
 export function PressableScale({
   children,
   style,
@@ -32,6 +35,7 @@ export function PressableScale({
   disabled,
   accessibilityRole,
   accessibilityLabel,
+  hitSlop,
 }: Props) {
   const scale = useSharedValue(1);
 
@@ -44,15 +48,13 @@ export function PressableScale({
       disabled={disabled}
       accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel}
+      hitSlop={hitSlop}
       onPress={onPress}
       onPressIn={() => {
         scale.value = withTiming(0.96, { duration: 70, easing: Easing.out(Easing.quad) });
       }}
       onPressOut={() => {
-        scale.value = withSequence(
-          withTiming(1.01, { duration: 80, easing: Easing.inOut(Easing.quad) }),
-          withSpring(1, springs.micro),
-        );
+        scale.value = withSpring(1, springs.pop);
       }}
       style={[animated, style]}
     >

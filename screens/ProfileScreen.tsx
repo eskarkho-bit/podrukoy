@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
   FadeInDown,
   interpolateColor,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { springs, STAGGER } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { PressableScale } from '../components/PressableScale';
@@ -214,9 +217,14 @@ export function ProfileScreen({
     }
   };
 
+  const insets = useSafeAreaInsets();
+
   return (
     <View style={styles.fill}>
-      <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+      >
         <Animated.Text entering={FadeInDown.duration(420)} style={styles.header}>
           Профиль
         </Animated.Text>
@@ -595,15 +603,48 @@ export function ProfileScreen({
   );
 }
 
+// Крайние положения ручки в треке
+const KNOB_OFF = 2;
+const KNOB_ON = 18;
+
 function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const on = useSharedValue(value ? 1 : 0);
-  const knob = useSharedValue(value ? 18 : 2);
+  const knob = useSharedValue(value ? KNOB_ON : KNOB_OFF);
   useEffect(() => {
     on.value = withTiming(value ? 1 : 0, { duration: 200 });
-    knob.value = withSpring(value ? 18 : 2, springs.micro);
+    knob.value = withSpring(value ? KNOB_ON : KNOB_OFF, springs.micro);
   }, [value, knob, on]);
+
+  // Тумблер, который выглядит перетаскиваемым, обязан перетаскиваться:
+  // ручка едет за пальцем 1:1, цвет подтягивается следом, решение при
+  // отпускании — по знаку скорости, дальше — пружина с этой же скоростью.
+  // Порог активации ±4 пкс оставляет обычные тапы кнопке под жестом.
+  const start = useSharedValue(KNOB_OFF);
+  const pan = Gesture.Pan()
+    .activeOffsetX([-4, 4])
+    .onStart(() => {
+      start.value = knob.value;
+    })
+    .onChange((e) => {
+      knob.value = Math.min(KNOB_ON, Math.max(KNOB_OFF, start.value + e.translationX));
+      on.value = (knob.value - KNOB_OFF) / (KNOB_ON - KNOB_OFF);
+    })
+    .onEnd((e) => {
+      const next =
+        e.velocityX > 150
+          ? true
+          : e.velocityX < -150
+            ? false
+            : knob.value > (KNOB_ON + KNOB_OFF) / 2;
+      knob.value = withSpring(next ? KNOB_ON : KNOB_OFF, {
+        ...springs.micro,
+        velocity: e.velocityX,
+      });
+      on.value = withTiming(next ? 1 : 0, { duration: 200 });
+      if (next !== value) runOnJS(onChange)(next);
+    });
 
   const trackStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(on.value, [0, 1], [t.toggleOff, t.accent]),
@@ -613,11 +654,18 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   }));
 
   return (
-    <PressableScale style={styles.toggleHit} onPress={() => onChange(!value)}>
-      <Animated.View style={[styles.toggleTrack, trackStyle]}>
-        <Animated.View style={[styles.toggleKnob, knobStyle]} />
-      </Animated.View>
-    </PressableScale>
+    <GestureDetector gesture={pan}>
+      <PressableScale
+        style={styles.toggleHit}
+        onPress={() => onChange(!value)}
+        hitSlop={{ top: 9, bottom: 9, left: 6, right: 6 }}
+        accessibilityRole="switch"
+      >
+        <Animated.View style={[styles.toggleTrack, trackStyle]}>
+          <Animated.View style={[styles.toggleKnob, knobStyle]} />
+        </Animated.View>
+      </PressableScale>
+    </GestureDetector>
   );
 }
 
@@ -625,7 +673,8 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     fill: { flex: 1 },
     root: { flex: 1, backgroundColor: t.bg },
-    content: { padding: 16, paddingTop: 60, paddingBottom: 120 },
+    // Верхний отступ добавляется на месте — от системной зоны прибора
+    content: { padding: 16, paddingBottom: 120 },
     header: { fontSize: 20, fontFamily: FONTS.display, marginBottom: 16, color: t.text },
     card: {
       backgroundColor: t.card,
@@ -780,7 +829,7 @@ const makeStyles = (t: Palette) =>
     },
     deleteTitle: { fontWeight: '800', fontSize: 14, color: t.danger },
     deleteText: {
-      fontWeight: '600',
+      fontWeight: '400',
       fontSize: 12,
       color: t.textSoft,
       lineHeight: 17,

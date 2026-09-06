@@ -330,9 +330,39 @@ describe('Блокировка', () => {
     await assertFails(setDoc(doc(as('blockedClient'), 'users/blockedClient'), { name: 'Чистый' }));
   });
 
+  // То же и у мастера: блокировка лежит в его собственной анкете, но снять её
+  // правкой анкеты нельзя — иначе отстранённый вернул бы себе ленту заявок с
+  // адресами и фото клиентов. Обычные поля при этом остаются редактируемыми.
+  test('отстранённый мастер не может снять себе блокировку', async () => {
+    await assertFails(
+      updateDoc(doc(as('blockedMaster'), 'masters/blockedMaster'), { blocked: false }),
+    );
+    // И заодно правкой других полей, «не заметившей» blocked, — тоже нет
+    await assertFails(
+      updateDoc(doc(as('blockedMaster'), 'masters/blockedMaster'), {
+        blocked: false,
+        city: 'казань',
+      }),
+    );
+  });
+
+  test('отстранённый мастер по-прежнему правит обычные поля анкеты', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('blockedMaster'), 'masters/blockedMaster'), { city: 'казань' }),
+    );
+  });
+
   test('нельзя завести профиль сразу с полем блокировки', async () => {
     await assertFails(
       setDoc(doc(as('client2'), 'users/client2'), { name: 'Хитрец', blocked: false }),
+    );
+  });
+
+  // Симметрично клиенту: анкету мастера тоже нельзя родить сразу с флагом.
+  // Берём uid без засеянной анкеты, иначе setDoc пошёл бы по пути update.
+  test('нельзя завести анкету мастера сразу с полем блокировки', async () => {
+    await assertFails(
+      setDoc(doc(as('client2'), 'masters/client2'), { name: 'Хитрец', skills: [], blocked: false }),
     );
   });
 });

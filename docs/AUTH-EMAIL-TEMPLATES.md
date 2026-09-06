@@ -23,6 +23,7 @@
    пробный биллинг Google считает «неполным» аккаунтом. Сначала «Activate
    full account» в баннере Cloud Console (кредиты триала при этом не
    сгорают и тратятся первыми), затем перезайти в Templates.
+
 2. Если после Blaze замок остался — тикет в
    [Firebase Support](https://firebase.google.com/support/troubleshooter/contact)
    (ссылка есть и в самом баннере) с просьбой включить редактирование

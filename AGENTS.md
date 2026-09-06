@@ -24,7 +24,7 @@ cd functions && npm run build    # типы функций
 npm run lint                     # eslint
 npm run format:check             # prettier
 npm test                         # 166 тестов компонентов
-npm run test:rules               # 154 теста правил доступа, нужен JDK 21
+npm run test:rules               # 157 тестов правил доступа, нужен JDK 21
 npm --prefix functions test      # 137 тестов функций, нужен JDK 21
 ```
 

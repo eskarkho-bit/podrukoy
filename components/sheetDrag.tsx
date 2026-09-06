@@ -1,7 +1,14 @@
-import { StyleSheet, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, type PanGesture } from 'react-native-gesture-handler';
-import { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import { springs } from '../motion';
+import {
+  cancelAnimation,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
+import { projectMomentum, rubberband, springs } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 
 // Шторку тянут пальцем сверху вниз — рука тянется к этому раньше, чем глаз
@@ -9,28 +16,66 @@ import { palettes, Palette, useTheme } from '../theme';
 //
 // Жест висит только на «ручке», а не на всей карточке: внутри шторки есть
 // поле ввода и ряды выбора, и Pan поверх них отбирал бы у них касания.
+//
+// Отпущенный палец не обрывает движение, а передаёт его: пружина стартует
+// с его скоростью, направление решает знак скорости, а порог сравнивается
+// с проекцией импульса — куда жест долетел бы сам.
 
-/** Протянули дальше — отпускаем шторку */
+/** Дальше этой точки покоя спроецированный жест считается закрытием */
 const CLOSE_DISTANCE = 90;
-/** Или протянули мало, но резко смахнули */
-const CLOSE_VELOCITY = 900;
+/** Вверх шторке некуда: палец встречает нарастающее сопротивление */
+const UP_RANGE = 480;
+const UP_RESIST = 0.16;
 
 export function useSheetDrag(onClose: () => void, enabled = true) {
+  const { height } = useWindowDimensions();
+  // Смещение пальца без сопротивления. Резина — функция расстояния, а не
+  // приращений: копить её по кусочкам значило бы исказить кривую.
+  const raw = useSharedValue(0);
   const dragY = useSharedValue(0);
+  // Карточка уехала за край сама — размонтирование не должно проигрывать
+  // exiting-анимацию: та стартует от позиции вёрстки, и уже спрятанная
+  // карточка мигнула бы обратно на экран
+  const [dragDismissed, setDragDismissed] = useState(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  const finishClose = () => {
+    setDragDismissed(true);
+    // Кадр между сменой exiting и размонтированием: в одном коммите
+    // unmount увидел бы старые пропсы
+    requestAnimationFrame(() => closeRef.current());
+  };
 
   const gesture = Gesture.Pan()
     .enabled(enabled)
-    // Вверх не пускаем: шторка не растягивается, тянуть её туда некуда
+    // Полоска тонкая, а палец широкий — зона жеста выше видимой ручки
+    .hitSlop({ top: 12, bottom: 8 })
+    .onBegin(() => {
+      // Схватили во время возврата — продолжаем от текущего места, без скачка
+      raw.value = dragY.value;
+      cancelAnimation(dragY);
+    })
     .onChange((e) => {
-      dragY.value = Math.max(0, dragY.value + e.changeY);
+      raw.value += e.changeY;
+      dragY.value = raw.value >= 0 ? raw.value : rubberband(raw.value, UP_RANGE, UP_RESIST);
     })
     .onEnd((e) => {
-      if (dragY.value > CLOSE_DISTANCE || e.velocityY > CLOSE_VELOCITY) {
-        runOnJS(onClose)();
+      const projected = raw.value + projectMomentum(e.velocityY);
+      raw.value = 0;
+      if (e.velocityY < 0 || projected < CLOSE_DISTANCE) {
+        // Передумали — назад с той же скоростью, что была у пальца
+        dragY.value = withSpring(0, { ...springs.sheet, velocity: e.velocityY });
       } else {
-        // Передумали — карточка возвращается на место той же пружиной,
-        // которой приехала
-        dragY.value = withSpring(0, springs.sheet);
+        // Закрытие продолжает движение пальца, а не начинает своё; за краем
+        // перелёт не нужен — гасим полностью
+        dragY.value = withSpring(
+          height,
+          { ...springs.sheet, dampingRatio: 1, velocity: e.velocityY },
+          (done) => {
+            if (done) runOnJS(finishClose)();
+          },
+        );
       }
     });
 
@@ -38,7 +83,7 @@ export function useSheetDrag(onClose: () => void, enabled = true) {
     transform: [{ translateY: dragY.value }],
   }));
 
-  return { gesture, cardStyle };
+  return { gesture, cardStyle, dragDismissed };
 }
 
 /** Полоска вверху шторки. Она же — область захвата. */
