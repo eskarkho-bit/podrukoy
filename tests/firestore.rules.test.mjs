@@ -118,6 +118,12 @@ beforeEach(async () => {
       rating: 4.8,
       reviewsCount: 5,
     });
+    // Как master1 принимает оплату: видят он сам и модератор, клиенту копию
+    // кладёт сервер
+    await setDoc(doc(db, 'masters/master1/payment/details'), {
+      banks: ['sber', 'tbank'],
+      acceptsCash: true,
+    });
     await setDoc(doc(db, 'masters/master2'), {
       name: 'Пётр',
       city: 'москва',
@@ -1055,6 +1061,86 @@ describe('Проверка мастера', () => {
   test('чужой список модераторов не прочитать', async () => {
     await assertFails(getDoc(doc(as('newbie'), 'admins/admin1')));
     await assertSucceeds(getDoc(doc(as('admin1'), 'admins/admin1')));
+  });
+});
+
+describe('Реквизиты мастера', () => {
+  // Расчёты идут мимо сервиса, но список банков и согласие на наличные —
+  // данные мастера: их видят он сам и модератор, а клиент — только копию,
+  // которую сервер положит в выбранную заявку.
+  test('видят только владелец и модератор', async () => {
+    await assertSucceeds(getDoc(doc(as('master1'), 'masters/master1/payment/details')));
+    await assertSucceeds(getDoc(doc(as('admin1'), 'masters/master1/payment/details')));
+    await assertFails(getDoc(doc(as('client1'), 'masters/master1/payment/details')));
+    await assertFails(getDoc(doc(as('master2'), 'masters/master1/payment/details')));
+  });
+
+  test('мастер заводит и правит свои реквизиты', async () => {
+    await assertSucceeds(
+      setDoc(doc(as('master2'), 'masters/master2/payment/details'), {
+        banks: ['vtb'],
+        acceptsCash: false,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(as('master2'), 'masters/master2/payment/details'), {
+        banks: ['vtb', 'alfa'],
+        acceptsCash: true,
+      }),
+    );
+  });
+
+  // Банки — закрытый список, тот же, что в приложении: свободный текст
+  // клиенту в приложении банка не пригодится, а номера карт сервису не нужны
+  test('чужой банк, номер карты и лишние поля не пройдут', async () => {
+    await assertFails(
+      setDoc(doc(as('master2'), 'masters/master2/payment/details'), {
+        banks: ['sber', 'банк-у-дома'],
+        acceptsCash: true,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(as('master2'), 'masters/master2/payment/details'), {
+        banks: 'sber',
+        acceptsCash: true,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(as('master2'), 'masters/master2/payment/details'), {
+        banks: ['sber'],
+        acceptsCash: 'да',
+      }),
+    );
+    await assertFails(
+      setDoc(doc(as('master2'), 'masters/master2/payment/details'), {
+        banks: ['sber'],
+        acceptsCash: true,
+        cardNumber: '2200 0000 0000 0000',
+      }),
+    );
+    await assertFails(
+      setDoc(doc(as('master2'), 'masters/master2/payment/details'), {
+        banks: ['sber'],
+        acceptsCash: true,
+        updatedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    );
+  });
+
+  test('чужие реквизиты не переписать и не удалить', async () => {
+    await assertFails(
+      setDoc(doc(as('master2'), 'masters/master1/payment/details'), {
+        banks: ['vtb'],
+        acceptsCash: true,
+      }),
+    );
+    await assertFails(deleteDoc(doc(as('master2'), 'masters/master1/payment/details')));
+    await assertFails(deleteDoc(doc(as('admin1'), 'masters/master1/payment/details')));
+  });
+
+  test('владелец удаляет свои реквизиты — часть удаления аккаунта', async () => {
+    await assertSucceeds(deleteDoc(doc(as('master1'), 'masters/master1/payment/details')));
   });
 });
 

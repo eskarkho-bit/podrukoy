@@ -346,6 +346,9 @@ export function MasterDemoScreen() {
           email="demo@domio.app"
           profile={DEMO_PROFILE}
           reviews={DEMO_REVIEWS}
+          payment={{ banks: ['sber', 'tbank'], acceptsCash: true }}
+          phone="79001234567"
+          onSavePayment={noop}
           onEdit={noop}
           onComplain={async () => true}
           onLogout={noop}

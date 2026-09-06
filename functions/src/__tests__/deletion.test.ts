@@ -35,6 +35,7 @@ async function seed() {
 
   await db.doc(`masters/${UID}`).set({ name: 'Дмитрий', verified: true });
   await db.doc(`masters/${UID}/verification/application`).set({ phone: '79991234567' });
+  await db.doc(`masters/${UID}/payment/details`).set({ banks: ['sber'], acceptsCash: true });
 
   // Жалобы: своя должна умереть с аккаунтом, чужая на его отзыв — остаться
   await db.doc('complaints/mine').set({
@@ -72,6 +73,7 @@ describe('полное удаление', () => {
     expect((await db.doc(`users/${UID}`).get()).exists).toBe(false);
     expect((await db.doc(`masters/${UID}`).get()).exists).toBe(false);
     expect((await db.doc(`masters/${UID}/verification/application`).get()).exists).toBe(false);
+    expect((await db.doc(`masters/${UID}/payment/details`).get()).exists).toBe(false);
     // Подколлекции Firestore сам не удаляет — обход обязан их достать
     expect((await db.doc(`users/${UID}/threads/support/messages/m1`).get()).exists).toBe(false);
   });

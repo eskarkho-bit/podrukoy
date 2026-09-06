@@ -26,6 +26,7 @@ const base: ExportInput = {
   supportMessages: [],
   master: undefined,
   verification: { phone: '79990000000', cardBindingId: 'pb-secret', cardLast4: '4242' },
+  payment: { banks: ['sber'], acceptsCash: true },
   myReviews: [{ orderId: 'o9', data: { stars: 5, text: 'Отлично' } }],
 };
 
@@ -47,9 +48,10 @@ describe('assembleExport', () => {
     expect(out).not.toContain('ExponentPushToken');
     expect(out).not.toContain('cardBindingId');
     expect(out).not.toContain('pb-secret');
-    // А маска карты и согласия — данные владельца, они на месте
+    // А маска карты, согласия и способы оплаты — данные владельца, они на месте
     expect(out).toContain('4242');
     expect(out).toContain('2026-07-01');
+    expect(out).toContain('acceptsCash');
   });
 
   test('переписка лежит внутри своей заявки, даты — строками', () => {

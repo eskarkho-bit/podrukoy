@@ -50,6 +50,8 @@ export type ExportInput = {
   supportMessages: Record<string, unknown>[];
   master: Record<string, unknown> | undefined;
   verification: Record<string, unknown> | undefined;
+  // Как мастер принимает оплату: банки для перевода и наличные
+  payment: Record<string, unknown> | undefined;
   myReviews: { orderId: string; data: Record<string, unknown> }[];
 };
 
@@ -65,6 +67,7 @@ export function assembleExport(input: ExportInput): unknown {
     support: input.supportMessages,
     master: input.master ?? null,
     verification: input.verification ?? null,
+    payment: input.payment ?? null,
     // Написанные отзывы — данные автора. Полученные (о мастере) не
     // выгружаются: они принадлежат написавшим их клиентам
     reviewsWritten: input.myReviews.map((r) => ({ orderId: r.orderId, ...r.data })),
@@ -95,6 +98,7 @@ async function buildExport(uid: string, email: string, phone: string): Promise<u
 
   const masterSnap = await getDoc(doc(db, 'masters', uid));
   const verificationSnap = await getDoc(doc(db, 'masters', uid, 'verification', 'application'));
+  const paymentSnap = await getDoc(doc(db, 'masters', uid, 'payment', 'details'));
 
   const reviewsSnap = await getDocs(
     query(collectionGroup(db, 'reviews'), where('clientId', '==', uid), orderBy('createdAt')),
@@ -109,6 +113,7 @@ async function buildExport(uid: string, email: string, phone: string): Promise<u
     supportMessages: supportSnap.docs.map((m) => m.data()),
     master: masterSnap.exists() ? masterSnap.data() : undefined,
     verification: verificationSnap.exists() ? verificationSnap.data() : undefined,
+    payment: paymentSnap.exists() ? paymentSnap.data() : undefined,
     myReviews: reviewsSnap.docs.map((r) => ({ orderId: r.id, data: r.data() })),
   });
 }

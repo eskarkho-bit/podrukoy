@@ -81,6 +81,13 @@ import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { settlementLabel } from '../components/cities';
 import { EDUCATION_LEVELS, educationFrom, type EducationLevel } from '../components/education';
+import { BANKS, type BankId } from '../components/banks';
+import {
+  EMPTY_PAYMENT_DETAILS,
+  formatPhone,
+  paymentDetailsFrom,
+  type PaymentDetails,
+} from '../components/payment';
 import { LegalScreen } from './LegalScreen';
 import {
   applicationFrom,
@@ -284,6 +291,9 @@ export function MasterScreen({ open, onClose }: Props) {
   // Анкета мастера: есть — раздел открыт, нет — предлагаем её заполнить
   const [master, setMaster] = useState<MasterProfile | null>(null);
   const [application, setApplication] = useState<Application>(EMPTY_APPLICATION);
+  // Как мастер принимает оплату: банки для СБП и наличные. null — ещё не
+  // настраивал, тогда клиенту предлагают оба способа
+  const [payment, setPayment] = useState<PaymentDetails | null>(null);
   // Правка анкеты: город и специальности задают, какие заявки вообще видны,
   // поэтому менять их нужно уметь не только при первом входе
   const [editingProfile, setEditingProfile] = useState(false);
@@ -368,6 +378,17 @@ export function MasterScreen({ open, onClose }: Props) {
       doc(db, 'masters', myUid, 'verification', 'application'),
       (snap) => setApplication(applicationFrom(snap.data())),
       (e) => console.warn('Заявка на проверку недоступна:', e),
+    );
+  }, [open, myUid]);
+
+  // Способы оплаты — там же, где заявка на проверку: читают только владелец
+  // и модератор, клиенту копию кладёт сервер при выборе
+  useEffect(() => {
+    if (!open || !myUid) return;
+    return onSnapshot(
+      doc(db, 'masters', myUid, 'payment', 'details'),
+      (snap) => setPayment(paymentDetailsFrom(snap.data())),
+      (e) => console.warn('Способы оплаты недоступны:', e),
     );
   }, [open, myUid]);
 
@@ -628,6 +649,24 @@ export function MasterScreen({ open, onClose }: Props) {
     onClose();
   };
 
+  // Банки и наличные сохраняются сразу, как переключатель настроек: каждое
+  // касание — одна запись, а отдельная кнопка «Сохранить» здесь лишняя.
+  // Локальное состояние обновляется до ответа базы, чтобы чип не «залипал»
+  const savePayment = async (next: PaymentDetails) => {
+    if (!myUid) return;
+    setPayment(next);
+    try {
+      await setDoc(doc(db, 'masters', myUid, 'payment', 'details'), {
+        banks: next.banks,
+        acceptsCash: next.acceptsCash,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Не удалось сохранить способы оплаты:', e);
+      showNotice(firestoreErrorText(e, 'Не удалось сохранить способы оплаты. Проверьте связь'));
+    }
+  };
+
   const patchJob = (jobId: string, patch: (j: Job) => Job) => {
     setJobs((prev) => prev.map((j) => (j.id === jobId ? patch(j) : j)));
   };
@@ -845,6 +884,9 @@ export function MasterScreen({ open, onClose }: Props) {
               email={user?.email ?? ''}
               profile={master}
               reviews={reviews}
+              payment={payment}
+              phone={application.phone}
+              onSavePayment={savePayment}
               onEdit={() => setEditingProfile(true)}
               onLogout={handleLogout}
               onClose={onClose}
@@ -2041,6 +2083,9 @@ export function ProfileTab({
   email,
   profile,
   reviews,
+  payment,
+  phone,
+  onSavePayment,
   onEdit,
   onLogout,
   onClose,
@@ -2049,6 +2094,11 @@ export function ProfileTab({
   email: string;
   profile: MasterProfile;
   reviews: MasterReview[];
+  /** Как мастер принимает оплату; null — ещё не настраивал */
+  payment: PaymentDetails | null;
+  /** Телефон из заявки на проверку — на него идут переводы по СБП */
+  phone: string;
+  onSavePayment: (next: PaymentDetails) => void;
   onEdit: () => void;
   onLogout: () => void;
   onClose: () => void;
@@ -2160,6 +2210,10 @@ export function ProfileTab({
           </PressableScale>
         </Animated.View>
 
+        <Animated.View entering={FadeInDown.delay(105).duration(360)}>
+          <PaymentSettings payment={payment} phone={phone} onSave={onSavePayment} />
+        </Animated.View>
+
         <Animated.Text entering={FadeInDown.delay(120).duration(360)} style={styles.sectionTitle}>
           Отзывы клиентов
         </Animated.Text>
@@ -2231,6 +2285,83 @@ export function ProfileTab({
           ))
         )}
       </ScrollView>
+    </View>
+  );
+}
+
+// ---------- Как мастер принимает оплату ----------
+
+// Расчёты идут мимо сервиса: наличными при встрече или переводом по СБП на
+// телефон из анкеты. Здесь мастер говорит лишь, в какие банки ему можно
+// переводить и берёт ли он наличные, — клиент увидит это, когда выберет его.
+// Номера карт не спрашиваем: перевод по номеру телефона их не требует, а
+// хранить платёжные данные сервису незачем.
+export function PaymentSettings({
+  payment,
+  phone,
+  onSave,
+}: {
+  /** null — мастер ещё ничего не настраивал */
+  payment: PaymentDetails | null;
+  phone: string;
+  onSave: (next: PaymentDetails) => void;
+}) {
+  const { mode } = useTheme();
+  const styles = themed[mode];
+  const current = payment ?? EMPTY_PAYMENT_DETAILS;
+
+  const toggleBank = (id: BankId) => {
+    const banks = current.banks.includes(id)
+      ? current.banks.filter((b) => b !== id)
+      : [...current.banks, id];
+    onSave({ ...current, banks });
+  };
+
+  return (
+    <View style={styles.payCard}>
+      <Text style={styles.payTitle}>Как принимаете оплату</Text>
+      <Text style={styles.payHint}>
+        Клиент увидит это, когда выберет вас.{' '}
+        {phone
+          ? `Переводы — по СБП на номер ${formatPhone(phone)}, тот же, что в анкете.`
+          : 'Номер для переводов берётся из анкеты.'}
+      </Text>
+
+      <Text style={styles.payLabel}>Наличные</Text>
+      <View style={styles.payChipRow}>
+        <PressableScale
+          style={[styles.skillChip, current.acceptsCash && styles.skillChipOn]}
+          onPress={() => onSave({ ...current, acceptsCash: !current.acceptsCash })}
+          accessibilityRole="button"
+        >
+          <Text style={[styles.skillChipText, current.acceptsCash && styles.skillChipTextOn]}>
+            {current.acceptsCash ? '✓ Принимаю наличные' : 'Наличные не принимаю'}
+          </Text>
+        </PressableScale>
+      </View>
+
+      <Text style={styles.payLabel}>Перевод по СБП — в какие банки</Text>
+      <View style={styles.payChipRow}>
+        {BANKS.map((bank) => {
+          const on = current.banks.includes(bank.id);
+          return (
+            <PressableScale
+              key={bank.id}
+              style={[styles.skillChip, on && styles.skillChipOn]}
+              onPress={() => toggleBank(bank.id)}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.skillChipText, on && styles.skillChipTextOn]}>{bank.label}</Text>
+            </PressableScale>
+          );
+        })}
+      </View>
+
+      <Text style={styles.payNotice}>
+        {payment === null
+          ? 'Пока ничего не выбрано — клиенту предложат и наличные, и перевод по номеру.'
+          : 'Сервис деньги не принимает и не удерживает: оплату вы получаете от клиента напрямую.'}
+      </Text>
     </View>
   );
 }
@@ -3160,6 +3291,26 @@ const makeStyles = (t: Palette) =>
       marginBottom: 18,
     },
     editBtnText: { color: t.onAccent, fontWeight: '700', fontSize: 14 },
+    // ---------- как принимаете оплату ----------
+    payCard: {
+      backgroundColor: t.card,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 16,
+      marginBottom: 18,
+    },
+    payTitle: { fontSize: 15, fontWeight: '800', color: t.text },
+    payHint: { color: t.textMuted, fontWeight: '400', fontSize: 12, lineHeight: 16, marginTop: 4 },
+    payLabel: { fontSize: 11, fontWeight: '800', color: t.textMuted, marginTop: 12 },
+    payChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+    payNotice: {
+      color: t.textMuted,
+      fontWeight: '400',
+      fontSize: 11,
+      lineHeight: 15,
+      marginTop: 12,
+    },
     reviewCard: {
       backgroundColor: t.card,
       borderRadius: 16,

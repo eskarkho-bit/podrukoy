@@ -1074,6 +1074,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
 
     await quietly(deleteDoc(doc(db, 'masters', uid, 'verification', 'application')));
+    await quietly(deleteDoc(doc(db, 'masters', uid, 'payment', 'details')));
     await quietly(deleteVerificationPhoto(uid));
     await quietly(deleteDoc(doc(db, 'masters', uid)));
     await quietly(deleteDoc(doc(db, 'users', uid)));

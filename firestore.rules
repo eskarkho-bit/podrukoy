@@ -108,6 +108,17 @@ service cloud.firestore {
       return p is number && p > 0 && p <= 10000000;
     }
 
+    // Банки для перевода по СБП. Список повторяет BANKS в components/banks.ts
+    // и меняется только вместе с ним. Свободного текста здесь нет намеренно:
+    // клиенту нужно выбрать получателя из стандартного списка своего банка.
+    function validBanks(list) {
+      return list is list && list.size() <= 16 && list.hasOnly([
+        'sber', 'tbank', 'vtb', 'alfa', 'akbars', 'gazprom', 'raiffeisen',
+        'sovcom', 'ozon', 'yandex', 'psb', 'mts', 'pochta', 'rshb', 'otp',
+        'uralsib',
+      ]);
+    }
+
     // Профиль клиента: имя, адреса, город, настройки. Читают владелец и
     // модератор: модератору профиль нужен целиком — карточка пользователя,
     // флаг блокировки, телефон для поиска. Это сознательный разворот прежнего
@@ -297,6 +308,37 @@ service cloud.firestore {
             'status', 'rejectionReason', 'reviewedAt', 'reviewedBy',
           ]);
 
+        // Часть удаления аккаунта
+        allow delete: if isOwner(uid);
+      }
+
+      // ---------- как мастер принимает оплату ----------
+      //
+      // Банки для перевода по СБП и согласие на наличные. Расчёты идут мимо
+      // сервиса, поэтому здесь нет ни номеров карт, ни счетов: переводят по
+      // телефону из заявки на проверку — тому, что видел модератор. Читают
+      // владелец и модератор; клиенту выбранной заявки копию кладёт сервер
+      // (orders.masterBanks / masterAcceptsCash).
+      match /payment/details {
+
+        function validDetails() {
+          return request.resource.data.keys().hasOnly(['banks', 'acceptsCash', 'updatedAt'])
+            && validBanks(request.resource.data.banks)
+            && request.resource.data.acceptsCash is bool;
+        }
+
+        // Штамп времени — только серверный, как у completedAt заявки.
+        // При правке он может остаться прежним: приложение шлёт его не всегда.
+        function stampedNow() {
+          return request.resource.data.updatedAt == request.time;
+        }
+
+        allow read: if isOwner(uid) || isAdmin();
+        allow create: if isOwner(uid) && validDetails()
+          && (!('updatedAt' in request.resource.data) || stampedNow());
+        allow update: if isOwner(uid) && validDetails()
+          && (request.resource.data.get('updatedAt', null) == resource.data.get('updatedAt', null)
+            || stampedNow());
         // Часть удаления аккаунта
         allow delete: if isOwner(uid);
       }

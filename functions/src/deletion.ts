@@ -112,9 +112,11 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
     await advance('verification');
   }
 
-  // 4. Заявка на проверку и снимок лица — самое чувствительное
+  // 4. Заявка на проверку и снимок лица — самое чувствительное. Тем же
+  //    этапом уходят и реквизиты: банки для перевода — данные того же рода
   if (!reached(stage, 'verification')) {
     await deleteAll(db.collection(`masters/${uid}/verification`));
+    await deleteAll(db.collection(`masters/${uid}/payment`));
     await deletePrefix(`verification/${uid}/`);
     await advance('master');
   }
