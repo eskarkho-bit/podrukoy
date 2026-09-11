@@ -108,6 +108,10 @@ export default function DemoRoute() {
       onCreateOrder={noop}
       onCancelOrder={noop}
       onConfirmOrder={noop}
+      onReturnOrder={noop}
+      onReportMaster={async () => false}
+      onBlockMaster={noop}
+      blockedMasterIds={[]}
       onChoosePaymentMethod={noop}
       onMarkPaid={noop}
       onAcceptOffer={noop}

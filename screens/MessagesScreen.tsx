@@ -3,6 +3,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -67,6 +68,8 @@ type Props = {
   onOpenThread: (threadId: string) => void;
   onSendMessage: (threadId: string, text: string) => void;
   onSendImage: (threadId: string, localUri: string, caption: string) => Promise<void>;
+  // Жалоба на сообщение собеседника — удержанием пузыря; true — принята
+  onReportMessage: (threadId: string, messageId: string, text: string) => Promise<boolean>;
   // Открытая переписка — это «вложенный» экран, поэтому нижние вкладки на время прячутся
   onThreadOpenChange: (open: boolean) => void;
 };
@@ -79,6 +82,7 @@ export function MessagesScreen({
   onOpenThread,
   onSendMessage,
   onSendImage,
+  onReportMessage,
   onThreadOpenChange,
 }: Props) {
   const { mode } = useTheme();
@@ -145,6 +149,13 @@ export function MessagesScreen({
               onBack={handleBack}
               onSend={(text) => onSendMessage(openThread.id, text)}
               onSendImage={(uri, caption) => onSendImage(openThread.id, uri, caption)}
+              // Жаловаться есть на кого только в чате заявки: в поддержке
+              // на том конце модератор
+              onReport={
+                openThread.canAttach
+                  ? (messageId, text) => onReportMessage(openThread.id, messageId, text)
+                  : undefined
+              }
             />
           </EdgeBackLayer>
         </Animated.View>
@@ -237,12 +248,14 @@ function ThreadDetail({
   onBack,
   onSend,
   onSendImage,
+  onReport,
 }: {
   thread: Thread;
   typing: boolean;
   onBack: () => void;
   onSend: (text: string) => void;
   onSendImage: (localUri: string, caption: string) => Promise<void>;
+  onReport?: (messageId: string, text: string) => Promise<boolean>;
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -253,6 +266,24 @@ function ThreadDetail({
   // должен ничего отправлять.
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [sendingImage, setSendingImage] = useState(false);
+  // Жалоба на сообщение собеседника: удержание пузыря раскрывает поле
+  // причины над строкой ввода; отправленные помечаются под пузырём
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [reportText, setReportText] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
+  const submitReport = async () => {
+    const text = reportText.trim();
+    if (!reportId || !onReport || !text || reportBusy) return;
+    setReportBusy(true);
+    const ok = await onReport(reportId, text);
+    setReportBusy(false);
+    if (ok) {
+      setReportedIds((prev) => new Set(prev).add(reportId));
+      setReportId(null);
+      setReportText('');
+    }
+  };
   const scrollRef = useRef<ScrollView>(null);
   // Позиция прокрутки принадлежит пальцу: новое сообщение (и пузырь
   // «печатает…») уводит ленту вниз, только если человек и так был внизу,
@@ -317,6 +348,10 @@ function ThreadDetail({
         </View>
         <View style={styles.backChip_ghost} />
       </View>
+      {/* Способ пожаловаться должен быть виден, а не угадываться */}
+      {!!onReport && thread.messages.some((m) => m.from === 'master') && (
+        <Text style={styles.reportHint}>Удерживайте сообщение мастера, чтобы пожаловаться</Text>
+      )}
 
       <ScrollView
         ref={scrollRef}
@@ -338,15 +373,29 @@ function ThreadDetail({
             exiting={FadeOutLeft.duration(180)}
             style={[styles.bubbleWrap, m.from === 'user' && styles.bubbleWrapUser]}
           >
-            <View style={[styles.bubble, m.from === 'user' && styles.bubbleUser]}>
+            <Pressable
+              style={[styles.bubble, m.from === 'user' && styles.bubbleUser]}
+              onLongPress={
+                onReport && m.from === 'master'
+                  ? () => {
+                      setReportId(m.id);
+                      setReportText('');
+                    }
+                  : undefined
+              }
+              delayLongPress={350}
+            >
               {!!m.imageUrl && <Image source={{ uri: m.imageUrl }} style={styles.bubbleImage} />}
               {!!m.text && (
                 <Text style={[styles.bubbleText, m.from === 'user' && styles.bubbleTextUser]}>
                   {m.text}
                 </Text>
               )}
-            </View>
-            <Text style={styles.bubbleTime}>{m.time}</Text>
+            </Pressable>
+            <Text style={styles.bubbleTime}>
+              {m.time}
+              {reportedIds.has(m.id) ? ' · жалоба отправлена' : ''}
+            </Text>
           </Animated.View>
         ))}
 
@@ -363,6 +412,34 @@ function ThreadDetail({
           </Animated.View>
         )}
       </ScrollView>
+
+      {reportId && (
+        <View style={styles.reportBox}>
+          <Text style={styles.reportTitle}>Жалоба на сообщение</Text>
+          <TextInput
+            style={styles.reportInput}
+            value={reportText}
+            onChangeText={setReportText}
+            placeholder="Что не так? Модерация прочитает переписку"
+            placeholderTextColor={t.textMuted}
+            multiline
+            maxLength={1000}
+            autoFocus
+          />
+          <View style={styles.reportRow}>
+            <PressableScale
+              style={[styles.reportBtn, (!reportText.trim() || reportBusy) && styles.reportBtnDim]}
+              onPress={submitReport}
+              disabled={!reportText.trim() || reportBusy}
+            >
+              <Text style={styles.reportBtnText}>{reportBusy ? 'Отправляем…' : 'Отправить'}</Text>
+            </PressableScale>
+            <PressableScale style={styles.reportGhost} onPress={() => setReportId(null)}>
+              <Text style={styles.reportGhostText}>Отмена</Text>
+            </PressableScale>
+          </View>
+        </View>
+      )}
 
       {pendingImage && (
         <View style={styles.pendingRow}>
@@ -624,6 +701,56 @@ const makeStyles = (t: Palette) =>
     },
     pendingThumb: { width: 48, height: 48, borderRadius: 8, backgroundColor: t.border },
     pendingHint: { flex: 1, fontSize: 12, color: t.textMuted },
+    reportHint: {
+      fontSize: 11.5,
+      fontWeight: '600',
+      color: t.textMuted,
+      textAlign: 'center',
+      paddingHorizontal: 16,
+      paddingBottom: 6,
+    },
+    reportBox: {
+      marginHorizontal: 12,
+      marginBottom: 8,
+      backgroundColor: t.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 12,
+    },
+    reportTitle: { fontSize: 12.5, fontWeight: '800', color: t.text, marginBottom: 8 },
+    reportInput: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 13,
+      color: t.text,
+      minHeight: 60,
+      textAlignVertical: 'top',
+    },
+    reportRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+    reportBtn: {
+      flex: 1,
+      borderRadius: 12,
+      paddingVertical: 11,
+      alignItems: 'center',
+      backgroundColor: t.danger,
+    },
+    reportBtnDim: { opacity: 0.5 },
+    reportBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12.5 },
+    reportGhost: {
+      borderRadius: 12,
+      paddingVertical: 11,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+      alignItems: 'center',
+    },
+    reportGhostText: { color: t.textMuted, fontWeight: '800', fontSize: 12.5 },
     pendingCancel: { padding: 6 },
     pendingCancelText: { fontSize: 16, fontWeight: '800', color: t.textMuted },
     bubbleImage: {

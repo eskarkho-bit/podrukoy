@@ -292,6 +292,20 @@ service cloud.firestore {
             || (statusNow('pending') && readyToApply())
           );
 
+        // Одобренную анкету мастер тоже правит, но по-разному: «о себе»
+        // проверке не подлежит и меняется свободно, а телефон и фото — то,
+        // что модератор проверял (на телефон клиенты переводят оплату), —
+        // меняются только вместе с повторной отправкой на проверку. Запирать
+        // их навсегда нельзя: сменил номер — остался без переводов. Допуск
+        // при этом снимает сервер (onVerificationChanged), а мастер может
+        // снять его и сам тем же пакетом.
+        allow update: if isOwner(uid) && statusWas('approved')
+          && (
+            (statusNow('approved')
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['about']))
+            || (ownFields() && photoHasConsent() && statusNow('pending') && readyToApply())
+          );
+
         // Решение модератора. Данные анкеты он не переписывает — только
         // выносит вердикт.
         allow update: if isAdmin()
@@ -374,6 +388,8 @@ service cloud.firestore {
     //   Поиск мастера ──(клиент выбрал предложение)──> В работе
     //   В работе ──(мастер закончил)──> Ждёт подтверждения
     //   Ждёт подтверждения ──(клиент подтвердил)──> Завершена
+    //   Ждёт подтверждения ──(клиент: «ещё не готово»)──> В работе
+    //   В работе ──(мастер отказался; статус меняет сервер)──> Поиск мастера
     //   любой незакрытый статус ──(клиент)──> Отменена
     //
     // Цену предлагают в подколлекции offers, по документу на мастера, — там же
@@ -415,9 +431,25 @@ service cloud.firestore {
       // Кроме телефонов клиент не может подсунуть и другие серверные поля:
       // firstOfferAt — метрика скорости откликов, closedByAdmin с причиной —
       // след принудительного закрытия; их пишут только функции.
+      //
+      // Время создания — только серверное: по нему сортируется лента мастера
+      // и считаются окна сверки и напоминаний, и заявка «из будущего» висела
+      // бы наверху у всех вечно. Тексты ограничены по длине: заголовок уходит
+      // пушем всем мастерам города как есть, а комментарий и адрес читают
+      // все, кому открыта заявка, — мегабайт мусора здесь никому не нужен.
       allow create: if authed()
         && notBlockedClient()
         && request.resource.data.clientId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.comment is string
+        && request.resource.data.comment.size() <= 1000
+        && request.resource.data.address is string
+        && request.resource.data.address.size() <= 200
+        && request.resource.data.clientName is string
+        && request.resource.data.clientName.size() <= 100
         && request.resource.data.status == 'Поиск мастера'
         && request.resource.data.masterId == null
         && request.resource.data.agreedPrice == null
@@ -426,7 +458,7 @@ service cloud.firestore {
         && validCategory(request.resource.data.category)
         && !request.resource.data.keys().hasAny([
           'masterPhone', 'clientPhone', 'masterBanks', 'masterAcceptsCash',
-          'paymentMethod', 'paidAt', 'paymentReceivedAt',
+          'paymentMethod', 'paidAt', 'paymentReceivedAt', 'masterDeclinedAt',
           'firstOfferAt', 'closedByAdmin', 'adminCloseReason',
         ])
         && (request.resource.data.get('preferredMasterId', null) == null
@@ -538,6 +570,14 @@ service cloud.firestore {
           && unchanged('masterId') && unchanged('agreedPrice');
       }
 
+      // Мастер отметил «сделано», а клиент не согласен: работа возвращается
+      // тому же исполнителю, а не закрывается. Без этого пути ложное
+      // «выполнено» запирало бы клиента — подтвердить или ничего.
+      function clientReturnsToWork() {
+        return statusIs('Ждёт подтверждения', 'В работе')
+          && unchanged('masterId') && unchanged('agreedPrice');
+      }
+
       function clientCancels() {
         return request.resource.data.status == 'Отменена'
           && resource.data.status in ['Поиск мастера', 'Есть предложения', 'В работе']
@@ -578,7 +618,7 @@ service cloud.firestore {
 
       allow update: if isClient() && clientFields() && completedAtUntouchedOrNow()
         && paymentMethodUntouchedOrChosen() && paidAtUntouchedOrNow()
-        && (clientPicksOffer() || clientConfirms() || clientCancels()
+        && (clientPicksOffer() || clientConfirms() || clientReturnsToWork() || clientCancels()
           || clientMarksReviewed() || clientAttachesPhoto() || clientMarksPayment()
           || clientAcceptsLegacy() || clientDeclinesLegacy());
 
@@ -590,6 +630,7 @@ service cloud.firestore {
       function masterFields() {
         return changed().hasOnly([
           'status', 'price', 'priceStatus', 'priceHistory', 'masterName', 'paymentReceivedAt',
+          'masterDeclinedAt',
         ]);
       }
 
@@ -614,6 +655,19 @@ service cloud.firestore {
           && changed().hasOnly(['paymentReceivedAt']);
       }
 
+      // Отказ от взятой заявки. Снять себя мастер не может — masterId и
+      // телефоны сторон пишет только сервер, — поэтому он ставит отметку, а
+      // сервер возвращает заявку в поиск, стирает контакты и сообщает
+      // клиенту (functions/src/orderDecline.ts). Только у работы в процессе:
+      // сданную работу бросать поздно — у неё уже приёмка.
+      function masterDeclines() {
+        return isAssignedMaster()
+          && resource.data.status == 'В работе'
+          && changed().hasOnly(['masterDeclinedAt'])
+          && resource.data.get('masterDeclinedAt', null) == null
+          && request.resource.data.masterDeclinedAt == request.time;
+      }
+
       // Пересмотр цены у старой заявки, где предложение лежит в ней самой
       function masterReoffersLegacy() {
         return isAssignedMaster()
@@ -624,7 +678,8 @@ service cloud.firestore {
       }
 
       allow update: if masterFields() && receivedAtUntouchedOrNow()
-        && (masterFinishes() || masterReoffersLegacy() || masterMarksReceived());
+        && (masterFinishes() || masterReoffersLegacy() || masterMarksReceived()
+          || masterDeclines());
 
       // ---------- предложения мастеров ----------
       //
@@ -645,6 +700,15 @@ service cloud.firestore {
             && order().get('masterId', null) == null;
         }
 
+        // Клиент ведёт в профиле список мастеров, от которых не хочет
+        // предложений; список читается прямо здесь. Профиль клиента для
+        // остальных закрыт — get() в правилах его правил чтения не касается.
+        function blockedByClient() {
+          let client = /databases/$(database)/documents/users/$(order().clientId);
+          return exists(client)
+            && request.auth.uid in get(client).data.get('blockedMasters', []);
+        }
+
         // Видят клиент заявки, сам мастер и модератор (для разбора споров).
         // Другие мастера — нет: знать чужие цены до собственного предложения
         // им не нужно.
@@ -656,6 +720,7 @@ service cloud.firestore {
         allow create, update: if isVerifiedMaster()
           && request.auth.uid == masterId
           && orderIsOpen()
+          && !blockedByClient()
           && request.resource.data.masterId == masterId
           && request.resource.data.status == 'pending'
           && validPrice(request.resource.data.price)
@@ -740,27 +805,55 @@ service cloud.firestore {
         || (authed() && resource.data.clientId == request.auth.uid);
     }
 
-    // Жалобы на отзывы.
+    // Жалобы.
     //
-    // Подаёт мастер, у которого отзыв на странице; вердикт («решена» /
+    // Три вида: мастер — на отзыв в своей анкете, клиент — на мастера своей
+    // заявки или на его сообщение в её чате. Вердикт («решена» /
     // «отклонена») выносит только сервер по вызову модератора — руками
     // статус не меняет никто, включая самого модератора: иначе журнал
     // фиксировал бы не все решения.
     match /complaints/{complaintId} {
-      allow create: if authed()
-        && request.resource.data.byUid == request.auth.uid
-        && request.resource.data.subjectType == 'review'
-        && request.resource.data.masterId is string
-        && request.resource.data.orderId is string
-        && request.resource.data.reviewClientId is string
-        && request.resource.data.text is string
-        && request.resource.data.text.size() >= 1
-        && request.resource.data.text.size() <= 1000
-        && request.resource.data.status == 'новая'
-        && request.resource.data.createdAt == request.time
-        && !request.resource.data.keys().hasAny([
-          'resolvedAt', 'resolvedBy', 'resolutionNote',
-        ]);
+
+      // Общее для любой жалобы: от своего имени, с текстом, новая, серверным
+      // временем и без вердикта
+      function complaintBase() {
+        return request.resource.data.byUid == request.auth.uid
+          && request.resource.data.masterId is string
+          && request.resource.data.orderId is string
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.status == 'новая'
+          && request.resource.data.createdAt == request.time
+          && !request.resource.data.keys().hasAny([
+            'resolvedAt', 'resolvedBy', 'resolutionNote',
+          ]);
+      }
+
+      // Мастер жалуется на отзыв в собственной анкете — не в чужой
+      function reviewComplaint() {
+        return request.resource.data.subjectType == 'review'
+          && request.resource.data.masterId == request.auth.uid
+          && request.resource.data.reviewClientId is string;
+      }
+
+      // Клиент жалуется на мастера своей заявки или на его сообщение в её
+      // чате. Заявка сверяется: жаловаться на мастера, с которым не имел
+      // дела, нельзя — иначе жалоба стала бы орудием травли.
+      function complainedOrder() {
+        return get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data;
+      }
+
+      function partyComplaint() {
+        return request.resource.data.subjectType in ['master', 'message']
+          && complainedOrder().clientId == request.auth.uid
+          && complainedOrder().get('masterId', null) == request.resource.data.masterId
+          && (request.resource.data.subjectType == 'master'
+            || request.resource.data.messageId is string);
+      }
+
+      allow create: if authed() && complaintBase()
+        && (reviewComplaint() || partyComplaint());
 
       // Автор видит свои жалобы (запрос обязан фильтровать по byUid),
       // модератор — все

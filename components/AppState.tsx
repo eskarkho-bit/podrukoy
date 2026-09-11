@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 import {
   addDoc,
+  arrayRemove,
   arrayUnion,
+  deleteField,
   collection,
   deleteDoc,
   doc,
@@ -32,6 +34,7 @@ import { currentConsents, takePendingConsent, type Consents } from './legal';
 import { takeSignupDraft } from './signupDraft';
 import { OrderDraft } from './ActionSheet';
 import { getPushToken } from './notifications';
+import { fileComplaint } from './complaints';
 import { exportUserData } from './dataExport';
 import { deleteVerificationPhoto, uploadChatPhoto, uploadOrderPhoto } from './photoUpload';
 
@@ -96,6 +99,11 @@ type AppState = {
   // отметка в профиле — способ попросить его молчать
   remindersOff: boolean;
   setRemindersOff: (off: boolean) => void;
+  // Выключатель пушей. Слушает его сервер на единственном пути отправки —
+  // токены остаются в профиле, поэтому «включить обратно» не требует
+  // перерегистрации устройства
+  pushOff: boolean;
+  setPushOff: (off: boolean) => void;
   // Блокировка модерацией: создание заявок закрыто правилами, а флаг из
   // профиля позволяет сказать об этом до попытки, вместе с причиной
   blocked: boolean;
@@ -109,12 +117,24 @@ type AppState = {
   clearOpenThreadRequest: () => void;
   createOrder: (draft: OrderDraft) => void;
   confirmOrderDone: (orderId: string) => void;
+  // Мастер отметил «сделано», а клиент не согласен — работа возвращается
+  // мастеру, а не закрывается
+  returnOrderToWork: (orderId: string) => void;
   // Расчёт напрямую между сторонами: способ и отметка «оплатил»
   choosePaymentMethod: (orderId: string, method: PaymentMethod) => void;
   markOrderPaid: (orderId: string) => void;
   cancelOrder: (orderId: string) => void;
   // Выбор предложения — он же назначение мастера
   acceptOffer: (orderId: string, masterId: string) => void;
+  // Жалобы клиента: на мастера своей заявки и на его сообщение в чате.
+  // true — жалоба принята, модерация её увидит
+  reportMaster: (orderId: string, text: string) => Promise<boolean>;
+  reportMessage: (orderId: string, messageId: string, text: string) => Promise<boolean>;
+  // Блокировка мастера клиентом: его предложения не показываются и правила
+  // их не пропускают, сервер не зовёт его к новым заявкам этого клиента
+  blockedMasters: { id: string; name: string }[];
+  blockMaster: (masterId: string, name: string) => void;
+  unblockMaster: (masterId: string) => void;
   submitReview: (orderId: string, stars: number, text: string) => void;
   // Заявки, созданные до появления offers
   acceptPrice: (orderId: string) => void;
@@ -191,6 +211,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // Отказ от напоминаний о повторяемых работах. Отсутствие поля — согласие:
   // так напоминания работают и у тех, кто регистрировался до их появления
   const [remindersOff, setRemindersOffLocal] = useState(false);
+  // Выключатель пушей: тоже «отсутствие поля — согласие»
+  const [pushOff, setPushOffLocal] = useState(false);
+  // Кого клиент заблокировал: идентификаторы для правил и сервера, имена —
+  // для списка в профиле
+  const [blockedMasterIds, setBlockedMasterIds] = useState<string[]>([]);
+  const [blockedMasterNames, setBlockedMasterNames] = useState<Record<string, string>>({});
   const [blocked, setBlockedLocal] = useState(false);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
   // Открытая переписка — это вложенный экран поверх вкладки «Сообщения»
@@ -242,6 +268,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setCityLocal('');
       setConsentsLocal(null);
       setRemindersOffLocal(false);
+      setPushOffLocal(false);
+      setBlockedMasterIds([]);
+      setBlockedMasterNames({});
       deleting.current = false;
       return;
     }
@@ -281,6 +310,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setConsentsLocal((d.consents ?? {}) as Consents);
         setThemeModeLocal(d.themeMode === 'dark' ? 'dark' : 'light');
         setRemindersOffLocal(d.remindersOff === true);
+        setPushOffLocal(d.pushOff === true);
+        setBlockedMasterIds(
+          Array.isArray(d.blockedMasters) ? d.blockedMasters.map((id: unknown) => String(id)) : [],
+        );
+        setBlockedMasterNames(
+          d.blockedMasterNames && typeof d.blockedMasterNames === 'object'
+            ? (d.blockedMasterNames as Record<string, string>)
+            : {},
+        );
         setBlockedLocal(d.blocked === true);
         setBlockedReason(typeof d.blockedReason === 'string' ? d.blockedReason : null);
       },
@@ -805,6 +843,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }).catch(failed('Не удалось подтвердить выполнение. Проверьте связь'));
   };
 
+  // Клиент не согласен с «выполнено»: работа возвращается тому же мастеру.
+  // Иначе ложное «сделано» запирало бы клиента — подтвердить или ничего.
+  // Сообщение в чат — после записи: рассказывать мастеру о возврате,
+  // который не прошёл, нельзя.
+  const returnOrderToWork = async (orderId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order || order.status !== 'Ждёт подтверждения') return;
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { status: 'В работе' });
+    } catch (e) {
+      failed('Не удалось вернуть заявку в работу. Проверьте связь')(e);
+      return;
+    }
+    await sendMessage(orderId, 'Работа ещё не закончена — прошу доделать.');
+  };
+
   // ---------- расчёт напрямую ----------
 
   // Способ выбирает клиент после выбора мастера и может передумать, пока
@@ -895,6 +949,88 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     const ref = userDoc();
     if (ref) updateDoc(ref, { remindersOff: off }).catch(() => {});
   };
+
+  // Ошибку не глотаем: тумблер, который «выключил», а пуши идут дальше, —
+  // хуже, чем тумблер, который честно не сработал
+  const setPushOff = (off: boolean) => {
+    setPushOffLocal(off);
+    const ref = userDoc();
+    if (ref) {
+      updateDoc(ref, { pushOff: off }).catch((e) => {
+        setPushOffLocal(!off);
+        failed('Не удалось сохранить настройку уведомлений. Проверьте связь')(e);
+      });
+    }
+  };
+
+  // ---------- жалобы и блокировка ----------
+
+  // Жалоба клиента — на мастера заявки или на его сообщение. Правила сверяют
+  // заявку: жаловаться можно только на того, с кем имел дело
+  const reportMaster = async (orderId: string, text: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order?.masterId || !text.trim()) return false;
+    try {
+      await fileComplaint({ subjectType: 'master', orderId, masterId: order.masterId, text });
+      return true;
+    } catch (e) {
+      failed('Жалоба не отправлена. Проверьте связь')(e);
+      return false;
+    }
+  };
+
+  const reportMessage = async (orderId: string, messageId: string, text: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order?.masterId || !text.trim()) return false;
+    try {
+      await fileComplaint({
+        subjectType: 'message',
+        orderId,
+        masterId: order.masterId,
+        messageId,
+        text,
+      });
+      return true;
+    } catch (e) {
+      failed('Жалоба не отправлена. Проверьте связь')(e);
+      return false;
+    }
+  };
+
+  // Блокировка живёт в профиле клиента: массив идентификаторов читают
+  // правила предложений и сервер при рассылке, имена — только этот экран.
+  // Уже идущая заявка не отменяется: блокировка — про будущее
+  const blockMaster = (masterId: string, name: string) => {
+    const ref = userDoc();
+    if (!ref || blockedMasterIds.includes(masterId)) return;
+    setBlockedMasterIds((prev) => [...prev, masterId]);
+    setBlockedMasterNames((prev) => ({ ...prev, [masterId]: name }));
+    updateDoc(ref, {
+      blockedMasters: arrayUnion(masterId),
+      [`blockedMasterNames.${masterId}`]: name,
+    }).catch((e) => {
+      setBlockedMasterIds((prev) => prev.filter((id) => id !== masterId));
+      failed('Не удалось заблокировать мастера. Проверьте связь')(e);
+    });
+  };
+
+  const unblockMaster = (masterId: string) => {
+    const ref = userDoc();
+    if (!ref) return;
+    setBlockedMasterIds((prev) => prev.filter((id) => id !== masterId));
+    updateDoc(ref, {
+      blockedMasters: arrayRemove(masterId),
+      [`blockedMasterNames.${masterId}`]: deleteField(),
+    }).catch((e) => {
+      setBlockedMasterIds((prev) => (prev.includes(masterId) ? prev : [...prev, masterId]));
+      failed('Не удалось снять блокировку. Проверьте связь')(e);
+    });
+  };
+
+  const blockedMasters = blockedMasterIds.map((id) => ({
+    id,
+    name: blockedMasterNames[id] ?? 'Мастер',
+  }));
 
   const markThreadRead = (threadId: string) => {
     if (!uid) return;
@@ -1139,7 +1275,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // Предложения и профили мастеров живут отдельными подписками — экрану они
   // нужны внутри заявки, поэтому сшиваем их здесь, а не в UI
   const ordersWithOffers: Order[] = orders.map((o) => {
-    const list = offersByOrder[o.id];
+    // Предложения заблокированных мастеров правила уже не пропускают; те,
+    // что успели прийти до блокировки, прячем здесь
+    const list = offersByOrder[o.id]?.filter((offer) => !blockedMasterIds.includes(offer.masterId));
     if (!list?.length) return o;
     return {
       ...o,
@@ -1185,9 +1323,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     dismissNotice: () => setNotice(null),
     setUserName,
     remindersOff,
+    pushOff,
     blocked,
     blockedReason,
     setRemindersOff,
+    setPushOff,
     setActiveAddress,
     setCity,
     setChatOpen,
@@ -1196,10 +1336,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setAdminOpen,
     createOrder,
     confirmOrderDone,
+    returnOrderToWork,
     choosePaymentMethod,
     markOrderPaid,
     cancelOrder,
     acceptOffer,
+    reportMaster,
+    reportMessage,
+    blockedMasters,
+    blockMaster,
+    unblockMaster,
     submitReview,
     acceptPrice,
     declinePrice,

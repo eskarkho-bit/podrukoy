@@ -383,6 +383,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                       placeholder="Расскажите, что конкретно нужно сделать…"
                       placeholderTextColor={t.textMuted}
                       multiline
+                      maxLength={1000}
                     />
                   </Animated.View>
                 </>

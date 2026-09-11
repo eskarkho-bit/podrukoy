@@ -217,9 +217,11 @@ describe('ComplaintCard', () => {
   const COMPLAINT: Complaint = {
     id: 'c1',
     byUid: 'master1',
+    subjectType: 'review',
     masterId: 'master1',
     orderId: 'order1',
     reviewClientId: 'client1',
+    messageId: null,
     text: 'Отзыв не о моей работе',
     status: 'новая',
     createdMs: Date.now(),
@@ -228,7 +230,13 @@ describe('ComplaintCard', () => {
   test('скрытие отзыва требует причину', async () => {
     const onHide = jest.fn();
     const view = await render(
-      <ComplaintCard complaint={COMPLAINT} busy={false} onHide={onHide} onDismiss={noop} />,
+      <ComplaintCard
+        complaint={COMPLAINT}
+        busy={false}
+        onHide={onHide}
+        onResolve={noop}
+        onDismiss={noop}
+      />,
     );
 
     await fireEvent.press(view.getByText('Скрыть отзыв'));
@@ -247,7 +255,13 @@ describe('ComplaintCard', () => {
   test('отклонение требует записку автору', async () => {
     const onDismiss = jest.fn();
     const view = await render(
-      <ComplaintCard complaint={COMPLAINT} busy={false} onHide={noop} onDismiss={onDismiss} />,
+      <ComplaintCard
+        complaint={COMPLAINT}
+        busy={false}
+        onHide={noop}
+        onResolve={noop}
+        onDismiss={onDismiss}
+      />,
     );
 
     await fireEvent.press(view.getByText('Отклонить'));
@@ -257,6 +271,38 @@ describe('ComplaintCard', () => {
     );
     await fireEvent.press(view.getAllByText('Отклонить')[0]);
     expect(onDismiss).toHaveBeenCalledWith('Отзыв по делу');
+  });
+
+  // Жалоба клиента на мастера: скрывать нечего, исход — «решена» с запиской
+  test('жалоба клиента закрывается как решённая с запиской о мерах', async () => {
+    const onResolve = jest.fn();
+    const onHide = jest.fn();
+    const view = await render(
+      <ComplaintCard
+        complaint={{
+          ...COMPLAINT,
+          byUid: 'client1',
+          subjectType: 'master',
+          reviewClientId: '',
+          text: 'Пришёл не вовремя',
+        }}
+        busy={false}
+        onHide={onHide}
+        onResolve={onResolve}
+        onDismiss={noop}
+      />,
+    );
+
+    expect(view.getByText(/Клиент client.*мастер master/)).toBeTruthy();
+    expect(view.queryByText('Скрыть отзыв')).toBeNull();
+    await fireEvent.press(view.getByText('Решена'));
+    await fireEvent.changeText(
+      view.getByPlaceholderText('Что сделано — уйдёт автору жалобы'),
+      'Мастеру вынесено предупреждение',
+    );
+    await fireEvent.press(view.getByText('Закрыть как решённую'));
+    expect(onResolve).toHaveBeenCalledWith('Мастеру вынесено предупреждение');
+    expect(onHide).not.toHaveBeenCalled();
   });
 });
 

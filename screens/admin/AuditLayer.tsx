@@ -21,6 +21,8 @@ const ACTION_LABELS: Record<string, string> = {
   'order.confirmed': 'Клиент подтвердил',
   'order.cancelled': 'Заявка отменена',
   'order.reopened': 'Заявка вернулась в поиск',
+  'order.returned_to_work': 'Клиент вернул работу мастеру',
+  'order.master_declined': 'Мастер отказался от заявки',
   'order.force_closed': 'Закрыта модерацией',
   'order.force_cancelled': 'Отменена модерацией',
   'order.contacts_shared': 'Телефоны открыты сторонам',

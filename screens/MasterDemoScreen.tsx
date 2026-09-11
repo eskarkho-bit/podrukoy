@@ -380,6 +380,7 @@ export function MasterDemoScreen() {
             onWithdrawOffer={() => withdrawOffer(openJob.id)}
             onOfferLegacy={(price) => sendOffer(openJob.id, price)}
             onFinish={() => finishJob(openJob.id)}
+            onDecline={noop}
             onPaymentReceived={noop}
             onSend={(text) => pushMessage(openJob.id, text)}
             onSendImage={(uri, caption) => pushImage(openJob.id, uri, caption)}

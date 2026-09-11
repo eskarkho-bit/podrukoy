@@ -1,4 +1,5 @@
-import { setGlobalOptions } from 'firebase-functions/v2';
+// Первым — настройки: они действуют только на функции, объявленные после
+import './options';
 import { logger } from 'firebase-functions';
 import {
   onDocumentCreated,
@@ -11,6 +12,7 @@ import { pushTo, pushToAdmins } from './push';
 import { notifyMastersAbout } from './orderPush';
 import { shareOrderContacts } from './orderContacts';
 import { notePaymentMarks } from './orderPayment';
+import { handleMasterDecline } from './orderDecline';
 import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
 import { recomputeRating, recountCompletedOrders } from './masterStats';
@@ -37,10 +39,6 @@ export { dashboardDaily } from './dashboard';
 // Требует тарифа Blaze: на бесплатном Spark функции не разворачиваются.
 
 initializeApp();
-
-// Потолок инстансов — страховка от неожиданного счёта: всплеск заявок не
-// должен превращаться в неограниченную рассылку
-setGlobalOptions({ maxInstances: 10 });
 
 const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
 
@@ -160,11 +158,32 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
   // Отметки о расчёте («оплатил», «получил») приходят тем же событием, но
   // статус при этом обычно не меняется — смотрим на них до проверки статуса
   await notePaymentMarks(event.params.orderId, before, after, event.id);
+  // Отказ мастера — тоже отметка без смены статуса: статус меняет уже сервер
+  if (await handleMasterDecline(event.params.orderId, before, after, event.id)) return;
   if (before.status === after.status) return;
 
   const title = String(after.title ?? 'Заявка');
   const clientId = after.clientId as string | undefined;
   const masterId = after.masterId as string | undefined;
+
+  // Клиент не согласился с «выполнено»: работа вернулась тому же мастеру.
+  // Это не выбор исполнителя — контакты уже в заявке, и «Вас выбрали» здесь
+  // было бы ложью, — поэтому ветка стоит до общей карты статусов
+  if (before.status === 'Ждёт подтверждения' && after.status === 'В работе') {
+    await audit({
+      action: 'order.returned_to_work',
+      actor: SYSTEM,
+      subject: { type: 'order', id: event.params.orderId },
+      correlationId: event.id,
+      details: { masterId: masterId ?? null },
+    });
+    if (masterId) {
+      await pushTo([masterId], 'Клиент вернул заявку в работу', `${title}: работа ещё не принята`, {
+        href: '/profile',
+      });
+    }
+    return;
+  }
 
   // Смена статуса — единственный след того, как двигалась сделка. Без него
   // спор «я не соглашался на эту цену» разобрать нечем.
@@ -316,14 +335,23 @@ export const onVerificationChanged = onDocumentWritten(
           hasPhoto: !!after.photoUrl,
           // Причина отказа — свободный текст мастеру, в журнале хватит факта
           rejected: status === 'rejected',
+          // Повторная проверка: одобренный мастер сменил телефон или фото
+          reapplied: wasStatus === 'approved',
         },
       });
     }
 
     if (status === 'pending') {
+      // Повторная проверка после смены телефона или фото: допуск снимается
+      // сервером, даже если приложение не успело, — телефон, на который
+      // клиенты переводят оплату, не должен работать непроверенным
+      const reapplied = wasStatus === 'approved';
+      if (reapplied) {
+        await db.doc(`masters/${masterId}`).set({ verified: false }, { merge: true });
+      }
       const master = await db.doc(`masters/${masterId}`).get();
       const delivered = await pushToAdmins(
-        'Заявка мастера на проверку',
+        reapplied ? 'Повторная проверка мастера' : 'Заявка мастера на проверку',
         `${master.get('name') ?? 'Без имени'} · ${
           (master.get('cities') ?? []).join(', ') || master.get('city') || 'вся республика'
         }`,
@@ -397,13 +425,20 @@ export const onComplaintCreated = onDocumentCreated('complaints/{complaintId}', 
     subject: { type: 'complaint', id: event.params.complaintId },
     correlationId: event.id,
     details: {
+      subjectType: String(complaint.subjectType ?? 'review'),
       masterId: String(complaint.masterId ?? ''),
       orderId: String(complaint.orderId ?? ''),
     },
   });
 
-  const delivered = await pushToAdmins('Жалоба на отзыв', 'Мастер просит проверить отзыв', {
-    href: '/profile',
-  });
+  // Модератору важно с порога понять, кто на кого жалуется: отзыв разбирают
+  // по анкете, мастера и сообщение — по заявке и переписке
+  const PUSH_BY_TYPE: Record<string, [string, string]> = {
+    review: ['Жалоба на отзыв', 'Мастер просит проверить отзыв'],
+    master: ['Жалоба на мастера', 'Клиент просит разобраться с исполнителем'],
+    message: ['Жалоба на сообщение', 'Клиент просит проверить переписку'],
+  };
+  const [pushTitle, pushBody] = PUSH_BY_TYPE[String(complaint.subjectType)] ?? PUSH_BY_TYPE.review;
+  const delivered = await pushToAdmins(pushTitle, pushBody, { href: '/profile' });
   if (!delivered) logger.warn('Жалоба подана, но модераторов нет — некому разбирать');
 });

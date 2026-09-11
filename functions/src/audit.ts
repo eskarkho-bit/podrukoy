@@ -26,6 +26,10 @@ export type AuditAction =
   | 'order.confirmed'
   | 'order.cancelled'
   | 'order.reopened'
+  // клиент не согласился с «выполнено» — работа вернулась мастеру
+  | 'order.returned_to_work'
+  // мастер отказался от взятой заявки — сервер вернул её в поиск
+  | 'order.master_declined'
   | 'order.repushed'
   | 'order.reminder_sent'
   | 'order.anonymized'

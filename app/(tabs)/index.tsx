@@ -14,6 +14,10 @@ export default function OrdersRoute() {
       onCreateOrder={s.createOrder}
       onCancelOrder={s.cancelOrder}
       onConfirmOrder={s.confirmOrderDone}
+      onReturnOrder={s.returnOrderToWork}
+      onReportMaster={s.reportMaster}
+      onBlockMaster={s.blockMaster}
+      blockedMasterIds={s.blockedMasters.map((m) => m.id)}
       onChoosePaymentMethod={s.choosePaymentMethod}
       onMarkPaid={s.markOrderPaid}
       onAcceptOffer={s.acceptOffer}

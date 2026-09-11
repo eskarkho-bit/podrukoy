@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { OrderSheet } from '../OrderSheet';
 import type { Order } from '../../screens/OrdersScreen';
 
@@ -26,14 +26,26 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function renderSheet(
   order: Order,
-  handlers: Partial<{ onChoose: jest.Mock; onMarkPaid: jest.Mock }> = {},
+  handlers: Partial<{
+    onChoose: jest.Mock;
+    onMarkPaid: jest.Mock;
+    onConfirmDone: jest.Mock;
+    onReturnToWork: jest.Mock;
+    onReportMaster: jest.Mock;
+    onBlockMaster: jest.Mock;
+    masterBlocked: boolean;
+  }> = {},
 ) {
   return render(
     <OrderSheet
       order={order}
       onClose={noop}
       onCancel={noop}
-      onConfirmDone={noop}
+      onConfirmDone={handlers.onConfirmDone ?? noop}
+      onReturnToWork={handlers.onReturnToWork ?? noop}
+      onReportMaster={handlers.onReportMaster ?? (async () => true)}
+      onBlockMaster={handlers.onBlockMaster ?? noop}
+      masterBlocked={handlers.masterBlocked ?? false}
       onChoosePaymentMethod={handlers.onChoose ?? noop}
       onMarkPaid={handlers.onMarkPaid ?? noop}
       onChat={noop}
@@ -114,5 +126,82 @@ describe('оплата напрямую', () => {
     });
 
     expect(view.queryByText(/^Оплата/)).toBeNull();
+  });
+});
+
+// Мастер сказал «сделано». Подтвердить — одно касание; вернуть в работу —
+// два: возврат меняет статус у другого человека.
+describe('приёмка работы', () => {
+  const AWAITING: Order = { ...ORDER, status: 'Ждёт подтверждения', reviewed: false };
+
+  test('подтверждение уходит с первого касания', async () => {
+    const onConfirmDone = jest.fn();
+    const view = await renderSheet(AWAITING, { onConfirmDone });
+
+    await fireEvent.press(view.getByText(/Работа выполнена — подтвердить/));
+    expect(onConfirmDone).toHaveBeenCalledTimes(1);
+  });
+
+  test('«ещё не готово» — только со второго касания', async () => {
+    const onReturnToWork = jest.fn();
+    const view = await renderSheet(AWAITING, { onReturnToWork });
+
+    await fireEvent.press(view.getByText(/Ещё не готово/));
+    expect(onReturnToWork).not.toHaveBeenCalled();
+    expect(view.getByText(/Точно вернуть мастеру/)).toBeTruthy();
+
+    await pause(450);
+    await fireEvent.press(view.getByText(/Точно вернуть мастеру/));
+    expect(onReturnToWork).toHaveBeenCalledTimes(1);
+  });
+
+  test('вне приёмки кнопок подтверждения и возврата нет', async () => {
+    const view = await renderSheet({ ...ORDER, status: 'В работе' });
+
+    expect(view.queryByText(/подтвердить/)).toBeNull();
+    expect(view.queryByText(/Ещё не готово/)).toBeNull();
+  });
+});
+
+// Жалоба и блокировка — на мастера заявки. Жалоба уходит только с текстом,
+// блокировка — со второго касания; у заблокированного вместо кнопки состояние.
+describe('жалоба и блокировка мастера', () => {
+  test('жалоба уходит с текстом и сменяется отметкой', async () => {
+    const onReportMaster = jest.fn(async () => true);
+    const view = await renderSheet(ORDER, { onReportMaster });
+
+    await fireEvent.press(view.getByText('Пожаловаться на мастера'));
+    const input = view.getByPlaceholderText(/Что случилось/);
+    await fireEvent.changeText(input, 'Пришёл не вовремя');
+    await fireEvent.press(view.getByText('Отправить жалобу'));
+
+    await waitFor(() => expect(onReportMaster).toHaveBeenCalledWith('Пришёл не вовремя'));
+    await waitFor(() => expect(view.getByText('Жалоба отправлена')).toBeTruthy());
+  });
+
+  test('блокировка — только со второго касания', async () => {
+    const onBlockMaster = jest.fn();
+    const view = await renderSheet(ORDER, { onBlockMaster });
+
+    await fireEvent.press(view.getByText('Заблокировать мастера'));
+    expect(onBlockMaster).not.toHaveBeenCalled();
+    await pause(450);
+    await fireEvent.press(view.getByText('Точно заблокировать?'));
+    expect(onBlockMaster).toHaveBeenCalledTimes(1);
+  });
+
+  test('заблокированный мастер — состояние вместо кнопки; пока мастера нет — ничего', async () => {
+    const blockedView = await renderSheet(ORDER, { masterBlocked: true });
+    expect(blockedView.getByText('Мастер заблокирован')).toBeTruthy();
+    expect(blockedView.queryByText('Заблокировать мастера')).toBeNull();
+
+    const openView = await renderSheet({
+      ...ORDER,
+      status: 'Поиск мастера',
+      masterId: null,
+      masterName: null,
+      agreedPrice: null,
+    });
+    expect(openView.queryByText('Пожаловаться на мастера')).toBeNull();
   });
 });

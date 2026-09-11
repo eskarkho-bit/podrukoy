@@ -42,6 +42,7 @@ const screen = (over: Partial<Parameters<typeof MessagesScreen>[0]> = {}) => (
     onOpenThread={noop}
     onSendMessage={noop}
     onSendImage={async () => {}}
+    onReportMessage={async () => true}
     onThreadOpenChange={noop}
     {...over}
   />
@@ -91,5 +92,23 @@ describe('MessagesScreen', () => {
     await waitFor(() =>
       expect(onSendImage).toHaveBeenCalledWith('order-1', 'file://local.jpg', 'вот розетка'),
     );
+  });
+  // Пожаловаться можно только на сообщение собеседника и только текстом:
+  // удержание пузыря раскрывает поле, отправка уходит с id сообщения
+  test('удержание сообщения мастера открывает жалобу, она уходит с текстом', async () => {
+    const onReportMessage = jest.fn(async () => true);
+    const view = await render(screen({ openRequestId: 'order-2', onReportMessage }));
+
+    expect(view.getByText(/Удерживайте сообщение мастера/)).toBeTruthy();
+    const bubble = view.getAllByText('Буду к шести')[1];
+    await fireEvent(bubble, 'longPress');
+    await waitFor(() => expect(view.getByText('Жалоба на сообщение')).toBeTruthy());
+
+    fireEvent.changeText(view.getByPlaceholderText(/Что не так/), 'Грубит');
+    await waitFor(() => expect(view.getByDisplayValue('Грубит')).toBeTruthy());
+    await fireEvent.press(view.getByText('Отправить'));
+
+    await waitFor(() => expect(onReportMessage).toHaveBeenCalledWith('order-2', 'm1', 'Грубит'));
+    await waitFor(() => expect(view.getByText(/жалоба отправлена/)).toBeTruthy());
   });
 });

@@ -57,6 +57,8 @@ const order = (patch = {}) => ({
   agreedPrice: null,
   agreedAt: null,
   reviewed: false,
+  // Правила принимают только серверное время создания
+  createdAt: serverTimestamp(),
   ...patch,
 });
 
@@ -213,6 +215,33 @@ describe('Создание заявки', () => {
 
   test('нельзя создать заявку от чужого имени', async () => {
     await assertFails(setDoc(doc(as('client1'), 'orders/new2'), order({ clientId: 'client2' })));
+  });
+
+  // По createdAt сортируется лента мастера: заявка «из будущего» висела бы
+  // наверху у всех вечно
+  test('время создания — только серверное', async () => {
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/late'), order({ createdAt: new Date('2099-01-01') })),
+    );
+    const noStamp = order();
+    delete noStamp.createdAt;
+    await assertFails(setDoc(doc(as('client1'), 'orders/nostamp'), noStamp));
+  });
+
+  // Заголовок уходит пушем всем мастерам города как есть
+  test('заголовок, комментарий и адрес ограничены по длине', async () => {
+    await assertFails(setDoc(doc(as('client1'), 'orders/t1'), order({ title: 'x'.repeat(201) })));
+    await assertFails(setDoc(doc(as('client1'), 'orders/t2'), order({ title: '' })));
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/t3'), order({ comment: 'x'.repeat(1001) })),
+    );
+    await assertFails(setDoc(doc(as('client1'), 'orders/t4'), order({ address: 'x'.repeat(201) })));
+    await assertSucceeds(
+      setDoc(
+        doc(as('client1'), 'orders/t5'),
+        order({ title: 'x'.repeat(200), comment: 'x'.repeat(1000), address: 'x'.repeat(200) }),
+      ),
+    );
   });
 
   test('нельзя создать заявку сразу с мастером и ценой', async () => {
@@ -688,6 +717,25 @@ describe('Завершение работы', () => {
     await assertSucceeds(updateDoc(doc(as('client1'), 'orders/working'), { status: 'Завершена' }));
   });
 
+  // Ложное «выполнено» не должно запирать клиента: работу можно вернуть
+  test('клиент возвращает работу мастеру, если она не сделана', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), { status: 'Ждёт подтверждения' });
+    });
+    await assertSucceeds(updateDoc(doc(as('client1'), 'orders/working'), { status: 'В работе' }));
+  });
+
+  test('вернуть в работу можно только с приёмки, только клиенту и с той же ценой', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), { status: 'Ждёт подтверждения' });
+    });
+    await assertFails(updateDoc(doc(as('master1'), 'orders/working'), { status: 'В работе' }));
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { status: 'В работе', agreedPrice: 100 }),
+    );
+    await assertFails(updateDoc(doc(as('client1'), 'orders/finished'), { status: 'В работе' }));
+  });
+
   // По completedAt мастер видит доход по месяцам. Дата пишется вместе с
   // подтверждением и только серверным временем — иначе историю заработка
   // можно было бы рисовать задним числом.
@@ -862,6 +910,60 @@ describe('Расчёт между сторонами', () => {
     );
     await assertFails(
       setDoc(doc(as('client1'), 'orders/prepaid'), order({ paidAt: serverTimestamp() })),
+    );
+  });
+});
+
+describe('Отказ мастера от заявки', () => {
+  // Снять себя с заявки мастер не может — это делает сервер по отметке,
+  // и правила пускают только саму отметку, только от назначенного мастера
+  test('назначенный мастер ставит отметку об отказе серверным временем', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('master1'), 'orders/working'), { masterDeclinedAt: serverTimestamp() }),
+    );
+  });
+
+  test('произвольное время и попутные поля не проходят', async () => {
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), {
+        masterDeclinedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), {
+        masterDeclinedAt: serverTimestamp(),
+        status: 'Поиск мастера',
+      }),
+    );
+  });
+
+  test('отказаться может только назначенный мастер и только от работы в процессе', async () => {
+    await assertFails(
+      updateDoc(doc(as('master2'), 'orders/working'), { masterDeclinedAt: serverTimestamp() }),
+    );
+    await assertFails(
+      updateDoc(doc(as('client1'), 'orders/working'), { masterDeclinedAt: serverTimestamp() }),
+    );
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), { status: 'Ждёт подтверждения' });
+    });
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), { masterDeclinedAt: serverTimestamp() }),
+    );
+  });
+
+  test('второй раз отметку не поставить, при создании не подсунуть', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), { masterDeclinedAt: new Date() });
+    });
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), { masterDeclinedAt: serverTimestamp() }),
+    );
+    await assertFails(
+      setDoc(
+        doc(as('client1'), 'orders/declined-new'),
+        order({ masterDeclinedAt: serverTimestamp() }),
+      ),
     );
   });
 });
@@ -1370,6 +1472,64 @@ describe('Заявка на проверку', () => {
   });
 });
 
+describe('Правки одобренной анкеты', () => {
+  const app = (uid) => doc(as(uid), 'masters/master1/verification/application');
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'masters/master1/verification/application'), {
+        phone: '79280001122',
+        about: 'Электрик',
+        photoUrl: 'https://example.com/face3.jpg',
+        biometricConsent: '2026-08-21',
+        status: 'approved',
+      });
+    });
+  });
+
+  test('«о себе» меняется без повторной проверки', async () => {
+    await assertSucceeds(updateDoc(app('master1'), { about: 'Электрик, стаж 10 лет' }));
+  });
+
+  // На телефон из анкеты клиенты переводят оплату — подменить его тихо нельзя
+  test('телефон и фото — только вместе с повторной отправкой на проверку', async () => {
+    await assertFails(updateDoc(app('master1'), { phone: '79280009999' }));
+    await assertFails(updateDoc(app('master1'), { photoUrl: 'https://example.com/new.jpg' }));
+    await assertSucceeds(
+      updateDoc(app('master1'), {
+        phone: '79280009999',
+        status: 'pending',
+        appliedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('повторная отправка без фотографии не проходит', async () => {
+    await assertFails(
+      updateDoc(app('master1'), { phone: '79280009999', photoUrl: null, status: 'pending' }),
+    );
+  });
+
+  test('вместе с повторной отправкой мастер снимает себе допуск одним пакетом', async () => {
+    const me = as('master1');
+    const batch = writeBatch(me);
+    batch.update(doc(me, 'masters/master1/verification/application'), {
+      photoUrl: 'https://example.com/new.jpg',
+      status: 'pending',
+      appliedAt: serverTimestamp(),
+    });
+    batch.update(doc(me, 'masters/master1'), { verified: false });
+    await assertSucceeds(batch.commit());
+  });
+
+  test('вердикт себе не подсунуть, чужую анкету не тронуть', async () => {
+    await assertFails(
+      updateDoc(app('master1'), { about: 'x', status: 'approved', reviewedBy: 'master1' }),
+    );
+    await assertFails(updateDoc(app('master2'), { about: 'x' }));
+  });
+});
+
 describe('Согласие на фотографию лица', () => {
   test('без согласия фотографию не записать', async () => {
     await assertFails(
@@ -1871,6 +2031,80 @@ describe('Жалобы на отзывы', () => {
     await assertFails(updateDoc(doc(as('master1'), 'complaints/c1'), { status: 'решена' }));
     await assertFails(updateDoc(doc(as('admin1'), 'complaints/c1'), { status: 'решена' }));
     await assertFails(deleteDoc(doc(as('admin1'), 'complaints/c1')));
+  });
+
+  test('на чужой отзыв мастер не жалуется', async () => {
+    await assertFails(
+      addDoc(collection(as('master2'), 'complaints'), complaint({ byUid: 'master2' })),
+    );
+  });
+
+  // Клиент жалуется на мастера своей заявки или на его сообщение в её чате
+  const clientComplaint = (patch = {}) => ({
+    byUid: 'client1',
+    subjectType: 'master',
+    masterId: 'master1',
+    orderId: 'finished',
+    text: 'Пришёл не вовремя и нагрубил',
+    status: 'новая',
+    createdAt: serverTimestamp(),
+    ...patch,
+  });
+
+  test('клиент жалуется на мастера своей заявки и на его сообщение', async () => {
+    await assertSucceeds(addDoc(collection(as('client1'), 'complaints'), clientComplaint()));
+    await assertSucceeds(
+      addDoc(
+        collection(as('client1'), 'complaints'),
+        clientComplaint({ subjectType: 'message', messageId: 'm1' }),
+      ),
+    );
+  });
+
+  test('на мастера, с которым не имел дела, пожаловаться нельзя', async () => {
+    // не тот мастер, заявка без мастера, не клиент, сообщение без id
+    await assertFails(
+      addDoc(collection(as('client1'), 'complaints'), clientComplaint({ masterId: 'master2' })),
+    );
+    await assertFails(
+      addDoc(collection(as('client1'), 'complaints'), clientComplaint({ orderId: 'open' })),
+    );
+    await assertFails(
+      addDoc(collection(as('master2'), 'complaints'), clientComplaint({ byUid: 'master2' })),
+    );
+    await assertFails(
+      addDoc(collection(as('client1'), 'complaints'), clientComplaint({ subjectType: 'message' })),
+    );
+  });
+});
+
+// Список заблокированных мастеров ведёт сам клиент в своём профиле; правила
+// предложений заглядывают в него, сервер — при рассылке о новой заявке
+describe('Блокировка мастера клиентом', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/client1'), {
+        name: 'Дмитрий',
+        blockedMasters: ['master2'],
+      });
+    });
+  });
+
+  test('заблокированный клиентом мастер не присылает предложение, остальные — да', async () => {
+    await assertFails(
+      setDoc(
+        doc(as('master2'), 'orders/open/offers/master2'),
+        offer({ masterId: 'master2', masterName: 'Пётр' }),
+      ),
+    );
+    await assertSucceeds(setDoc(doc(as('master1'), 'orders/open/offers/master1'), offer()));
+  });
+
+  test('список ведёт только сам клиент', async () => {
+    await assertSucceeds(
+      updateDoc(doc(as('client1'), 'users/client1'), { blockedMasters: ['master2', 'master1'] }),
+    );
+    await assertFails(updateDoc(doc(as('master2'), 'users/client1'), { blockedMasters: [] }));
   });
 });
 

@@ -103,6 +103,13 @@ type Props = {
   onCreateOrder: (draft: OrderDraft) => void;
   onCancelOrder: (orderId: string) => void;
   onConfirmOrder: (orderId: string) => void;
+  // «Ещё не готово»: работа возвращается мастеру вместо подтверждения
+  onReturnOrder: (orderId: string) => void;
+  // Жалоба на мастера заявки и его блокировка; список заблокированных —
+  // чтобы у заблокированного показывать состояние, а не кнопку
+  onReportMaster: (orderId: string, text: string) => Promise<boolean>;
+  onBlockMaster: (masterId: string, name: string) => void;
+  blockedMasterIds: string[];
   // Расчёт напрямую: клиент выбирает способ и отмечает, что оплатил
   onChoosePaymentMethod: (orderId: string, method: PaymentMethod) => void;
   onMarkPaid: (orderId: string) => void;
@@ -132,6 +139,10 @@ export function OrdersScreen({
   onCreateOrder,
   onCancelOrder,
   onConfirmOrder,
+  onReturnOrder,
+  onReportMaster,
+  onBlockMaster,
+  blockedMasterIds,
   onChoosePaymentMethod,
   onMarkPaid,
   onAcceptOffer,
@@ -455,6 +466,14 @@ export function OrdersScreen({
             setOpenedOrderId(null);
           }}
           onConfirmDone={() => onConfirmOrder(openedOrder.id)}
+          onReturnToWork={() => onReturnOrder(openedOrder.id)}
+          onReportMaster={(text) => onReportMaster(openedOrder.id, text)}
+          onBlockMaster={() => {
+            if (openedOrder.masterId) {
+              onBlockMaster(openedOrder.masterId, openedOrder.masterName ?? 'Мастер');
+            }
+          }}
+          masterBlocked={!!openedOrder.masterId && blockedMasterIds.includes(openedOrder.masterId)}
           onChoosePaymentMethod={(method) => onChoosePaymentMethod(openedOrder.id, method)}
           onMarkPaid={() => onMarkPaid(openedOrder.id)}
           onAcceptOffer={(masterId) => onAcceptOffer(openedOrder.id, masterId)}

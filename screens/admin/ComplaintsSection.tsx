@@ -7,26 +7,46 @@ import { counted } from '../../components/format';
 import { dayLabel } from '../../components/masterStats';
 import { useAdminState, type Complaint } from '../../components/AdminState';
 
-// Жалобы на отзывы. Живут во вкладке «Мастера»: исход жалобы — модерация
-// отзыва, тот же тип решения, что вердикт по анкете.
+// Жалобы. Живут во вкладке «Мастера»: у жалобы мастера на отзыв исход —
+// модерация отзыва, тот же тип решения, что вердикт по анкете; у жалобы
+// клиента на мастера или его сообщение — разбор по заявке и переписке
+// (вкладка «Заявки»), а здесь — только вердикт с запиской автору.
 //
 // «Скрыть отзыв» делает два серверных вызова подряд — скрытие и закрытие
 // жалобы: путь скрытия в системе один, и в журнале он один.
 
+const short = (id: string) => `${id.slice(0, 6)}…`;
+
+/** Кто на кого жалуется — одной строкой, по виду жалобы. */
+function complaintMeta(c: Complaint): string {
+  if (c.subjectType === 'message') {
+    return `Клиент ${short(c.byUid)} · сообщение мастера ${short(c.masterId)} · заявка ${short(c.orderId)}`;
+  }
+  if (c.subjectType === 'master') {
+    return `Клиент ${short(c.byUid)} · мастер ${short(c.masterId)} · заявка ${short(c.orderId)}`;
+  }
+  return `Мастер ${short(c.byUid)} · отзыв ${short(c.orderId)}`;
+}
+
 /**
- * Карточка жалобы. Скрытие требует причину (уйдёт мастеру пушем),
- * отклонение — короткую записку автору жалобы, тоже обязательную:
- * «нет» без объяснения обесценило бы сам механизм.
+ * Карточка жалобы. Скрытие отзыва требует причину (уйдёт мастеру пушем),
+ * решение по жалобе клиента — записку о принятых мерах, отклонение —
+ * короткую записку автору, тоже обязательную: «нет» без объяснения
+ * обесценило бы сам механизм.
  */
 export function ComplaintCard({
   complaint,
   busy,
   onHide,
+  onResolve,
   onDismiss,
 }: {
   complaint: Complaint;
   busy: boolean;
+  /** Жалоба на отзыв: скрыть отзыв и закрыть жалобу */
   onHide: (reason: string) => void;
+  /** Жалоба клиента: закрыть как решённую с запиской о мерах */
+  onResolve: (note: string) => void;
   onDismiss: (note: string) => void;
 }) {
   const { mode, colors: t } = useTheme();
@@ -34,11 +54,12 @@ export function ComplaintCard({
   const [mode2, setMode2] = useState<null | 'hide' | 'dismiss'>(null);
   const [reason, setReason] = useState('');
   const resolved = complaint.status !== 'новая';
+  const aboutReview = complaint.subjectType === 'review';
 
   return (
     <View style={styles.card}>
       <Text style={styles.meta}>
-        Мастер {complaint.byUid.slice(0, 6)}… · отзыв {complaint.orderId.slice(0, 6)}…
+        {complaintMeta(complaint)}
         {complaint.createdMs != null ? ` · ${dayLabel(complaint.createdMs)}` : ''}
         {resolved ? ` · ${complaint.status}` : ''}
       </Text>
@@ -47,14 +68,20 @@ export function ComplaintCard({
       {!resolved && mode2 === null && (
         <View style={styles.row}>
           <PressableScale
-            style={[styles.btn, styles.btnDanger, busy && styles.btnDim]}
+            style={[
+              styles.btn,
+              aboutReview ? styles.btnDanger : styles.btnAccent,
+              busy && styles.btnDim,
+            ]}
             onPress={() => {
               setMode2('hide');
               setReason('');
             }}
             disabled={busy}
           >
-            <Text style={styles.btnDangerText}>Скрыть отзыв</Text>
+            <Text style={aboutReview ? styles.btnDangerText : styles.btnAccentText}>
+              {aboutReview ? 'Скрыть отзыв' : 'Решена'}
+            </Text>
           </PressableScale>
           <PressableScale
             style={[styles.btn, styles.btnGhost, busy && styles.btnDim]}
@@ -76,7 +103,11 @@ export function ComplaintCard({
             value={reason}
             onChangeText={setReason}
             placeholder={
-              mode2 === 'hide' ? 'Причина скрытия — уйдёт мастеру' : 'Почему жалоба отклонена'
+              mode2 === 'hide'
+                ? aboutReview
+                  ? 'Причина скрытия — уйдёт мастеру'
+                  : 'Что сделано — уйдёт автору жалобы'
+                : 'Почему жалоба отклонена'
             }
             placeholderTextColor={t.textMuted}
             multiline
@@ -91,13 +122,19 @@ export function ComplaintCard({
                 (!reason.trim() || busy) && styles.btnDim,
               ]}
               onPress={() => {
-                (mode2 === 'hide' ? onHide : onDismiss)(reason.trim());
+                (mode2 === 'hide' ? (aboutReview ? onHide : onResolve) : onDismiss)(reason.trim());
                 setMode2(null);
               }}
               disabled={!reason.trim() || busy}
             >
               <Text style={mode2 === 'hide' ? styles.btnDangerText : styles.btnAccentText}>
-                {busy ? 'Сохраняем…' : mode2 === 'hide' ? 'Скрыть и закрыть жалобу' : 'Отклонить'}
+                {busy
+                  ? 'Сохраняем…'
+                  : mode2 === 'hide'
+                    ? aboutReview
+                      ? 'Скрыть и закрыть жалобу'
+                      : 'Закрыть как решённую'
+                    : 'Отклонить'}
               </Text>
             </PressableScale>
             <PressableScale style={[styles.btn, styles.btnGhost]} onPress={() => setMode2(null)}>
@@ -133,6 +170,14 @@ export function ComplaintsSection() {
     setBusyId(null);
   };
 
+  // Жалоба клиента: меры (блокировка, закрытие заявки) принимаются в своих
+  // вкладках, здесь фиксируется только исход
+  const resolve = async (c: Complaint, note: string) => {
+    setBusyId(c.id);
+    await resolveComplaint(c.id, 'решена', note);
+    setBusyId(null);
+  };
+
   const toggleArchive = async () => {
     setArchive(archive === null ? await loadComplaintsArchive() : null);
   };
@@ -141,8 +186,8 @@ export function ComplaintsSection() {
     <View>
       <Animated.Text entering={FadeInDown.duration(360)} style={styles.sectionTitle}>
         {complaints.length
-          ? `Жалобы на отзывы · ${counted(complaints.length, 'ждёт', 'ждут', 'ждут')} решения`
-          : 'Жалобы на отзывы'}
+          ? `Жалобы · ${counted(complaints.length, 'ждёт', 'ждут', 'ждут')} решения`
+          : 'Жалобы'}
       </Animated.Text>
 
       {complaints.length === 0 && (
@@ -157,6 +202,7 @@ export function ComplaintsSection() {
             complaint={c}
             busy={busyId === c.id}
             onHide={(reason) => hide(c, reason)}
+            onResolve={(note) => resolve(c, note)}
             onDismiss={(note) => dismiss(c, note)}
           />
         </Animated.View>
@@ -174,6 +220,7 @@ export function ComplaintsSection() {
           complaint={c}
           busy={false}
           onHide={() => {}}
+          onResolve={() => {}}
           onDismiss={() => {}}
         />
       ))}

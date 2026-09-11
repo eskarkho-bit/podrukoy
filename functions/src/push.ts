@@ -26,7 +26,16 @@ type ExpoTicket = {
   details?: { error?: string };
 };
 
-/** Токены устройств пользователя. Их может быть несколько — телефон и планшет. */
+/**
+ * Токены устройств пользователя. Их может быть несколько — телефон и планшет.
+ *
+ * Выключатель «Push-уведомления» в профиле — это pushOff в документе
+ * пользователя, и слушается он здесь, на единственном пути отправки: так
+ * молчат все уведомления сразу, а не те, о которых вспомнили. Токены при
+ * этом не стираются — включил обратно, и всё снова приходит без
+ * перерегистрации устройства. Отсутствие поля — согласие, чтобы работало
+ * и у зарегистрировавшихся до появления выключателя.
+ */
 async function tokensFor(uids: string[]): Promise<Map<string, string[]>> {
   const db = getFirestore();
   const unique = [...new Set(uids)].filter(Boolean);
@@ -35,6 +44,7 @@ async function tokensFor(uids: string[]): Promise<Map<string, string[]>> {
   const snaps = await db.getAll(...unique.map((uid) => db.doc(`users/${uid}`)));
   const result = new Map<string, string[]>();
   snaps.forEach((snap) => {
+    if (snap.get('pushOff') === true) return;
     const list = snap.get('pushTokens');
     if (Array.isArray(list) && list.length) result.set(snap.id, list as string[]);
   });

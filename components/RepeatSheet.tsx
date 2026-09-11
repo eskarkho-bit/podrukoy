@@ -216,6 +216,7 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
                   placeholder="Что нужно сделать в этот раз…"
                   placeholderTextColor={t.textMuted}
                   multiline
+                  maxLength={1000}
                 />
               </Animated.View>
 

@@ -44,6 +44,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -818,6 +819,23 @@ export function MasterScreen({ open, onClose }: Props) {
     pushMessage(jobId, 'Работа выполнена. Спасибо, что выбрали меня!');
   };
 
+  // Отказ от взятой заявки. Снять себя мастер не может — masterId и телефоны
+  // сторон пишет только сервер, — поэтому ставится отметка, а сервер
+  // возвращает заявку в поиск и сообщает клиенту (orderDecline.ts).
+  // Сообщение в чат — до отметки: после возврата мастер уже не участник
+  // заявки, и правила его туда не пустят.
+  const declineJob = async (jobId: string) => {
+    pushMessage(jobId, 'Вынужден отказаться от заявки — простите за неудобство.');
+    try {
+      await updateDoc(doc(db, 'orders', jobId), { masterDeclinedAt: serverTimestamp() });
+    } catch (e) {
+      console.warn('Не удалось отказаться от заявки:', e);
+      showNotice(firestoreErrorText(e, 'Не удалось отказаться от заявки. Проверьте связь'));
+      return;
+    }
+    handleBackFromJob();
+  };
+
   // «Оплату получил» — один раз, серверным временем; отметка не снимается.
   // От отметки клиента не зависит: наличные в приложении отмечают не все
   const confirmPaymentReceived = (jobId: string) => {
@@ -916,6 +934,7 @@ export function MasterScreen({ open, onClose }: Props) {
               onComplain={async (review, text) => {
                 try {
                   await fileComplaint({
+                    subjectType: 'review',
                     orderId: review.id,
                     reviewClientId: review.clientId,
                     text,
@@ -953,6 +972,7 @@ export function MasterScreen({ open, onClose }: Props) {
                   onWithdrawOffer={() => withdrawOffer(openJob.id)}
                   onOfferLegacy={(price) => offerPriceLegacy(openJob.id, price)}
                   onFinish={() => finishJob(openJob.id)}
+                  onDecline={() => declineJob(openJob.id)}
                   onPaymentReceived={() => confirmPaymentReceived(openJob.id)}
                   onSend={(text) => sendMessage(openJob.id, text)}
                   onSendImage={(uri, caption) => pushImage(openJob.id, uri, caption)}
@@ -1110,7 +1130,54 @@ function MasterApplicationScreen({
         { merge: true },
       );
 
-      if (!verified) {
+      if (verified) {
+        // Проверенные данные меняются только через повторную проверку: на
+        // этот телефон клиенты переводят оплату, и подменить его тихо нельзя.
+        // Допуск снимается тут же одним пакетом с анкетой — и ещё раз на
+        // сервере, если приложение не успело. «О себе» проверке не подлежит.
+        const digits = phone.replace(/\D/g, '');
+        const appRef = doc(db, 'masters', myUid, 'verification', 'application');
+        if (needsRecheck) {
+          if (!phoneValid(phone)) {
+            setError('Телефон нужен в виде 11 цифр — по нему с вами свяжутся');
+            setLoading(false);
+            return;
+          }
+          let photoUrl = application.photoUrl;
+          if (photoUri && photoUri !== application.photoUrl) {
+            try {
+              photoUrl = await uploadVerificationPhoto(myUid, photoUri);
+            } catch (e) {
+              console.warn('Фото для проверки не загрузилось:', e);
+              setError(
+                'Фото не загрузилось, анкета не отправлена на проверку. Проверьте связь и попробуйте ещё раз',
+              );
+              setLoading(false);
+              return;
+            }
+          }
+          if (!photoUrl) {
+            setError('Сделайте фотографию лица — без неё заявку не проверить');
+            setLoading(false);
+            return;
+          }
+          const batch = writeBatch(db);
+          batch.update(appRef, {
+            phone: digits,
+            about: about.trim(),
+            photoUrl,
+            biometricConsent: faceConsent
+              ? LEGAL_DOCS.biometrics.version
+              : (application.biometricConsent ?? null),
+            status: 'pending',
+            appliedAt: serverTimestamp(),
+          });
+          batch.update(doc(db, 'masters', myUid), { verified: false });
+          await batch.commit();
+        } else if (about.trim() !== application.about) {
+          await updateDoc(appRef, { about: about.trim() });
+        }
+      } else {
         // Фото уезжает в Storage под путь, закрытый для всех, кроме
         // владельца и модератора. Загрузка может не удаться — например,
         // Storage ещё не подключён или пропала связь, — и это не повод
@@ -1209,10 +1276,18 @@ function MasterApplicationScreen({
     );
   }
 
+  // У проверенного мастера смена телефона или фото — это повторная проверка,
+  // и кнопка обязана сказать об этом до нажатия
+  const needsRecheck =
+    verified &&
+    (phone.replace(/\D/g, '') !== application.phone ||
+      (!!photoUri && photoUri !== application.photoUrl));
   const primaryLabel = loading
     ? 'Сохраняем…'
     : verified
-      ? 'Сохранить'
+      ? needsRecheck
+        ? 'Сохранить и отправить на проверку'
+        : 'Сохранить'
       : rejected
         ? 'Отправить снова'
         : 'Отправить на проверку';
@@ -1378,9 +1453,22 @@ function MasterApplicationScreen({
           </View>
           <Text style={styles.fieldHint}>Можно не указывать — в профиле будет «не указано»</Text>
 
-          {/* Всё, что ниже, нужно только для проверки: у проверенного мастера
-              эти данные уже приняты и больше не спрашиваются */}
-          {!verified && (
+          {/* Телефон, «о себе» и фото — то, что проверяет модератор. У
+              проверенного мастера они тоже редактируются: телефон — ещё и
+              номер для перевода оплаты, запирать его навсегда нельзя. Но
+              смена телефона или фото отправляет анкету на повторную проверку,
+              и предупреждение об этом стоит до полей. */}
+          {verified && (
+            <View style={styles.recheckCard}>
+              <Text style={styles.recheckTitle}>Проверенные данные</Text>
+              <Text style={styles.recheckText}>
+                Смена телефона или фотографии отправит анкету на повторную проверку: до одобрения
+                лента заявок закроется, а неотвеченные предложения снимутся. Текущая работа
+                останется у вас. «О себе» меняется без проверки.
+              </Text>
+            </View>
+          )}
+          {
             <>
               <Text style={[styles.fieldLabel, styles.fieldLabelGap]}>Телефон</Text>
               <TextInput
@@ -1464,7 +1552,7 @@ function MasterApplicationScreen({
                 </View>
               </View>
             </>
-          )}
+          }
 
           {error && (
             <Animated.Text entering={FadeInDown.duration(240)} style={styles.fieldError}>
@@ -2420,6 +2508,7 @@ export function JobDetail({
   onWithdrawOffer,
   onOfferLegacy,
   onFinish,
+  onDecline,
   onPaymentReceived,
   onSend,
   onSendImage,
@@ -2431,6 +2520,8 @@ export function JobDetail({
   onWithdrawOffer: () => void;
   onOfferLegacy: (price: number) => void;
   onFinish: () => void;
+  // Отказ от взятой заявки — заявка вернётся в поиск
+  onDecline: () => void;
   // «Оплату получил» — ставится один раз
   onPaymentReceived: () => void;
   onSend: (text: string) => void;
@@ -2450,6 +2541,8 @@ export function JobDetail({
   // Позиция прокрутки принадлежит пальцу: лента сама уезжает вниз, только
   // если мастер и так был внизу, а не выдёргивает его из чтения
   const atBottom = useRef(true);
+  // Отказ меняет жизнь клиента — подтверждение в два касания, как у отмены
+  const { confirming: declining, press: pressDecline } = useArmedConfirm(onDecline);
 
   const price = parseInt(priceDraft.replace(/\D/g, ''), 10);
   const priceValid = Number.isFinite(price) && price > 0;
@@ -2697,6 +2790,22 @@ export function JobDetail({
                 {job.status === 'accepted' && (
                   <PressableScale style={styles.finishBtn} onPress={onFinish}>
                     <Text style={styles.finishBtnText}>✓ Работа выполнена</Text>
+                  </PressableScale>
+                )}
+
+                {/* Заболел, не рассчитал время — лучше отказаться сразу, чем
+                    исчезнуть: заявку вернёт в поиск сервер, клиент узнает
+                    пушем. Сданную работу бросить уже нельзя. */}
+                {job.status === 'accepted' && (
+                  <PressableScale
+                    style={[styles.declineBtn, declining && styles.declineBtnConfirm]}
+                    onPress={pressDecline}
+                  >
+                    <Text style={[styles.declineText, declining && styles.declineTextConfirm]}>
+                      {declining
+                        ? 'Точно отказаться? Заявка вернётся в поиск'
+                        : 'Отказаться от заявки'}
+                    </Text>
                   </PressableScale>
                 )}
 
@@ -3031,6 +3140,24 @@ const makeStyles = (t: Palette) =>
     clearCity: { paddingVertical: 8, marginTop: 2 },
     clearCityText: { color: t.accent, fontWeight: '700', fontSize: 11.5 },
     fieldInputArea: { minHeight: 74, textAlignVertical: 'top', paddingTop: 10 },
+    // Предупреждение проверенному мастеру: смена телефона или фото — это
+    // повторная проверка
+    recheckCard: {
+      backgroundColor: t.soft,
+      borderRadius: 14,
+      padding: 12,
+      marginTop: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    recheckTitle: { fontSize: 12.5, fontWeight: '800', color: t.text },
+    recheckText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: t.textMuted,
+      lineHeight: 17,
+      marginTop: 4,
+    },
     rejectCard: {
       backgroundColor: t.card,
       borderRadius: 16,
@@ -3616,6 +3743,18 @@ const makeStyles = (t: Palette) =>
       backgroundColor: t.soft,
     },
     withdrawBtnText: { color: t.danger, fontWeight: '800', fontSize: 12.5 },
+    declineBtn: {
+      alignItems: 'center',
+      paddingVertical: 11,
+      marginTop: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+    },
+    declineBtnConfirm: { backgroundColor: t.danger, borderColor: t.danger },
+    declineText: { color: t.danger, fontWeight: '800', fontSize: 12.5 },
+    declineTextConfirm: { color: '#FFFFFF' },
     chatLockedRow: {
       paddingHorizontal: 16,
       paddingVertical: 14,

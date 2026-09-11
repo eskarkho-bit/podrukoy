@@ -136,9 +136,13 @@ export type OrdersFilter = {
 export type Complaint = {
   id: string;
   byUid: string;
+  // На что жалоба: мастер — на отзыв о себе, клиент — на мастера заявки
+  // или на его сообщение в её чате
+  subjectType: 'review' | 'master' | 'message';
   masterId: string;
   orderId: string;
   reviewClientId: string;
+  messageId: string | null;
   text: string;
   status: string;
   createdMs: number | null;
@@ -313,12 +317,16 @@ function toAdminOrder(d: QueryDocumentSnapshot | DocumentSnapshot): AdminOrder {
 
 function toComplaint(d: QueryDocumentSnapshot | DocumentSnapshot): Complaint {
   const v = d.data() ?? {};
+  const subjectType =
+    v.subjectType === 'master' || v.subjectType === 'message' ? v.subjectType : 'review';
   return {
     id: d.id,
     byUid: String(v.byUid ?? ''),
+    subjectType,
     masterId: String(v.masterId ?? ''),
     orderId: String(v.orderId ?? ''),
     reviewClientId: String(v.reviewClientId ?? ''),
+    messageId: typeof v.messageId === 'string' ? v.messageId : null,
     text: String(v.text ?? ''),
     status: String(v.status ?? ''),
     createdMs: ms(v.createdAt),

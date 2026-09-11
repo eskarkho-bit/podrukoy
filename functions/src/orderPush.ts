@@ -32,11 +32,21 @@ export async function notifyMastersAbout(
   const city = String(order.city ?? '');
   const category = String(order.category ?? '');
 
+  // Кого клиент заблокировал: такому мастеру правила не дадут прислать
+  // предложение, и звать его к заявке значило бы звать в закрытую дверь
+  const blocked = new Set<string>();
+  const clientId = typeof order.clientId === 'string' ? order.clientId : null;
+  if (clientId) {
+    const list = (await db.doc(`users/${clientId}`).get()).get('blockedMasters');
+    if (Array.isArray(list)) list.forEach((id) => blocked.add(String(id)));
+  }
+
   const uids = snap.docs
     .filter((d) => {
       // Непроверенный мастер заявку всё равно не откроет — правила не дадут.
       // Слать ему уведомление значит звать туда, куда не пустят.
       if (d.get('verified') !== true) return false;
+      if (blocked.has(d.id)) return false;
       // Клиент не должен получать уведомление о собственной заявке, даже
       // если он же зарегистрирован мастером
       if (d.id === order.clientId) return false;

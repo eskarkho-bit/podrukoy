@@ -37,9 +37,16 @@ type Props = {
   ordersTotal: number;
   ordersActive: number;
   // Напоминания о повторяемых работах: шлёт сервер, здесь только выключатель
+  // Пуши: выключатель настоящий — его слушает сервер на пути отправки
+  pushOn: boolean;
+  onChangePush: (on: boolean) => void;
   remindersOn: boolean;
   onChangeReminders: (on: boolean) => void;
   onContactSupport: () => void;
+  // Кого клиент заблокировал: их предложения не показываются; снять
+  // блокировку можно только отсюда
+  blockedMasters: { id: string; name: string }[];
+  onUnblockMaster: (masterId: string) => void;
   // Экспорт данных: право на переносимость; файл отдаёт AppState
   onExportData: () => Promise<void>;
   // Вход в режим мастера (перед ним — обязательная авторизация)
@@ -72,9 +79,13 @@ export function ProfileScreen({
   onChangeCity,
   ordersTotal,
   ordersActive,
+  pushOn,
+  onChangePush,
   remindersOn,
   onChangeReminders,
   onContactSupport,
+  blockedMasters,
+  onUnblockMaster,
   onExportData,
   onOpenMaster,
   isAdmin,
@@ -87,8 +98,6 @@ export function ProfileScreen({
 }: Props) {
   const { mode, colors: t, setMode } = useTheme();
   const styles = themed[mode];
-  const [pushOn, setPushOn] = useState(true);
-  const [emailOn, setEmailOn] = useState(false);
   // Редактирование имени прямо в карточке — без отдельного экрана
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -338,16 +347,10 @@ export function ProfileScreen({
           style={styles.row}
         >
           <Text style={styles.rowLabel}>Push-уведомления</Text>
-          <Toggle value={pushOn} onChange={setPushOn} />
+          <Toggle value={pushOn} onChange={onChangePush} />
         </Animated.View>
-
-        <Animated.View
-          entering={FadeInDown.delay(160 + STAGGER * 3).duration(340)}
-          style={styles.row}
-        >
-          <Text style={styles.rowLabel}>Email-уведомления</Text>
-          <Toggle value={emailOn} onChange={setEmailOn} />
-        </Animated.View>
+        {/* Email-уведомлений у сервиса нет — и тумблера для них тоже:
+            выключатель, за которым ничего не стоит, обманывает */}
 
         <Animated.View
           entering={FadeInDown.delay(160 + STAGGER * 3.5).duration(340)}
@@ -383,6 +386,28 @@ export function ProfileScreen({
             <Text style={styles.rowChevron}>›</Text>
           </PressableScale>
         </Animated.View>
+
+        {/* Блокировка ставится из заявки, снимается здесь: список нужен,
+            чтобы блокировка не была дверью без ручки */}
+        {blockedMasters.length > 0 && (
+          <Animated.View
+            entering={FadeInDown.delay(160 + STAGGER * 5.2).duration(340)}
+            style={styles.blockedCard}
+          >
+            <Text style={styles.blockedTitle}>Заблокированные мастера</Text>
+            <Text style={styles.blockedHint}>
+              Их предложения вам не показываются, а о ваших заявках они не узнают
+            </Text>
+            {blockedMasters.map((m) => (
+              <View key={m.id} style={styles.blockedRow}>
+                <Text style={styles.blockedName}>{m.name}</Text>
+                <PressableScale onPress={() => onUnblockMaster(m.id)} hitSlop={8}>
+                  <Text style={styles.blockedUnblock}>Разблокировать</Text>
+                </PressableScale>
+              </View>
+            ))}
+          </Animated.View>
+        )}
 
         {/* Смена пароля. У телефонного аккаунта пароля нет — его владельца
           подтверждает код из СМС, менять нечего. */}
@@ -791,6 +816,30 @@ const makeStyles = (t: Palette) =>
       textAlign: 'right',
     },
     rowChevron: { fontSize: 18, color: t.textMuted, fontWeight: '700' },
+    blockedCard: {
+      backgroundColor: t.card,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 14,
+      marginBottom: 10,
+    },
+    blockedTitle: { fontWeight: '800', fontSize: 13.5, color: t.text },
+    blockedHint: {
+      fontWeight: '600',
+      fontSize: 11.5,
+      color: t.textMuted,
+      marginTop: 4,
+      lineHeight: 16,
+    },
+    blockedRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 10,
+    },
+    blockedName: { fontWeight: '700', fontSize: 13, color: t.text },
+    blockedUnblock: { fontWeight: '800', fontSize: 12.5, color: t.accent },
     passwordCard: {
       backgroundColor: t.card,
       borderRadius: 18,

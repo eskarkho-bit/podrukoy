@@ -45,6 +45,13 @@ type Props = {
   onCancel: () => void;
   // Пользователь подтверждает, что мастер закончил работу
   onConfirmDone: () => void;
+  // «Ещё не готово»: работа возвращается мастеру
+  onReturnToWork: () => void;
+  // Жалоба на мастера заявки — читает модерация; true — принята
+  onReportMaster: (text: string) => Promise<boolean>;
+  // Блокировка мастера: его предложения этому клиенту больше не приходят
+  onBlockMaster: () => void;
+  masterBlocked: boolean;
   // Расчёт напрямую: способ выбирает клиент, «оплатил» ставится один раз
   onChoosePaymentMethod: (method: PaymentMethod) => void;
   onMarkPaid: () => void;
@@ -125,6 +132,10 @@ export function OrderSheet({
   onClose,
   onCancel,
   onConfirmDone,
+  onReturnToWork,
+  onReportMaster,
+  onBlockMaster,
+  masterBlocked,
   onChoosePaymentMethod,
   onMarkPaid,
   onChat,
@@ -139,6 +150,28 @@ export function OrderSheet({
   // Отмена необратима — подтверждение взводится отдельно и не ловит
   // случайный двойной тап
   const { confirming, press: pressCancel } = useArmedConfirm(onCancel);
+  // Возврат работы мастеру меняет статус у другого человека — тоже в два касания
+  const { confirming: returning, press: pressReturn } = useArmedConfirm(onReturnToWork);
+  // Блокировка — тоже
+  const { confirming: blocking, press: pressBlock } = useArmedConfirm(onBlockMaster);
+  // Жалоба на мастера: раскрытое поле причины, отправленная помечается
+  // локально — при перезаходе ссылка просто вернётся
+  const [reporting, setReporting] = useState(false);
+  const [reportText, setReportText] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reported, setReported] = useState(false);
+  const submitReport = async () => {
+    const text = reportText.trim();
+    if (!text || reportBusy) return;
+    setReportBusy(true);
+    const ok = await onReportMaster(text);
+    setReportBusy(false);
+    if (ok) {
+      setReported(true);
+      setReporting(false);
+      setReportText('');
+    }
+  };
   // «Как мы проверяем мастеров» — открывается с бейджа на предложении
   const [verifOpen, setVerifOpen] = useState(false);
   const { gesture, cardStyle, dragDismissed } = useSheetDrag(onClose);
@@ -323,6 +356,17 @@ export function OrderSheet({
               >
                 <Text style={styles.confirmBtnText}>✓ Работа выполнена — подтвердить</Text>
               </PressableScale>
+              {/* Не согласны с «выполнено» — работа возвращается мастеру, а
+                  не закрывается: без этого ложное «сделано» запирало бы
+                  клиента. Ему уйдёт сообщение в чат и пуш. */}
+              <PressableScale
+                style={[styles.returnBtn, returning && styles.returnBtnConfirm]}
+                onPress={pressReturn}
+              >
+                <Text style={[styles.returnText, returning && styles.returnTextConfirm]}>
+                  {returning ? 'Точно вернуть мастеру?' : 'Ещё не готово — вернуть в работу'}
+                </Text>
+              </PressableScale>
             </Animated.View>
           )}
 
@@ -431,6 +475,69 @@ export function OrderSheet({
                   Повторить заявку
                 </Text>
               </PressableScale>
+            </Animated.View>
+          )}
+
+          {/* Жалоба и блокировка — когда есть на кого: мастер выбран. Жалобу
+              читает модератор; блокировка закрывает мастеру заявки этого
+              клиента на будущее, идущая работа не отменяется. */}
+          {!!order.masterId && !collecting && (
+            <Animated.View
+              entering={FadeInDown.delay(240).duration(300)}
+              style={styles.masterActions}
+            >
+              {reporting ? (
+                <View style={styles.reportBox}>
+                  <TextInput
+                    style={styles.reportInput}
+                    value={reportText}
+                    onChangeText={setReportText}
+                    placeholder="Что случилось? Модерация прочитает"
+                    placeholderTextColor={t.textMuted}
+                    multiline
+                    maxLength={1000}
+                    autoFocus
+                  />
+                  <View style={styles.reportRow}>
+                    <PressableScale
+                      style={[
+                        styles.reportBtn,
+                        (!reportText.trim() || reportBusy) && styles.reportBtnDim,
+                      ]}
+                      onPress={submitReport}
+                      disabled={!reportText.trim() || reportBusy}
+                    >
+                      <Text style={styles.reportBtnText}>
+                        {reportBusy ? 'Отправляем…' : 'Отправить жалобу'}
+                      </Text>
+                    </PressableScale>
+                    <PressableScale style={styles.reportGhost} onPress={() => setReporting(false)}>
+                      <Text style={styles.reportGhostText}>Отмена</Text>
+                    </PressableScale>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.masterActionsRow}>
+                  {reported ? (
+                    <Text style={styles.masterActionDone}>Жалоба отправлена</Text>
+                  ) : (
+                    <PressableScale onPress={() => setReporting(true)} hitSlop={8}>
+                      <Text style={styles.masterActionLink}>Пожаловаться на мастера</Text>
+                    </PressableScale>
+                  )}
+                  {masterBlocked ? (
+                    <Text style={styles.masterActionDone}>Мастер заблокирован</Text>
+                  ) : (
+                    <PressableScale onPress={pressBlock} hitSlop={8}>
+                      <Text
+                        style={[styles.masterActionLink, blocking && styles.masterActionLinkArmed]}
+                      >
+                        {blocking ? 'Точно заблокировать?' : 'Заблокировать мастера'}
+                      </Text>
+                    </PressableScale>
+                  )}
+                </View>
+              )}
             </Animated.View>
           )}
 
@@ -1045,6 +1152,70 @@ const makeStyles = (t: Palette) =>
     cancelBtnConfirm: { backgroundColor: t.danger, borderColor: t.danger },
     cancelText: { fontWeight: '700', fontSize: 13.5, color: t.danger },
     cancelTextConfirm: { color: '#FFFFFF' },
+    // Возврат в работу — не отмена: без красного, но с тем же двойным касанием
+    returnBtn: {
+      marginTop: 8,
+      borderRadius: 16,
+      paddingVertical: 12,
+      alignItems: 'center',
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.border,
+    },
+    returnBtnConfirm: { backgroundColor: t.warn, borderColor: t.warn },
+    returnText: { fontWeight: '700', fontSize: 13.5, color: t.warn },
+    returnTextConfirm: { color: '#FFFFFF' },
+    // Жалоба и блокировка — тихие ссылки: нужны редко, кричать не должны
+    masterActions: { marginTop: 14 },
+    masterActionsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingHorizontal: 4,
+      marginBottom: 6,
+    },
+    masterActionLink: { fontSize: 12.5, fontWeight: '700', color: t.textMuted },
+    masterActionLinkArmed: { color: t.danger },
+    masterActionDone: { fontSize: 12.5, fontWeight: '700', color: t.textMuted, opacity: 0.7 },
+    reportBox: {
+      backgroundColor: t.card,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+      padding: 12,
+      marginBottom: 6,
+    },
+    reportInput: {
+      borderWidth: 1,
+      borderColor: t.inputBorder,
+      borderRadius: 12,
+      backgroundColor: t.inputBg,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 13,
+      color: t.text,
+      minHeight: 64,
+      textAlignVertical: 'top',
+    },
+    reportRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+    reportBtn: {
+      flex: 1,
+      borderRadius: 12,
+      paddingVertical: 11,
+      alignItems: 'center',
+      backgroundColor: t.danger,
+    },
+    reportBtnDim: { opacity: 0.5 },
+    reportBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12.5 },
+    reportGhost: {
+      borderRadius: 12,
+      paddingVertical: 11,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: t.border,
+      backgroundColor: t.card,
+      alignItems: 'center',
+    },
+    reportGhostText: { color: t.textMuted, fontWeight: '800', fontSize: 12.5 },
   });
 
 const themed = { light: makeStyles(palettes.light), dark: makeStyles(palettes.dark) };

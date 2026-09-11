@@ -34,6 +34,28 @@ export async function dropPendingOffers(masterId: string): Promise<number> {
 }
 
 /**
+ * Поля, которые возвращают заявку в поиск: мастера, его контактов и условий
+ * оплаты в ней больше нет, телефон клиента тоже снят — открытую заявку снова
+ * читают все мастера города. Один набор на два пути: удаление аккаунта
+ * мастера и его отказ от заявки (orderDecline.ts) — разошедшиеся наборы
+ * оставили бы номер в одном из них.
+ */
+export function reopenedFields() {
+  return {
+    status: 'Поиск мастера',
+    masterId: null,
+    masterName: null,
+    agreedPrice: null,
+    agreedAt: null,
+    masterPhone: null,
+    clientPhone: null,
+    masterBanks: null,
+    masterAcceptsCash: null,
+    reopenedAt: new Date(),
+  };
+}
+
+/**
  * Отвязывает исчезнувшего мастера от его заявок.
  *
  * «В работе» возвращаются в поиск: клиент не должен сидеть с
@@ -54,21 +76,7 @@ export async function detachMasterFromOrders(masterId: string): Promise<number> 
   let reopened = 0;
   for (const d of orders.docs) {
     if (d.get('status') === 'В работе') {
-      await d.ref.set(
-        {
-          status: 'Поиск мастера',
-          masterId: null,
-          masterName: null,
-          agreedPrice: null,
-          agreedAt: null,
-          masterPhone: null,
-          clientPhone: null,
-          masterBanks: null,
-          masterAcceptsCash: null,
-          reopenedAt: new Date(),
-        },
-        { merge: true },
-      );
+      await d.ref.set(reopenedFields(), { merge: true });
       reopened += 1;
 
       const clientId = d.get('clientId');

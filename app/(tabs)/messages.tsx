@@ -13,6 +13,7 @@ export default function MessagesRoute() {
       onOpenThread={s.markThreadRead}
       onSendMessage={s.sendMessage}
       onSendImage={s.sendImageMessage}
+      onReportMessage={s.reportMessage}
       onThreadOpenChange={s.setChatOpen}
     />
   );

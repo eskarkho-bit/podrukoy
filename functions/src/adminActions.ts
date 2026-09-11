@@ -315,6 +315,7 @@ export async function resolveComplaint(
       byUid: String(snap.get('byUid') ?? ''),
       masterId: String(snap.get('masterId') ?? ''),
       orderId: String(snap.get('orderId') ?? ''),
+      subjectType: String(snap.get('subjectType') ?? 'review'),
     };
   });
 
@@ -329,11 +330,22 @@ export async function resolveComplaint(
   });
 
   if (result.byUid) {
+    // Без записки модератора — фраза по виду жалобы: про отзыв говорим про
+    // отзыв, клиенту про мастера — про меры, а не про анкету
+    const review = result.subjectType === 'review';
+    const fallback =
+      outcome === 'решена'
+        ? review
+          ? 'Отзыв скрыт после проверки'
+          : 'Мы разобрались и приняли меры'
+        : review
+          ? 'Отзыв остаётся в анкете'
+          : 'Нарушений не нашли';
     await pushTo(
       [result.byUid],
       outcome === 'решена' ? 'Жалоба решена' : 'Жалоба отклонена',
-      note || (outcome === 'решена' ? 'Отзыв скрыт после проверки' : 'Отзыв остаётся в анкете'),
-      { href: '/profile' },
+      note || fallback,
+      { href: review ? '/profile' : '/' },
     );
   }
   return { already: false };
