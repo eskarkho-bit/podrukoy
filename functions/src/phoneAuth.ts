@@ -1,5 +1,6 @@
 import { logger } from 'firebase-functions';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { createHash, randomInt } from 'node:crypto';
@@ -28,9 +29,12 @@ import { audit } from './audit';
 // держит хэш кода. Утечка коллекции не даёт ни войти, ни узнать чей-то номер.
 //
 // Провайдер — SMS.RU. Всё общение с ним заперто в этом файле: чтобы перейти
-// на SMSC или Твил, переписывается только он. Ключ — SMSRU_API_ID в окружении
-// функций (functions/.env); пока ключа нет, requestPhoneCode честно отвечает
-// «не настроено», и приложение не показывает вход по телефону как рабочий.
+// на SMSC или Твил, переписывается только он. Ключ — секрет SMSRU_API_ID в
+// Secret Manager (firebase functions:secrets:set SMSRU_API_ID), а не
+// переменная в functions/.env: переменные окружения видны всем, у кого есть
+// доступ к проекту, секрет — только той функции, что его объявила. Пока
+// ключа нет, requestPhoneCode честно отвечает «не настроено», и приложение
+// не показывает вход по телефону как рабочий.
 //
 // В бою custom-токены подписывает сервисный аккаунт функций: ему нужна роль
 // Service Account Token Creator (iam.serviceAccountTokenCreator) на самого
@@ -38,6 +42,12 @@ import { audit } from './audit';
 
 const SMS_API = 'https://sms.ru/sms/send';
 const CALL_API = 'https://sms.ru/code/call';
+
+// Ключ провайдера объявлен секретом: в окружение функции он попадает только
+// если перечислен в её secrets (см. requestPhoneCode), verifyPhoneCode его
+// не получает — сверке кода провайдер не нужен. В тестах и в эмуляторе
+// value() читает process.env, как обычную переменную.
+const SMSRU_API_ID = defineSecret('SMSRU_API_ID');
 
 export type CodeChannel = 'call' | 'sms';
 
@@ -77,7 +87,7 @@ const codeHash = (phone: string, code: string) => sha256(`${phone}:${code}`);
 const phoneAuditId = (phone: string) => phoneCodeDocId(phone);
 
 function credentials(): { apiId: string } | null {
-  const apiId = process.env.SMSRU_API_ID;
+  const apiId = SMSRU_API_ID.value();
   return apiId ? { apiId } : null;
 }
 
@@ -374,7 +384,7 @@ export async function confirmLoginCode(
 }
 
 /** Просьба прислать код. Доступна без входа — это и есть путь к входу. */
-export const requestPhoneCode = onCall(async (request) =>
+export const requestPhoneCode = onCall({ secrets: [SMSRU_API_ID] }, async (request) =>
   sendLoginCode(String(request.data?.phone ?? '')),
 );
 

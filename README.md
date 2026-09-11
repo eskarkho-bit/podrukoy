@@ -45,7 +45,7 @@ npm start
 | --------------------------------- | ----------------------------------------------------- |
 | `npm start`                       | Metro + QR-код                                        |
 | `npm run android` / `ios` / `web` | запуск на платформе                                   |
-| `npm run test:rules`              | 151 тест правил доступа на эмуляторе Firestore        |
+| `npm run test:rules`              | 172 теста правил доступа на эмуляторе Firestore       |
 | `npm run rules:check`             | не отстали ли правила в бою от репозитория            |
 | `npm run rules:deploy`            | выкатить правила Firestore и индексы                  |
 | `npm run storage:deploy`          | выкатить правила Storage (нужен подключённый Storage) |
@@ -83,12 +83,17 @@ node scripts/emulator-admin.mjs you@mail.ru --demo
 задумано: для веб-конфига Firebase это публичные значения, доступ ограничивают
 правила, а не секретность ключа.
 
-**Функции.** Ключ СМС-провайдера для входа по телефону — в `functions/.env`,
-файл в git не попадает. Образец: [`functions/.env.example`](functions/.env.example).
+**Функции.** Ключ СМС-провайдера для входа по телефону живёт в Secret Manager,
+а не в `functions/.env`: переменные окружения функции видны всем, у кого есть
+доступ к проекту, секрет — только самой функции. Задаётся один раз, деплой
+функций подхватывает его сам:
 
+```bash
+firebase functions:secrets:set SMSRU_API_ID
 ```
-SMSRU_API_ID=
-```
+
+Несекретные настройки (канал доставки кода) остаются в `functions/.env`, файл
+в git не попадает. Образец: [`functions/.env.example`](functions/.env.example).
 
 Пока ключа нет, вход по телефону честно отвечает «не настроено», а остальное
 приложение работает. Платёжного провайдера у сервиса нет: расчёты между
@@ -103,7 +108,7 @@ SMSRU_API_ID=
 npm run rules:deploy                      # правила Firestore и индексы
 npm run storage:deploy                    # правила Storage, отдельно (см. ниже)
 cd functions && npm install && cd ..
-firebase deploy --only functions          # 24 функции
+firebase deploy --only functions          # 22 функции
 eas update --channel production           # JS-обновление приложения
 ```
 
