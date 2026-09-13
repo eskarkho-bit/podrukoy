@@ -41,6 +41,11 @@ const as = (uid) => env.authenticatedContext(uid).firestore();
 /** Firestore без входа. */
 const anon = () => env.unauthenticatedContext().firestore();
 
+// Ссылки на файлы правила пускают только в наше хранилище — фикстуры
+// строятся так же, как getDownloadURL
+const storageUrl = (name) =>
+  `https://firebasestorage.googleapis.com/v0/b/domio-7ad1c.firebasestorage.app/o/${name}?alt=media`;
+
 const order = (patch = {}) => ({
   clientId: 'client1',
   clientName: 'Дмитрий',
@@ -144,7 +149,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'masters/ready/verification/application'), {
       phone: '79990000000',
       about: 'Сантехник',
-      photoUrl: 'https://example.com/face.jpg',
+      photoUrl: storageUrl('face.jpg'),
       biometricConsent: '2026-08-06',
       status: 'draft',
     });
@@ -153,7 +158,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'masters/waiting/verification/application'), {
       phone: '79991112233',
       about: '',
-      photoUrl: 'https://example.com/face2.jpg',
+      photoUrl: storageUrl('face2.jpg'),
       status: 'pending',
     });
 
@@ -205,6 +210,20 @@ beforeEach(async () => {
       }),
     );
     await setDoc(doc(db, 'orders/legacy'), legacyOrder());
+
+    // Завершённая заявка с отзывом — на него жалуется master1
+    await setDoc(
+      doc(db, 'orders/finished2'),
+      order({ masterId: 'master1', masterName: 'Иван', status: 'Завершена', agreedPrice: 1500 }),
+    );
+    await setDoc(doc(db, 'masters/master1/reviews/finished2'), {
+      orderId: 'finished2',
+      clientId: 'client1',
+      clientName: 'Дмитрий',
+      stars: 1,
+      text: 'Плохо',
+      createdAt: new Date(),
+    });
   });
 });
 
@@ -310,6 +329,16 @@ describe('Создание заявки', () => {
   // firstOfferAt считает сервер по первому предложению, closedByAdmin с
   // причиной — след принудительного закрытия. Клиент, засеявший их при
   // создании, испортил бы метрику и журнал спора.
+  test('служебные отметки статистики и согласования при создании не подсунуть', async () => {
+    await assertFails(setDoc(doc(as('client1'), 'orders/s1'), order({ statsCounted: true })));
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/s2'), order({ agreedAt: serverTimestamp() })),
+    );
+    await assertFails(
+      setDoc(doc(as('client1'), 'orders/s3'), order({ photoUrl: storageUrl('early.jpg') })),
+    );
+  });
+
   test('нельзя подсунуть при создании серверные поля закрытия и метрики', async () => {
     await assertFails(
       setDoc(doc(as('client1'), 'orders/newS1'), order({ firstOfferAt: serverTimestamp() })),
@@ -382,6 +411,13 @@ describe('Блокировка', () => {
     );
   });
 
+  // Пустой профиль считался бы «не заблокирован» — заблокированный не должен
+  // мочь удалить его и завести чистый
+  test('заблокированный клиент не удалит свой профиль, отстранённый мастер — анкету', async () => {
+    await assertFails(deleteDoc(doc(as('blockedClient'), 'users/blockedClient')));
+    await assertFails(deleteDoc(doc(as('blockedMaster'), 'masters/blockedMaster')));
+  });
+
   test('нельзя завести профиль сразу с полем блокировки', async () => {
     await assertFails(
       setDoc(doc(as('client2'), 'users/client2'), { name: 'Хитрец', blocked: false }),
@@ -401,7 +437,7 @@ describe('Фото заявки', () => {
   test('клиент прикладывает фото к свежей заявке', async () => {
     await assertSucceeds(
       updateDoc(doc(as('client1'), 'orders/open'), {
-        photoUrl: 'https://example.com/photo.jpg',
+        photoUrl: storageUrl('photo.jpg'),
       }),
     );
   });
@@ -412,7 +448,7 @@ describe('Фото заявки', () => {
     });
     await assertFails(
       updateDoc(doc(as('client1'), 'orders/open'), {
-        photoUrl: 'https://example.com/other.jpg',
+        photoUrl: storageUrl('other.jpg'),
       }),
     );
   });
@@ -420,7 +456,7 @@ describe('Фото заявки', () => {
   test('после выбора мастера фото не подменить', async () => {
     await assertFails(
       updateDoc(doc(as('client1'), 'orders/working'), {
-        photoUrl: 'https://example.com/other.jpg',
+        photoUrl: storageUrl('other.jpg'),
       }),
     );
   });
@@ -428,7 +464,7 @@ describe('Фото заявки', () => {
   test('мастер чужое фото не приложит', async () => {
     await assertFails(
       updateDoc(doc(as('master1'), 'orders/open'), {
-        photoUrl: 'https://example.com/other.jpg',
+        photoUrl: storageUrl('other.jpg'),
       }),
     );
   });
@@ -492,6 +528,42 @@ describe('Предложения мастеров', () => {
           masterName: 'Пётр',
           price: 3000,
         }),
+      ),
+    );
+  });
+
+  // Имя уходит клиенту в заголовок пуша и в заявку — только из анкеты
+  test('в legacy-заявке мастер тоже представляется только именем из анкеты', async () => {
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/legacy'), {
+        masterName: 'Поддержка domio',
+        price: 1500,
+        priceStatus: 'offered',
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(as('master1'), 'orders/legacy'), {
+        masterName: 'Иван',
+        price: 1500,
+        priceStatus: 'offered',
+      }),
+    );
+  });
+
+  test('имя в предложении — из анкеты, перечень полей закрытый', async () => {
+    await assertFails(
+      setDoc(
+        doc(as('master2'), 'orders/open/offers/master2'),
+        offer({ masterId: 'master2', masterName: 'Поддержка domio' }),
+      ),
+    );
+    await assertFails(
+      setDoc(doc(as('master1'), 'orders/open/offers/master1'), offer({ telegram: '@x' })),
+    );
+    await assertFails(
+      setDoc(
+        doc(as('master1'), 'orders/open/offers/master1'),
+        offer({ orderTitle: 'x'.repeat(201) }),
       ),
     );
   });
@@ -923,6 +995,18 @@ describe('Отказ мастера от заявки', () => {
     );
   });
 
+  test('после отметки клиента об оплате отказаться нельзя', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), {
+        paymentMethod: 'transfer',
+        paidAt: new Date(),
+      });
+    });
+    await assertFails(
+      updateDoc(doc(as('master1'), 'orders/working'), { masterDeclinedAt: serverTimestamp() }),
+    );
+  });
+
   test('произвольное время и попутные поля не проходят', async () => {
     await assertFails(
       updateDoc(doc(as('master1'), 'orders/working'), {
@@ -1058,6 +1142,17 @@ describe('Отзывы и рейтинг', () => {
 
   // Профиль, который видит клиент у предложения: фамилия, стаж, образование.
   // Всё со слов мастера — проверять нечем, но и вреда от них нет.
+  test('в анкете нет ни лишних полей, ни романов, ни выдуманного образования', async () => {
+    await assertFails(updateDoc(doc(as('master1'), 'masters/master1'), { telegram: '@x' }));
+    await assertFails(updateDoc(doc(as('master1'), 'masters/master1'), { name: 'x'.repeat(101) }));
+    await assertFails(updateDoc(doc(as('master1'), 'masters/master1'), { education: 'академик' }));
+    await assertFails(
+      updateDoc(doc(as('master1'), 'masters/master1'), {
+        cities: Array.from({ length: 21 }, (_, i) => `город${i}`),
+      }),
+    );
+  });
+
   test('фамилию, стаж и образование мастер пишет сам', async () => {
     await assertSucceeds(
       updateDoc(doc(as('master1'), 'masters/master1'), {
@@ -1127,6 +1222,30 @@ describe('Переписка по заявке', () => {
     await assertFails(getDoc(doc(as('master2'), 'orders/working/messages/any')));
   });
 
+  test('в отменённую заявку не пишут — сделки больше нет', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), { status: 'Отменена' });
+    });
+    await assertFails(
+      addDoc(collection(as('client1'), 'orders/working/messages'), message('client1')),
+    );
+  });
+
+  test('заблокированный клиентом мастер в чат не пишет', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/client1'), {
+        name: 'Дмитрий',
+        blockedMasters: ['master1'],
+      });
+    });
+    await assertFails(
+      addDoc(collection(as('master1'), 'orders/working/messages'), message('master1')),
+    );
+    await assertSucceeds(
+      addDoc(collection(as('client1'), 'orders/working/messages'), message('client1')),
+    );
+  });
+
   test('нельзя отправить сообщение от чужого имени', async () => {
     await assertFails(
       addDoc(collection(as('master1'), 'orders/working/messages'), message('client1')),
@@ -1145,7 +1264,7 @@ describe('Переписка по заявке', () => {
     );
   });
 
-  const IMAGE = 'https://firebasestorage.googleapis.com/v0/b/x/o/orders%2Fworking%2Fchat%2Fa.jpg';
+  const IMAGE = storageUrl('orders%2Fworking%2Fchat%2Fa.jpg');
 
   test('фото без текста проходит с обеих сторон', async () => {
     await assertSucceeds(
@@ -1180,6 +1299,13 @@ describe('Переписка по заявке', () => {
       addDoc(collection(as('client1'), 'orders/working/messages'), {
         ...message('client1', ''),
         imageUrl: 'https://' + 'a'.repeat(2050),
+      }),
+    );
+    // Чужой хост не пройдёт даже по https
+    await assertFails(
+      addDoc(collection(as('client1'), 'orders/working/messages'), {
+        ...message('client1', ''),
+        imageUrl: 'https://example.com/pic.jpg',
       }),
     );
   });
@@ -1386,12 +1512,39 @@ describe('Заявка на проверку', () => {
     );
   });
 
+  // Лишний документ «на проверке» — пуш всем модераторам и строка в очереди,
+  // которую нечем закрыть
+  test('документ анкеты только один — application', async () => {
+    await assertFails(
+      setDoc(doc(as('newbie'), 'masters/newbie/verification/extra'), {
+        phone: '79991234567',
+        about: '',
+        photoUrl: null,
+        status: 'draft',
+      }),
+    );
+  });
+
+  test('телефон — только цифры, снимок — только из нашего хранилища', async () => {
+    await assertFails(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        phone: '+7 (999) 123-45-67',
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
+        photoUrl: 'https://example.com/face.jpg',
+        biometricConsent: '2026-08-06',
+      }),
+    );
+  });
+
   test('нельзя создать заявку сразу на проверке', async () => {
     await assertFails(
       setDoc(doc(as('fresh'), 'masters/fresh/verification/application'), {
         phone: '79995554433',
         about: '',
-        photoUrl: 'https://example.com/f.jpg',
+        photoUrl: storageUrl('f.jpg'),
         status: 'pending',
       }),
     );
@@ -1438,7 +1591,7 @@ describe('Заявка на проверку', () => {
       await setDoc(doc(ctx.firestore(), 'masters/nocard/verification/application'), {
         phone: '79993334455',
         about: '',
-        photoUrl: 'https://example.com/f.jpg',
+        photoUrl: storageUrl('f.jpg'),
         biometricConsent: '2026-08-06',
         status: 'draft',
       });
@@ -1480,7 +1633,7 @@ describe('Правки одобренной анкеты', () => {
       await setDoc(doc(ctx.firestore(), 'masters/master1/verification/application'), {
         phone: '79280001122',
         about: 'Электрик',
-        photoUrl: 'https://example.com/face3.jpg',
+        photoUrl: storageUrl('face3.jpg'),
         biometricConsent: '2026-08-21',
         status: 'approved',
       });
@@ -1494,7 +1647,7 @@ describe('Правки одобренной анкеты', () => {
   // На телефон из анкеты клиенты переводят оплату — подменить его тихо нельзя
   test('телефон и фото — только вместе с повторной отправкой на проверку', async () => {
     await assertFails(updateDoc(app('master1'), { phone: '79280009999' }));
-    await assertFails(updateDoc(app('master1'), { photoUrl: 'https://example.com/new.jpg' }));
+    await assertFails(updateDoc(app('master1'), { photoUrl: storageUrl('new.jpg') }));
     await assertSucceeds(
       updateDoc(app('master1'), {
         phone: '79280009999',
@@ -1514,12 +1667,47 @@ describe('Правки одобренной анкеты', () => {
     const me = as('master1');
     const batch = writeBatch(me);
     batch.update(doc(me, 'masters/master1/verification/application'), {
-      photoUrl: 'https://example.com/new.jpg',
+      photoUrl: storageUrl('new.jpg'),
       status: 'pending',
       appliedAt: serverTimestamp(),
     });
     batch.update(doc(me, 'masters/master1'), { verified: false });
     await assertSucceeds(batch.commit());
+  });
+
+  // Отзыв согласия у проверенного: снимок и согласие уходят вместе,
+  // анкета возвращается в черновик — а не отклоняется правилами после того,
+  // как файл уже удалён
+  test('проверенный мастер отзывает согласие на фотографию', async () => {
+    // Снять только согласие, оставив снимок, нельзя
+    await assertFails(updateDoc(app('master1'), { biometricConsent: null, status: 'draft' }));
+    await assertSucceeds(
+      updateDoc(app('master1'), { photoUrl: null, biometricConsent: null, status: 'draft' }),
+    );
+  });
+
+  test('ожидающий проверки мастер отзывает согласие — анкета уходит в черновик', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'masters/pendingMaster'), {
+        name: 'Руслан',
+        cities: ['грозный'],
+        skills: ['электрика'],
+      });
+      await setDoc(doc(ctx.firestore(), 'masters/pendingMaster/verification/application'), {
+        phone: '79990001122',
+        about: '',
+        photoUrl: storageUrl('verification%2FpendingMaster%2Fface.jpg'),
+        biometricConsent: '2026-08-06',
+        status: 'pending',
+        appliedAt: new Date(),
+      });
+    });
+    const ref = doc(as('pendingMaster'), 'masters/pendingMaster/verification/application');
+    // Правкой других полей из очереди не выйти
+    await assertFails(updateDoc(ref, { about: 'x', status: 'draft' }));
+    await assertSucceeds(
+      updateDoc(ref, { photoUrl: null, biometricConsent: null, status: 'draft' }),
+    );
   });
 
   test('вердикт себе не подсунуть, чужую анкету не тронуть', async () => {
@@ -1534,7 +1722,7 @@ describe('Согласие на фотографию лица', () => {
   test('без согласия фотографию не записать', async () => {
     await assertFails(
       updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-        photoUrl: 'https://example.com/face.jpg',
+        photoUrl: storageUrl('face.jpg'),
       }),
     );
   });
@@ -1542,7 +1730,7 @@ describe('Согласие на фотографию лица', () => {
   test('с согласием — записывается', async () => {
     await assertSucceeds(
       updateDoc(doc(as('newbie'), 'masters/newbie/verification/application'), {
-        photoUrl: 'https://example.com/face.jpg',
+        photoUrl: storageUrl('face.jpg'),
         biometricConsent: '2026-08-06',
       }),
     );
@@ -1819,6 +2007,21 @@ describe('Профиль пользователя', () => {
     await assertFails(setDoc(doc(as('client2'), 'users/client1'), { name: 'Взлом' }));
   });
 
+  // Чужой номер в профиле выдавал бы человека за другого в поиске модератора;
+  // списки не растут бесконечно — каждый пуш читает все токены
+  test('чужой телефон и раздутые списки в профиль не записать', async () => {
+    await assertFails(
+      setDoc(doc(as('client1'), 'users/client1'), { name: 'Дмитрий', phone: '+79990000000' }),
+    );
+    await assertFails(
+      setDoc(doc(as('client1'), 'users/client1'), {
+        name: 'Дмитрий',
+        pushTokens: Array.from({ length: 11 }, (_, i) => `ExponentPushToken[${i}]`),
+      }),
+    );
+    await assertFails(setDoc(doc(as('client1'), 'users/client1'), { name: 'x'.repeat(101) }));
+  });
+
   test('чужая переписка с поддержкой недоступна', async () => {
     await assertFails(getDoc(doc(as('client2'), 'users/client1/threads/support')));
   });
@@ -1961,7 +2164,7 @@ describe('Жалобы на отзывы', () => {
     byUid: 'master1',
     subjectType: 'review',
     masterId: 'master1',
-    orderId: 'finished',
+    orderId: 'finished2',
     reviewClientId: 'client1',
     text: 'Отзыв не о моей работе',
     status: 'новая',
@@ -2036,6 +2239,16 @@ describe('Жалобы на отзывы', () => {
   test('на чужой отзыв мастер не жалуется', async () => {
     await assertFails(
       addDoc(collection(as('master2'), 'complaints'), complaint({ byUid: 'master2' })),
+    );
+  });
+
+  // Жалоба без отзыва — способ спамить модераторов и привязывать чужой uid
+  test('жалоба только на существующий отзыв и на его автора', async () => {
+    await assertFails(
+      addDoc(collection(as('master1'), 'complaints'), complaint({ orderId: 'open' })),
+    );
+    await assertFails(
+      addDoc(collection(as('master1'), 'complaints'), complaint({ reviewClientId: 'client2' })),
     );
   });
 
@@ -2126,7 +2339,7 @@ describe('Сквозной сценарий допуска', () => {
       setDoc(doc(master, 'masters/applicant/verification/application'), {
         phone: '79993334455',
         about: 'Электрик, свой инструмент',
-        photoUrl: 'https://example.com/face3.jpg',
+        photoUrl: storageUrl('face3.jpg'),
         biometricConsent: '2026-08-29',
         status: 'draft',
       }),

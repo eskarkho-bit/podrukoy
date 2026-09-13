@@ -1,8 +1,9 @@
 import { logger } from 'firebase-functions';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
+import { notifyMastersAbout } from './orderPush';
 import { audit } from './audit';
-import { reopenedFields } from './masterExit';
+import { moneyMoved, reopenedFields } from './masterExit';
 
 // Отказ мастера от взятой заявки.
 //
@@ -37,6 +38,9 @@ export async function handleMasterDecline(
     const snap = await tx.get(ref);
     if (!snap.exists) return false;
     if (snap.get('status') !== 'В работе' || snap.get('masterId') !== masterId) return false;
+    // Правила такую отметку не пропускают; здесь та же проверка на случай,
+    // если оплату отметили, пока событие ехало
+    if (moneyMoved(snap.data() ?? {})) return false;
     // Отметка снимается вместе с мастером: следующий исполнитель должен
     // иметь возможность поставить свою
     tx.set(ref, { ...reopenedFields(), masterDeclinedAt: null }, { merge: true });
@@ -66,5 +70,10 @@ export async function handleMasterDecline(
       { href: '/' },
     );
   }
+  // Остальные мастера города узнают о заявке заново: пуш при создании они
+  // получали, но тогда она ушла к другому, и о ней забыли
+  await notifyMastersAbout({ ...after, ...reopenedFields() }, 'Заявка снова ищет мастера', {
+    excludeUid: masterId,
+  });
   return true;
 }

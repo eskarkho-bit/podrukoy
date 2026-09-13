@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Linking,
@@ -292,7 +293,7 @@ export type MasterProfile = {
 type MyOffer = { orderId: string; title: string; price: number };
 
 export function MasterScreen({ open, onClose }: Props) {
-  const { mode } = useTheme();
+  const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const { user } = useAuth();
   const { showNotice } = useAppState();
@@ -300,6 +301,11 @@ export function MasterScreen({ open, onClose }: Props) {
   // Анкета мастера: есть — раздел открыт, нет — предлагаем её заполнить
   const [master, setMaster] = useState<MasterProfile | null>(null);
   const [application, setApplication] = useState<Application>(EMPTY_APPLICATION);
+  // Анкета и заявка прочитаны хотя бы раз: до этого форму не показываем —
+  // она заполняет поля при первом появлении, и пустая анкета «до загрузки»
+  // оставалась бы пустой и после неё
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [applicationLoaded, setApplicationLoaded] = useState(false);
   // Как мастер принимает оплату: банки для СБП и наличные. null — ещё не
   // настраивал, тогда клиенту предлагают оба способа
   const [payment, setPayment] = useState<PaymentDetails | null>(null);
@@ -328,6 +334,26 @@ export function MasterScreen({ open, onClose }: Props) {
 
   const openJob = jobs.find((j) => j.id === openJobId) ?? null;
 
+  // Заявка исчезла из списка — клиент выбрал другого или модерация закрыла:
+  // открытой не остаётся ничего, иначе подписка на её переписку упиралась
+  // бы в отказ правил, а «назад» вело в пустоту
+  useEffect(() => {
+    if (openJobId && jobs.length && !jobs.some((j) => j.id === openJobId)) setOpenJobId(null);
+  }, [jobs, openJobId]);
+
+  // Пока раздел закрыт, его содержимое не рисуется: подписки и состояние
+  // остаются, а перерисовка невидимой ленты на каждое событие — нет.
+  // Снимается с задержкой на выезд, чтобы закрытие не показывало пустой лист
+  const [rendered, setRendered] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setRendered(true);
+      return;
+    }
+    const timer = setTimeout(() => setRendered(false), 320);
+    return () => clearTimeout(timer);
+  }, [open]);
+
   // Весь оверлей мягко выезжает справа, как вложенный экран. Значения ведём из
   // эффекта, а не изнутри стиля: экран перерисовывается на каждое обновление
   // ленты и переписки, и анимация в стиле начиналась бы заново.
@@ -352,6 +378,7 @@ export function MasterScreen({ open, onClose }: Props) {
       doc(db, 'masters', myUid),
       (snap) => {
         const v = snap.data();
+        setProfileLoaded(true);
         setMaster(
           snap.exists() && v
             ? {
@@ -385,7 +412,10 @@ export function MasterScreen({ open, onClose }: Props) {
     if (!open || !myUid) return;
     return onSnapshot(
       doc(db, 'masters', myUid, 'verification', 'application'),
-      (snap) => setApplication(applicationFrom(snap.data())),
+      (snap) => {
+        setApplication(applicationFrom(snap.data()));
+        setApplicationLoaded(true);
+      },
       (e) => console.warn('Заявка на проверку недоступна:', e),
     );
   }, [open, myUid]);
@@ -415,11 +445,14 @@ export function MasterScreen({ open, onClose }: Props) {
 
   const citiesKey = (master?.cities ?? []).join(',');
   const skillsKey = (master?.skills ?? []).join(',');
+  const verified = !!master?.verified;
+  const suspended = !!master?.blocked;
 
   useEffect(() => {
     // Непроверенному мастеру запросы делать незачем: правила их отклонят,
-    // а консоль засыплет permission-denied
-    if (!master?.verified || !myUid) {
+    // а консоль засыплет permission-denied. Отстранённому — тоже: правила
+    // закрыли ему ленту, а старые подписки показывали бы её из памяти
+    if (!verified || suspended || !myUid) {
       setJobs([]);
       setMyOrders([]);
       setOffersCount(0);
@@ -531,7 +564,9 @@ export function MasterScreen({ open, onClose }: Props) {
     // занято специальностями. Складывать город и специальность в одно
     // денормализованное поле было бы быстрее, но потребовало бы миграции
     // и упёрлось бы в предел на число значений.
-    const cities = master.cities.length ? master.cities.slice(0, MAX_FEED_CITIES) : [null];
+    const cityList = citiesKey ? citiesKey.split(',') : [];
+    const skillList = skillsKey ? skillsKey.split(',') : [];
+    const cities = cityList.length ? cityList.slice(0, MAX_FEED_CITIES) : [null];
     // Лимит общий на ленту, а не на каждый пункт: иначе десять городов дали
     // бы пятьсот заявок на телефоне
     const perCity = Math.max(10, Math.floor(FEED_LIMIT / cities.length));
@@ -540,8 +575,8 @@ export function MasterScreen({ open, onClose }: Props) {
       const filters = [where('status', '==', 'Поиск мастера')];
       if (city) filters.push(where('city', '==', city));
       // «in» принимает не больше десяти значений, а специальностей восемь
-      if (master.skills.length) {
-        filters.push(where('category', 'in', master.skills.slice(0, 10)));
+      if (skillList.length) {
+        filters.push(where('category', 'in', skillList.slice(0, 10)));
       }
 
       return onSnapshot(
@@ -608,7 +643,9 @@ export function MasterScreen({ open, onClose }: Props) {
       unsubMine();
       unsubOffers();
     };
-  }, [master, myUid, citiesKey, skillsKey]);
+    // Зависимости — примитивы, а не объект анкеты: тот приходит новым на
+    // каждое обновление рейтинга, и подписки пересоздавались бы зря
+  }, [verified, suspended, myUid, citiesKey, skillsKey]);
 
   // Сводка цен по заявкам республики. Правила открывают её только
   // проверенным мастерам; персональных данных там нет — гистограмма и счётчики.
@@ -731,7 +768,8 @@ export function MasterScreen({ open, onClose }: Props) {
           return {
             id: m.id,
             from: v.senderId === myUid ? 'me' : 'client',
-            text: v.text,
+            // Стёртое при удалении аккаунта сообщение: место остаётся, слов нет
+            text: v.redactedAt ? 'Сообщение удалено' : v.text,
             time: v.time,
             ...(typeof v.imageUrl === 'string' ? { imageUrl: v.imageUrl } : {}),
           };
@@ -753,7 +791,9 @@ export function MasterScreen({ open, onClose }: Props) {
     try {
       await setDoc(doc(db, 'orders', jobId, 'offers', myUid), {
         masterId: myUid,
-        masterName: master.name || 'Мастер',
+        // Ровно как в анкете: правила сверяют имя с masters/{uid}, чтобы в
+        // пуше клиенту нельзя было представиться кем угодно
+        masterName: master.name,
         price,
         comment: comment.trim().slice(0, 300),
         status: 'pending',
@@ -785,7 +825,7 @@ export function MasterScreen({ open, onClose }: Props) {
     const previous = jobs.find((j) => j.id === jobId)?.price;
     try {
       await updateDoc(doc(db, 'orders', jobId), {
-        masterName: master?.name ?? 'Мастер',
+        masterName: master?.name ?? '',
         price,
         priceStatus: 'offered',
         priceHistory: arrayUnion({
@@ -810,12 +850,16 @@ export function MasterScreen({ open, onClose }: Props) {
   };
 
   // Мастер отмечает работу выполненной — подтверждать её будет клиент
-  const finishJob = (jobId: string) => {
-    updateDoc(doc(db, 'orders', jobId), { status: 'Ждёт подтверждения' }).catch((e) => {
+  const finishJob = async (jobId: string) => {
+    try {
+      await updateDoc(doc(db, 'orders', jobId), { status: 'Ждёт подтверждения' });
+    } catch (e) {
       console.warn('Не удалось завершить заявку:', e);
       showNotice(firestoreErrorText(e, 'Не удалось отметить работу выполненной. Проверьте связь'));
-    });
-
+      return;
+    }
+    // Сообщение — после отметки: иначе «работа выполнена» уходило бы в чат
+    // и тогда, когда сама отметка не прошла
     pushMessage(jobId, 'Работа выполнена. Спасибо, что выбрали меня!');
   };
 
@@ -878,9 +922,14 @@ export function MasterScreen({ open, onClose }: Props) {
       style={[StyleSheet.absoluteFill, styles.root, layerStyle]}
       pointerEvents={open ? 'auto' : 'none'}
     >
-      {/* Пока модератор не подтвердил анкету, ленты нет: в заявках лежат
-          адреса и фотографии жилья клиентов */}
-      {!master?.verified || editingProfile ? (
+      {/* Закрытый раздел не рисуется; до первого чтения анкеты — только
+          индикатор. Пока модератор не подтвердил анкету, ленты нет: в
+          заявках лежат адреса и фотографии жилья клиентов */}
+      {!rendered ? null : !profileLoaded || !applicationLoaded ? (
+        <View style={styles.loading}>
+          <ActivityIndicator color={t.accent} />
+        </View>
+      ) : !master?.verified || editingProfile ? (
         <MasterApplicationScreen
           uid={myUid}
           profile={master}
@@ -1077,7 +1126,9 @@ function MasterApplicationScreen({
     setError(null);
     setLoading(true);
     try {
-      await deleteVerificationPhoto(myUid);
+      // Сначала анкета, потом файл: правила пускают этот переход и у
+      // проверенного, и у ожидающего проверки. Обратный порядок при сбое
+      // оставлял бы анкету со ссылкой на уже удалённый снимок.
       await updateDoc(doc(db, 'masters', myUid, 'verification', 'application'), {
         photoUrl: null,
         biometricConsent: null,
@@ -1086,6 +1137,7 @@ function MasterApplicationScreen({
       if (verified) {
         await updateDoc(doc(db, 'masters', myUid), { verified: false });
       }
+      await deleteVerificationPhoto(myUid);
       setPhotoUri(null);
       setFaceConsent(false);
     } catch (e) {
@@ -1761,7 +1813,9 @@ export function JobList({
             return (
               <Animated.View
                 key={job.id}
-                entering={FadeInDown.delay(firstBatch ? 140 + i * STAGGER : 0).duration(340)}
+                entering={FadeInDown.delay(
+                  firstBatch ? 140 + Math.min(i, 8) * STAGGER : 0,
+                ).duration(340)}
                 exiting={FadeOut.duration(180)}
                 layout={LinearTransition.springify().damping(20).stiffness(170)}
               >
@@ -2640,7 +2694,7 @@ export function JobDetail({
           const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
           atBottom.current = contentOffset.y >= contentSize.height - layoutMeasurement.height - 40;
         }}
-        scrollEventThrottle={16}
+        scrollEventThrottle={100}
         onContentSizeChange={() => {
           // Пока экран открывается, к концу — прыжком; дальше — плавно
           if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: settled() });
@@ -3046,6 +3100,7 @@ const makeStyles = (t: Palette) =>
   StyleSheet.create({
     root: { backgroundColor: t.bg },
     fill: { flex: 1 },
+    loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     // Верхний отступ добавляется на месте — от системной зоны прибора
     topBar: {
       flexDirection: 'row',

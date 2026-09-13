@@ -472,7 +472,7 @@ export function SupportChat({
           const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
           atBottom.current = contentOffset.y >= contentSize.height - layoutMeasurement.height - 40;
         }}
-        scrollEventThrottle={16}
+        scrollEventThrottle={100}
         onContentSizeChange={() => {
           if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: true });
         }}

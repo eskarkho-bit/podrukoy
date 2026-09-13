@@ -7,6 +7,7 @@ import Animated, {
   SlideOutDown,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import { BLUR_METHOD } from './blur';
 import { palettes, Palette, useTheme } from '../theme';
 import { useBackClose } from './backClose';
 import { PressableScale } from './PressableScale';
@@ -41,7 +42,7 @@ export function ObjectListSheet({ onClose, onPick }: Props) {
         <BlurView
           intensity={26}
           tint={mode === 'dark' ? 'dark' : 'light'}
-          experimentalBlurMethod="dimezisBlurView"
+          experimentalBlurMethod={BLUR_METHOD}
           style={StyleSheet.absoluteFill}
         />
         <Pressable style={[StyleSheet.absoluteFill, styles.dim]} onPress={onClose} />

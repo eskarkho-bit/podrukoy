@@ -9,7 +9,8 @@ import {
 import { initializeApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { pushTo, pushToAdmins } from './push';
-import { notifyMastersAbout } from './orderPush';
+import { notifyMastersAbout, orderBurstExceeded } from './orderPush';
+import { meterExceeded } from './meters';
 import { shareOrderContacts } from './orderContacts';
 import { notePaymentMarks } from './orderPayment';
 import { handleMasterDecline } from './orderDecline';
@@ -42,6 +43,35 @@ initializeApp();
 
 const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
 
+// Обращения в поддержку: пуш модераторам не чаще раза в столько на человека
+const SUPPORT_PUSH_WINDOW_MS = 10 * 60_000;
+
+/**
+ * Можно ли звать прошлого мастера лично: допуск на месте, клиент его не
+ * заблокировал и у них действительно была общая заявка. Без последней
+ * проверки поле preferredMasterId стало бы способом дёргать пушем любого
+ * мастера по uid.
+ */
+async function preferredMasterAllowed(
+  order: FirebaseFirestore.DocumentData,
+  masterId: string,
+): Promise<boolean> {
+  const db = getFirestore();
+  const clientId = String(order.clientId ?? '');
+  const master = await db.doc(`masters/${masterId}`).get();
+  if (master.get('verified') !== true || master.get('blocked') === true) return false;
+  const blocked = (await db.doc(`users/${clientId}`).get()).get('blockedMasters');
+  if (Array.isArray(blocked) && blocked.includes(masterId)) return false;
+  // Два равенства — Firestore обходится одиночными индексами, составной не нужен
+  const prior = await db
+    .collection('orders')
+    .where('clientId', '==', clientId)
+    .where('masterId', '==', masterId)
+    .limit(1)
+    .get();
+  return !prior.empty;
+}
+
 // ---------- новая заявка → мастерам ----------
 
 // Выборка «кому слать» — в orderPush.ts: тот же код зовёт мастеров повторно
@@ -70,17 +100,31 @@ export const onOrderCreated = onDocumentCreated('orders/{orderId}', async (event
     },
   });
 
-  await notifyMastersAbout(order, 'Новая заявка рядом', { excludeUid: preferred ?? undefined });
+  // Один аккаунт не должен будить всех мастеров города каждую минуту: сверх
+  // лимита заявка создаётся и видна в ленте, но рассылки по ней нет
+  if (await orderBurstExceeded(String(order.clientId ?? ''))) {
+    await audit({
+      action: 'order.push_throttled',
+      actor: SYSTEM,
+      subject: { type: 'order', id: event.params.orderId },
+      correlationId: event.id,
+    });
+    logger.warn('Рассылка о заявке пропущена: слишком много заявок от клиента', {
+      orderId: event.params.orderId,
+    });
+    return;
+  }
 
-  if (preferred) {
-    // Проверка допуска та же, что в общей рассылке: непроверенного мастера
-    // правила к заявке не пустят, и звать его туда незачем
-    const master = await getFirestore().doc(`masters/${preferred}`).get();
-    if (master.get('verified') === true) {
-      await pushTo([preferred], 'Ваш клиент снова зовёт вас', String(order.title ?? 'Заявка'), {
-        href: '/profile',
-      });
-    }
+  const preferredOk = preferred ? await preferredMasterAllowed(order, preferred) : false;
+
+  await notifyMastersAbout(order, 'Новая заявка рядом', {
+    excludeUid: preferredOk && preferred ? preferred : undefined,
+  });
+
+  if (preferredOk && preferred) {
+    await pushTo([preferred], 'Ваш клиент снова зовёт вас', String(order.title ?? 'Заявка'), {
+      href: '/profile',
+    });
   }
 });
 
@@ -135,8 +179,11 @@ export const onMessageCreated = onDocumentCreated(
     if (!to) return;
 
     const fromClient = message.senderId === clientId;
-    // У сообщения-фотографии текста нет — пуш должен сказать хоть что-то
-    const body = String(message.text ?? '').trim() || (message.imageUrl ? 'Фото' : '');
+    // Текст сообщения в пуш не кладём: он проходит через сервис Expo и
+    // ложится на экран блокировки, а в переписке по заявке бывают адрес и
+    // телефон. Пуш говорит, что есть новое, — само сообщение ждёт в чате.
+    const body =
+      message.imageUrl && !String(message.text ?? '').trim() ? 'Фото' : 'Новое сообщение';
     await pushTo(
       [to],
       fromClient
@@ -255,6 +302,16 @@ export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async 
   }
 
   if (after.status === 'Отменена') {
+    // Сделки больше нет — телефоны и реквизиты сторон из заявки уходят: без
+    // этого отменённая заявка оставалась бы справочником чужих номеров
+    if (after.masterPhone != null || after.clientPhone != null || after.masterBanks != null) {
+      await getFirestore()
+        .doc(`orders/${event.params.orderId}`)
+        .set(
+          { masterPhone: null, clientPhone: null, masterBanks: null, masterAcceptsCash: null },
+          { merge: true },
+        );
+    }
     if (masterId) {
       await pushTo(
         [masterId],
@@ -281,15 +338,27 @@ export const onSupportMessageCreated = onDocumentCreated(
     const message = event.data?.data();
     if (!message || message.auto === true) return;
 
-    const text = String(message.text ?? '');
-
+    // Текст обращения в пуш не кладём — по той же причине, что и в переписке
+    // по заявке: чужой сервис и экран блокировки. Читают его в приложении.
     if (message.from === 'user') {
-      const delivered = await pushToAdmins('Обращение в поддержку', text, { href: '/profile' });
+      // Не чаще раза в десять минут на человека: серия сообщений подряд —
+      // одно обращение, а не десять пушей всем модераторам
+      const throttled = await meterExceeded(
+        `supportPush-${event.params.uid}`,
+        1,
+        SUPPORT_PUSH_WINDOW_MS,
+      );
+      if (throttled) return;
+      const delivered = await pushToAdmins('Обращение в поддержку', 'Новое сообщение', {
+        href: '/profile',
+      });
       if (!delivered) logger.warn('Обращение в поддержку, но модераторов нет — некому отвечать');
       return;
     }
 
-    await pushTo([event.params.uid], 'Поддержка', text, { href: '/messages' });
+    await pushTo([event.params.uid], 'Поддержка', 'Вам ответили — откройте переписку', {
+      href: '/messages',
+    });
   },
 );
 

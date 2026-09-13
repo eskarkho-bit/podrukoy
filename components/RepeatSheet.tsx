@@ -19,6 +19,7 @@ import Animated, {
   ZoomIn,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import { BLUR_METHOD } from './blur';
 import { palettes, Palette, useTheme } from '../theme';
 import { AnimatedCheck } from './AnimatedCheck';
 import { useBackClose } from './backClose';
@@ -43,17 +44,19 @@ import type { Order } from '../screens/OrdersScreen';
 
 type Props = {
   order: Order;
+  // Прошлого мастера клиент заблокировал: звать его первым не предлагаем
+  masterBlocked?: boolean;
   onClose: () => void;
   // Вызывается после «успеха» — с собранным черновиком новой заявки
   onSubmit: (draft: OrderDraft) => void;
 };
 
-export function RepeatSheet({ order, onClose, onSubmit }: Props) {
+export function RepeatSheet({ order, masterBlocked, onClose, onSubmit }: Props) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [comment, setComment] = useState(order.comment ?? '');
   // Прошлый мастер зовётся по умолчанию: раз работу подтвердили, им довольны
-  const canCallMaster = !!order.masterId && !!order.masterName;
+  const canCallMaster = !!order.masterId && !!order.masterName && !masterBlocked;
   const [callMaster, setCallMaster] = useState(canCallMaster);
   const [done, setDone] = useState(false);
   const submitted = useRef(false);
@@ -124,7 +127,7 @@ export function RepeatSheet({ order, onClose, onSubmit }: Props) {
         <BlurView
           intensity={26}
           tint={mode === 'dark' ? 'dark' : 'light'}
-          experimentalBlurMethod="dimezisBlurView"
+          experimentalBlurMethod={BLUR_METHOD}
           style={StyleSheet.absoluteFill}
         />
         <Pressable

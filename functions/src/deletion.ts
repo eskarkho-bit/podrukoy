@@ -61,16 +61,31 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
     });
   };
 
-  // 1. Заявки: незакрытые отменяем, все — обезличиваем
+  // 1. Заявки: незакрытые отменяем, сданные — засчитываем мастеру, все —
+  //    обезличиваем. Свои сообщения в переписке и подпись под отзывами
+  //    уходят тем же этапом: и то и другое — его слова и его имя.
   if (!reached(stage, 'orders')) {
     const orders = await db.collection('orders').where('clientId', '==', uid).get();
     let anonymized = 0;
     for (const d of orders.docs) {
-      const open = ['Поиск мастера', 'Есть предложения', 'В работе'].includes(d.get('status'));
+      const status = String(d.get('status') ?? '');
+      const open = ['Поиск мастера', 'Есть предложения', 'В работе'].includes(status);
+      // Работа сдана, а подтвердить её больше некому — считаем принятой:
+      // иначе она висела бы у мастера «ждёт подтверждения» вечно
+      const awaiting = status === 'Ждёт подтверждения';
       await d.ref.set(
         {
-          // Мастер не должен ехать к исчезнувшему клиенту
-          ...(open ? { status: 'Отменена' } : {}),
+          // Мастер не должен ехать к исчезнувшему клиенту; сделки нет —
+          // и его контактов в заявке тоже
+          ...(open
+            ? {
+                status: 'Отменена',
+                masterPhone: null,
+                masterBanks: null,
+                masterAcceptsCash: null,
+              }
+            : {}),
+          ...(awaiting ? { status: 'Завершена', completedAt: FieldValue.serverTimestamp() } : {}),
           clientName: ANONYMOUS,
           clientPhone: null,
           address: '',
@@ -81,7 +96,26 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
         { merge: true },
       );
       await deletePrefix(`orders/${d.id}/`);
+      await redactMessages(d.ref, uid);
+      // Подпись под отзывом: сам отзыв остаётся мастеру, имя — нет
+      const masterId = d.get('masterId');
+      if (typeof masterId === 'string' && masterId) {
+        const review = db.doc(`masters/${masterId}/reviews/${d.id}`);
+        if ((await review.get()).exists) {
+          await review.set({ clientName: ANONYMOUS }, { merge: true });
+        }
+      }
       anonymized += 1;
+    }
+    // Заявки, где он был исполнителем: имя и его сообщения уходят, работа и
+    // расчёты остаются клиенту. Незаконченные разберёт удаление анкеты
+    // (masterExit.ts) этапом позже.
+    const asMaster = await db.collection('orders').where('masterId', '==', uid).get();
+    for (const d of asMaster.docs) {
+      await d.ref.set({ masterName: ANONYMOUS }, { merge: true });
+      await redactMessages(d.ref, uid);
+      // Снимки в переписке названы по отправителю — уходят по префиксу
+      await deletePrefix(`orders/${d.id}/chat/${uid}-`);
     }
     await audit({
       action: 'order.anonymized',
@@ -121,8 +155,9 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
     await advance('master');
   }
 
-  // 5. Анкета мастера. Отзывы о нём остаются: они принадлежат клиентам,
-  //    которые их написали, и к персональным данным мастера не относятся.
+  // 5. Анкета мастера вместе с отзывами о нём: анкеты, к которой они были
+  //    написаны, больше нет, а рейтинг без анкеты никому не показать.
+  //    Подколлекцию Firestore сам не удалит — обходим руками.
   if (!reached(stage, 'master')) {
     await deleteAll(db.collection(`masters/${uid}/reviews`));
     await db.doc(`masters/${uid}`).delete();
@@ -162,6 +197,28 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
     correlationId,
   });
   logger.info('Аккаунт удалён', { uid });
+}
+
+/**
+ * Стирает слова одного участника из переписки заявки: текст и снимок уходят,
+ * место сообщения остаётся — собеседник видит, что здесь что-то было.
+ * Повтор безвреден.
+ */
+async function redactMessages(order: FirebaseFirestore.DocumentReference, uid: string) {
+  const mine = await order.collection('messages').where('senderId', '==', uid).get();
+  for (let i = 0; i < mine.docs.length; i += 300) {
+    const batch = getFirestore().batch();
+    mine.docs
+      .slice(i, i + 300)
+      .forEach((m) =>
+        batch.set(
+          m.ref,
+          { text: '', imageUrl: null, redactedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        ),
+      );
+    await batch.commit();
+  }
 }
 
 /** Удаляет все документы коллекции пачками. */

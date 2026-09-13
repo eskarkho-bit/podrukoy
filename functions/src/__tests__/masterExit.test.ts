@@ -1,5 +1,5 @@
 import { getFirestore } from 'firebase-admin/firestore';
-import { initTestApp, wipe } from './helpers';
+import { fakeProvider, initTestApp, wipe } from './helpers';
 import { detachMasterFromOrders, dropPendingOffers } from '../masterExit';
 
 // Исчезновение мастера. Заявка «В работе» возвращается в поиск — и в этот
@@ -13,7 +13,10 @@ const db = getFirestore();
 const MASTER = 'master-exit';
 
 beforeEach(async () => {
-  await wipe('orders', 'users');
+  await wipe('orders', 'users', 'masters');
+  fakeProvider((_path, body) => ({
+    json: { data: (body as unknown[]).map(() => ({ status: 'ok' })) },
+  }));
 
   await db.doc('orders/in-work').set({
     clientId: 'c1',
@@ -95,6 +98,54 @@ describe('detachMasterFromOrders', () => {
     expect(done.get('masterBanks')).toBeNull();
     // Заявка, где номера уже не было, а условия ещё лежали
     expect((await db.doc('orders/done-terms-only').get()).get('masterBanks')).toBeNull();
+  });
+
+  // Деньги уже переходили из рук в руки — в поиск такую заявку не вернуть,
+  // новый исполнитель увидел бы её «оплаченной»
+  test('оплаченная работа закрывается, а не ищет нового исполнителя', async () => {
+    await db.doc('orders/in-work-paid').set({
+      clientId: 'c6',
+      masterId: MASTER,
+      masterName: 'Иван',
+      status: 'В работе',
+      paidAt: new Date(),
+      paymentMethod: 'transfer',
+      masterPhone: '+79280001122',
+      clientPhone: '+79991234567',
+      masterBanks: ['sber'],
+    });
+    await db.doc('users/c6').set({ pushTokens: ['ExponentPushToken[c6]'] });
+    const net = fakeProvider((_path, body) => ({
+      json: { data: (body as unknown[]).map(() => ({ status: 'ok' })) },
+    }));
+
+    expect(await detachMasterFromOrders(MASTER)).toBe(1);
+
+    const order = await db.doc('orders/in-work-paid').get();
+    expect(order.get('status')).toBe('Отменена');
+    // Кому платили — остаётся: без этого спор не разобрать
+    expect(order.get('masterId')).toBe(MASTER);
+    expect(order.get('paidAt')).toBeTruthy();
+    expect(order.get('masterPhone')).toBeNull();
+    expect(order.get('clientPhone')).toBeNull();
+    const sent = net.of('exp.host').flatMap((c) => c.body as { to: string; title: string }[]);
+    expect(sent.find((m) => m.to === 'ExponentPushToken[c6]')?.title).toBe('Мастер удалил аккаунт');
+  });
+
+  // Заявка снова в поиске — остальные мастера города узнают о ней заново
+  test('о возвращённой в поиск заявке узнают остальные мастера', async () => {
+    await db.doc('masters/m-other').set({ name: 'Пётр', verified: true, cities: [], skills: [] });
+    await db.doc('users/m-other').set({ pushTokens: ['ExponentPushToken[other]'] });
+    const net = fakeProvider((_path, body) => ({
+      json: { data: (body as unknown[]).map(() => ({ status: 'ok' })) },
+    }));
+
+    await detachMasterFromOrders(MASTER);
+
+    const sent = net.of('exp.host').flatMap((c) => c.body as { to: string; title: string }[]);
+    expect(sent.filter((m) => m.to === 'ExponentPushToken[other]').map((m) => m.title)).toEqual([
+      'Заявка снова ищет мастера',
+    ]);
   });
 
   test('чужие заявки не тронуты', async () => {

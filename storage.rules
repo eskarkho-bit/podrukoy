@@ -11,12 +11,15 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
     }
 
-    // Проверенный мастер — тот же критерий, что и в firestore.rules
+    // Проверенный мастер — тот же критерий, что и в firestore.rules:
+    // допуск есть и отстранения нет
     function isVerifiedMaster() {
       return request.auth != null
         && firestore.exists(/databases/(default)/documents/masters/$(request.auth.uid))
         && firestore.get(/databases/(default)/documents/masters/$(request.auth.uid))
-             .data.get('verified', false) == true;
+             .data.get('verified', false) == true
+        && firestore.get(/databases/(default)/documents/masters/$(request.auth.uid))
+             .data.get('blocked', false) != true;
     }
 
     function isImage() {
@@ -49,8 +52,11 @@ service firebase.storage {
         || (order().status == 'Поиск мастера' && isVerifiedMaster())
       );
 
+      // Снимок пишется, пока заявку никто не взял — тот же замок, что у
+      // ссылки в самой заявке: подменить фото у мастера в работе нельзя
       allow write: if request.auth != null
         && order().clientId == request.auth.uid
+        && order().status == 'Поиск мастера'
         && request.resource.size < 10 * 1024 * 1024
         && isImage();
 
@@ -77,7 +83,9 @@ service firebase.storage {
 
       allow read: if isParty() || isAdmin();
 
+      // Пока сделка жива — как и сами сообщения в firestore.rules
       allow write: if isParty()
+        && order().status in ['В работе', 'Ждёт подтверждения', 'Завершена']
         && request.resource.size < 10 * 1024 * 1024
         && isImage();
     }
@@ -85,7 +93,9 @@ service firebase.storage {
     // Фотография лица для проверки мастера. В отличие от фото заявки это
     // документ, удостоверяющий личность: видят его только сам мастер и
     // модератор, никакой «любой авторизованный» здесь недопустим.
-    match /verification/{uid}/{allPaths=**} {
+    // Ровно один файл, face.jpg: под свободным именем любой аккаунт складывал
+    // бы сюда что угодно до восьми мегабайт за файл без счёта
+    match /verification/{uid}/face.jpg {
       allow read: if request.auth != null
         && (request.auth.uid == uid || isAdmin());
       allow write: if request.auth != null
@@ -94,15 +104,6 @@ service firebase.storage {
         && isImage();
       // Снимок удаляется вместе с аккаунтом
       allow delete: if request.auth != null && request.auth.uid == uid;
-    }
-
-    // Аватары
-    match /avatars/{uid} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-        && request.auth.uid == uid
-        && request.resource.size < 5 * 1024 * 1024
-        && isImage();
     }
 
     match /{allPaths=**} {

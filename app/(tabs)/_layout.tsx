@@ -21,6 +21,9 @@ export default function TabsLayout() {
           headerShown: false,
           animation: 'fade',
           sceneStyle: { backgroundColor: 'transparent' },
+          // Скрытая вкладка не перерисовывается: иначе дом с его анимациями
+          // отрабатывал каждое событие Firestore, пока человек в переписке
+          freezeOnBlur: true,
         }}
       >
         <Tabs.Screen name="index" />

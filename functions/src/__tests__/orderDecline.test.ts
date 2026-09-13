@@ -35,7 +35,7 @@ const event = async () => {
 };
 
 beforeEach(async () => {
-  await wipe('orders', 'users', 'audit');
+  await wipe('orders', 'users', 'audit', 'masters');
   await db.doc(`users/${CLIENT}`).set({ pushTokens: ['ExponentPushToken[client]'] });
   await seed();
   await db.doc(`orders/o1/offers/${MASTER}`).set({ masterId: MASTER, status: 'accepted' });
@@ -86,6 +86,46 @@ test('повтор доставки не шлёт второй пуш и не п
   expect(net.of('exp.host')).toHaveLength(1);
   const entries = await db.collection('audit').get();
   expect(entries.docs.filter((d) => d.get('action') === 'order.master_declined')).toHaveLength(1);
+});
+
+// Заявка снова в поиске — остальные мастера должны узнать об этом так же,
+// как о новой: при создании она ушла к другому, и о ней забыли
+test('остальные мастера узнают, что заявка снова ищет исполнителя', async () => {
+  const net = fakeProvider((_path, body) => ({
+    json: { data: (body as unknown[]).map(() => ({ status: 'ok' })) },
+  }));
+  await db.doc('masters/m-other').set({ name: 'Пётр', verified: true, cities: [], skills: [] });
+  await db.doc('users/m-other').set({ pushTokens: ['ExponentPushToken[other]'] });
+  // Сам отказавшийся о своей заявке второй раз не слышит
+  await db.doc(`masters/${MASTER}`).set({ name: 'Иван', verified: true, cities: [], skills: [] });
+  await db.doc(`users/${MASTER}`).set({ pushTokens: ['ExponentPushToken[declined]'] });
+  const { before, after } = await event();
+
+  await handleMasterDecline('o1', before, after, 'test');
+
+  const sent = net.of('exp.host').flatMap((c) => c.body as { to: string; title: string }[]);
+  expect(sent.map((m) => m.to).sort()).toEqual([
+    'ExponentPushToken[client]',
+    'ExponentPushToken[other]',
+  ]);
+  expect(sent.find((m) => m.to === 'ExponentPushToken[other]')?.title).toBe(
+    'Заявка снова ищет мастера',
+  );
+});
+
+// Деньги уже переходили из рук в руки — новый исполнитель увидел бы заявку
+// «оплаченной». Правила такую отметку не пропускают; сервер — тоже.
+test('после отметки об оплате заявка в поиск не возвращается', async () => {
+  const net = fakeProvider(() => ({ json: { data: [{ status: 'ok' }] } }));
+  await seed({ paidAt: new Date(), paymentMethod: 'transfer' });
+  const { before, after } = await event();
+
+  expect(await handleMasterDecline('o1', before, after, 'test')).toBe(true);
+
+  const order = await db.doc('orders/o1').get();
+  expect(order.get('status')).toBe('В работе');
+  expect(order.get('masterId')).toBe(MASTER);
+  expect(net.calls).toHaveLength(0);
 });
 
 test('заявка уже не в работе — не трогается', async () => {

@@ -31,6 +31,8 @@ export type AuditAction =
   // мастер отказался от взятой заявки — сервер вернул её в поиск
   | 'order.master_declined'
   | 'order.repushed'
+  // рассылка о заявке пропущена: клиент создаёт их чаще, чем положено
+  | 'order.push_throttled'
   | 'order.reminder_sent'
   | 'order.anonymized'
   | 'order.contacts_shared'

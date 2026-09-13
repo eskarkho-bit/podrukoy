@@ -20,6 +20,7 @@ import Animated, {
   ZoomIn,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import { BLUR_METHOD } from './blur';
 import * as ImagePicker from 'expo-image-picker';
 import { palettes, Palette, useTheme } from '../theme';
 import { AnimatedCheck } from './AnimatedCheck';
@@ -218,7 +219,7 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
         <BlurView
           intensity={26}
           tint={mode === 'dark' ? 'dark' : 'light'}
-          experimentalBlurMethod="dimezisBlurView"
+          experimentalBlurMethod={BLUR_METHOD}
           style={StyleSheet.absoluteFill}
         />
         <Pressable

@@ -30,8 +30,41 @@ async function seed() {
     clientName: 'Дмитрий',
     address: 'ул. Ленина, 24',
     clientPhone: '+79991234567',
+    masterId: 'm-x',
     status: 'Завершена',
   });
+  // Переписка: свои слова уходят, слова мастера остаются
+  await db.doc('orders/done-one/messages/mine').set({
+    senderId: UID,
+    text: 'мой адрес — Ленина, 24, кв. 7',
+    imageUrl: 'https://example.com/chat.jpg',
+  });
+  await db.doc('orders/done-one/messages/his').set({ senderId: 'm-x', text: 'еду' });
+  // Отзыв о мастере с подписью
+  await db.doc('masters/m-x/reviews/done-one').set({
+    orderId: 'done-one',
+    clientId: UID,
+    clientName: 'Дмитрий',
+    stars: 5,
+    text: 'Отлично',
+  });
+  // Работа сдана, подтвердить некому
+  await db.doc('orders/awaiting-one').set({
+    clientId: UID,
+    clientName: 'Дмитрий',
+    masterId: 'm-x',
+    status: 'Ждёт подтверждения',
+  });
+  // Он же был исполнителем у другого клиента
+  await db.doc('orders/as-master').set({
+    clientId: 'c-other',
+    clientName: 'Аслан',
+    masterId: UID,
+    masterName: 'Дмитрий',
+    status: 'Завершена',
+  });
+  await db.doc('orders/as-master/messages/mine').set({ senderId: UID, text: 'буду в три' });
+  await db.doc('orders/as-master/messages/his').set({ senderId: 'c-other', text: 'жду' });
 
   await db.doc(`masters/${UID}`).set({ name: 'Дмитрий', verified: true });
   await db.doc(`masters/${UID}/verification/application`).set({ phone: '79991234567' });
@@ -99,6 +132,44 @@ describe('полное удаление', () => {
     expect((await db.doc('orders/open-one').get()).get('status')).toBe('Отменена');
     // Завершённую трогать незачем: работа сделана и оплачена
     expect((await db.doc('orders/done-one').get()).get('status')).toBe('Завершена');
+  });
+
+  // Подтвердить сданную работу больше некому — иначе она висела бы у мастера
+  // «ждёт подтверждения» вечно
+  test('сданная работа засчитывается мастеру', async () => {
+    await runDeletion(UID, 'test');
+
+    const awaiting = await db.doc('orders/awaiting-one').get();
+    expect(awaiting.get('status')).toBe('Завершена');
+    expect(awaiting.get('completedAt')).toBeTruthy();
+    expect(awaiting.get('clientName')).toBe('Удалённый аккаунт');
+  });
+
+  // Слова человека — его данные, где бы он их ни писал: клиентом или мастером
+  test('его сообщения стираются, чужие остаются', async () => {
+    await runDeletion(UID, 'test');
+
+    const mine = await db.doc('orders/done-one/messages/mine').get();
+    expect(mine.get('text')).toBe('');
+    expect(mine.get('imageUrl')).toBeNull();
+    expect(mine.get('redactedAt')).toBeTruthy();
+    expect((await db.doc('orders/done-one/messages/his').get()).get('text')).toBe('еду');
+
+    expect((await db.doc('orders/as-master/messages/mine').get()).get('text')).toBe('');
+    expect((await db.doc('orders/as-master/messages/his').get()).get('text')).toBe('жду');
+  });
+
+  test('подпись под отзывом и имя исполнителя в чужих заявках уходят', async () => {
+    await runDeletion(UID, 'test');
+
+    const review = await db.doc('masters/m-x/reviews/done-one').get();
+    expect(review.exists).toBe(true);
+    expect(review.get('clientName')).toBe('Удалённый аккаунт');
+    expect(review.get('stars')).toBe(5);
+
+    const asMaster = await db.doc('orders/as-master').get();
+    expect(asMaster.get('masterName')).toBe('Удалённый аккаунт');
+    expect(asMaster.get('clientName')).toBe('Аслан');
   });
 
   test('заявка помечается выполненной', async () => {

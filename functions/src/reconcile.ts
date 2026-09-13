@@ -4,6 +4,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { audit, SYSTEM } from './audit';
 import { runDeletion } from './deletion';
 import { notifyMastersAbout } from './orderPush';
+import { purgeExpiredMeters } from './meters';
 
 // Сверка: доводит до конца то, что не доехало событиями.
 //
@@ -40,6 +41,7 @@ const LOCK = 'system/reconcile';
 type Counters = {
   deletionsResumed: number;
   ordersRepushed: number;
+  metersPurged: number;
   errors: number;
 };
 
@@ -181,6 +183,7 @@ export const reconcile = onSchedule(
     const counters: Counters = {
       deletionsResumed: 0,
       ordersRepushed: 0,
+      metersPurged: 0,
       errors: 0,
     };
 
@@ -194,6 +197,9 @@ export const reconcile = onSchedule(
     try {
       await sweepDeletions(runId, counters);
       await repushSilentOrders(runId, counters);
+      // Счётчики лимитов (meters.ts) живут, пока живо их окно, — тут они и
+      // умирают: без этого коллекция росла бы на каждый вход по телефону
+      counters.metersPurged += await purgeExpiredMeters(BATCH);
     } catch (e) {
       counters.errors += 1;
       logger.error('Прогон сверки прерван', e);

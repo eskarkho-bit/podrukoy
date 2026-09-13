@@ -18,7 +18,16 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { ReactNode, createContext, useContext, useEffect, useRef, useState } from 'react';
+import {
+  ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { db } from '../firebaseConfig';
 import { ChatMessage, Thread } from '../screens/MessagesScreen';
 import { Offer, Order } from '../screens/OrdersScreen';
@@ -167,6 +176,14 @@ type AppState = {
 const masterThreadName = (order?: { masterName?: string | null }) =>
   order?.masterName ? `Мастер ${order.masterName}` : 'Мастер';
 
+// Столько токенов устройств держит профиль — столько же пускают правила.
+// Переустановка выдаёт новый токен, и без обрезки старые копились бы вечно
+const MAX_PUSH_TOKENS = 10;
+
+// Пока сделка жива, в чате по заявке можно писать; в поиске собеседника ещё
+// нет, в отменённой — уже не о чем. Тот же список, что в firestore.rules.
+const TALKABLE = ['В работе', 'Ждёт подтверждения', 'Завершена'];
+
 const AppStateContext = createContext<AppState | null>(null);
 
 export function useAppState() {
@@ -195,8 +212,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [orderThreads, setOrderThreads] = useState<Thread[]>([]);
   const [supportThreads, setSupportThreads] = useState<Thread[]>([]);
   // Прочитанность считаем на устройстве: писать её в базу на каждое открытие
-  // чата — лишние запросы ради бейджа
-  const [readThreads, setReadThreads] = useState<Set<string>>(new Set());
+  // чата — лишние запросы ради бейджа. Запоминается последнее увиденное
+  // сообщение, а не сам факт открытия: иначе чат, открытый однажды, больше
+  // никогда не становился бы непрочитанным
+  const [readThreads, setReadThreads] = useState<Map<string, string>>(new Map());
+  // Профиль прочитан хотя бы раз — только тогда есть куда писать токен
+  const [profileReady, setProfileReady] = useState(false);
+  const profileTokensRef = useRef<string[]>([]);
+  const [pushToken, setPushToken] = useState<string | null>(null);
   const [userName, setUserNameLocal] = useState('');
   const [addresses, setAddresses] = useState<string[]>([DEFAULT_ADDRESS]);
   const [activeAddress, setActiveAddressLocal] = useState(DEFAULT_ADDRESS);
@@ -252,6 +275,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   };
 
   const userDoc = () => (uid ? doc(db, 'users', uid) : null);
+  // Для колбэков с постоянной ссылкой: uid читается в момент вызова, а не
+  // запекается в замыкание при первом рендере
+  const uidRef = useRef(uid);
+  uidRef.current = uid;
 
   // Идёт удаление аккаунта. Без этого флага подписка на профиль увидела бы
   // только что удалённый документ и тут же создала его заново.
@@ -271,6 +298,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setPushOffLocal(false);
       setBlockedMasterIds([]);
       setBlockedMasterNames({});
+      setProfileReady(false);
       deleting.current = false;
       return;
     }
@@ -301,6 +329,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           return;
         }
         const d = snap.data();
+        profileTokensRef.current = Array.isArray(d.pushTokens) ? d.pushTokens.map(String) : [];
+        setProfileReady(true);
         setUserNameLocal(d.name ?? '');
         setAddresses(
           Array.isArray(d.addresses) && d.addresses.length ? d.addresses : [DEFAULT_ADDRESS],
@@ -347,21 +377,30 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [uid]);
 
   // ---------- push-токен ----------
-  // Складываем в профиль список токенов: у одного человека может быть
-  // несколько устройств, и серверу потом нужно знать их все
+  // Токен устройства — один на запуск: разрешение на уведомления спрашивается
+  // здесь же, и второй раз просить его после смены аккаунта незачем
   useEffect(() => {
-    if (!uid) return;
     let alive = true;
     getPushToken().then((token) => {
-      if (!alive || !token) return;
-      updateDoc(doc(db, 'users', uid), { pushTokens: arrayUnion(token) }).catch((e) =>
-        console.warn('Не удалось сохранить push-токен:', e),
-      );
+      if (alive) setPushToken(token);
     });
     return () => {
       alive = false;
     };
-  }, [uid]);
+  }, []);
+
+  // Складываем в профиль список токенов: у одного человека может быть
+  // несколько устройств, и серверу потом нужно знать их все. Пишем, когда
+  // профиль уже прочитан: раньше писать некуда, а arrayUnion без обрезки
+  // копил бы токены переустановок, пока правила не отказали бы в записи
+  useEffect(() => {
+    if (!uid || !pushToken || !profileReady) return;
+    const list = profileTokensRef.current;
+    if (list.includes(pushToken)) return;
+    updateDoc(doc(db, 'users', uid), {
+      pushTokens: [...list.filter((t) => t !== pushToken).slice(1 - MAX_PUSH_TOKENS), pushToken],
+    }).catch((e) => console.warn('Не удалось сохранить push-токен:', e));
+  }, [uid, pushToken, profileReady]);
 
   // ---------- заказы ----------
   useEffect(() => {
@@ -465,9 +504,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   // Подписываемся только на заявки в поиске: после выбора мастера предложения
   // уже ничего не решают
+  // Ключ — отсортированный список: заявки приходят отсортированными по
+  // времени, а у только что созданной время появляется с задержкой, и без
+  // сортировки перестановка пересоздавала бы все подписки дважды на заявку
   const openOrderIdsKey = orders
     .filter((o) => o.status === 'Поиск мастера')
     .map((o) => o.id)
+    .sort()
     .join(',');
 
   useEffect(() => {
@@ -515,7 +558,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // ---------- переписка по заявкам ----------
   // Общий чат клиента и мастера лежит внутри самой заявки: права доступа
   // выводятся из неё, и обе стороны видят одни и те же сообщения.
-  const orderIdsKey = orders.map((o) => o.id).join(',');
+  const orderIdsKey = orders
+    .map((o) => o.id)
+    .sort()
+    .join(',');
 
   // Подписка перезапускается только при смене набора заявок, а имя мастера
   // появляется в уже существующей. Замыкание держало бы `orders` на момент
@@ -544,7 +590,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               id: m.id,
               // «свой» — тот, кто отправил; для клиента это он сам
               from: v.senderId === uid ? 'user' : 'master',
-              text: v.text,
+              // Стёртое при удалении аккаунта сообщение: место остаётся, слов нет
+              text: v.redactedAt ? 'Сообщение удалено' : v.text,
               time: v.time,
               ...(typeof v.imageUrl === 'string' ? { imageUrl: v.imageUrl } : {}),
             };
@@ -938,11 +985,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (ref) updateDoc(ref, { city: trimmed }).catch(() => {});
   };
 
-  const setThemeMode = (next: ThemeMode) => {
+  const setThemeMode = useCallback((next: ThemeMode) => {
     setThemeModeLocal(next);
-    const ref = userDoc();
-    if (ref) updateDoc(ref, { themeMode: next }).catch(() => {});
-  };
+    const u = uidRef.current;
+    if (u) updateDoc(doc(db, 'users', u), { themeMode: next }).catch(() => {});
+  }, []);
+
+  // Значение темы держится одно, пока не сменилась сама тема: объект,
+  // пересоздаваемый на каждый рендер провайдера, заставлял перерисовываться
+  // каждый компонент с useTheme() при каждом событии Firestore — а их у
+  // клиента с десятком заявок несколько десятков на старте
+  const themeValue = useMemo(
+    () => ({ mode: themeMode, colors: palettes[themeMode], setMode: setThemeMode }),
+    [themeMode, setThemeMode],
+  );
 
   const setRemindersOff = (off: boolean) => {
     setRemindersOffLocal(off);
@@ -1010,6 +1066,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       [`blockedMasterNames.${masterId}`]: name,
     }).catch((e) => {
       setBlockedMasterIds((prev) => prev.filter((id) => id !== masterId));
+      setBlockedMasterNames((prev) => {
+        const next = { ...prev };
+        delete next[masterId];
+        return next;
+      });
       failed('Не удалось заблокировать мастера. Проверьте связь')(e);
     });
   };
@@ -1034,7 +1095,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const markThreadRead = (threadId: string) => {
     if (!uid) return;
-    setReadThreads((prev) => new Set(prev).add(threadId));
+    const thread = [...orderThreads, ...supportThreads].find((t) => t.id === threadId);
+    const lastId = thread?.messages[thread.messages.length - 1]?.id ?? '';
+    setReadThreads((prev) => new Map(prev).set(threadId, lastId));
     if (threadId === SUPPORT_THREAD_ID) {
       updateDoc(doc(db, 'users', uid, 'threads', threadId), { unread: false }).catch(() => {});
     }
@@ -1159,6 +1222,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setMasterOpen(false);
     setChatOpen(false);
     setOverlayOpen(false);
+    // Токен этого устройства уходит из профиля: после выхода сюда не должны
+    // приходить уведомления ушедшего аккаунта — телефон могли передать
+    if (uid && pushToken) {
+      await updateDoc(doc(db, 'users', uid), { pushTokens: arrayRemove(pushToken) }).catch(
+        () => {},
+      );
+    }
     await signOutUser();
   };
 
@@ -1258,15 +1328,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     await quietly(signOutUser());
   };
 
-  // Непрочитанным считаем чат, где последнее сообщение не наше и который
-  // не открывали в этой сессии
+  // Непрочитанным считаем чат, где последнее сообщение не наше и его ещё
+  // не видели: у поддержки флаг ставит сервер, у заявок — сам список.
+  // Закрытым — чат заявки, по которой сделки больше нет: правила туда не
+  // пустят, и поле ввода не должно обещать обратного
   const threads: Thread[] = [...orderThreads, ...supportThreads].map((t) => {
     const last = t.messages[t.messages.length - 1];
+    const seen = readThreads.get(t.id);
     const unread =
       t.id === SUPPORT_THREAD_ID
-        ? t.unread && !readThreads.has(t.id)
-        : !!last && last.from === 'master' && !readThreads.has(t.id);
-    return unread === t.unread ? t : { ...t, unread };
+        ? t.unread && seen !== last?.id
+        : !!last && last.from === 'master' && seen !== last.id;
+    const order = t.id === SUPPORT_THREAD_ID ? undefined : orders.find((o) => o.id === t.id);
+    const closed = !!order && !TALKABLE.includes(order.status);
+    return unread === t.unread && closed === !!t.closed ? t : { ...t, unread, closed };
   });
 
   const hasUnreadMessages = threads.some((t) => t.unread);
@@ -1362,9 +1437,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ThemeContext.Provider
-      value={{ mode: themeMode, colors: palettes[themeMode], setMode: setThemeMode }}
-    >
+    <ThemeContext.Provider value={themeValue}>
       <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
     </ThemeContext.Provider>
   );

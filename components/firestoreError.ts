@@ -3,6 +3,14 @@
 // Появился после того, как отказ по правам доступа показывался как «проверьте
 // связь»: человек проверял интернет, а дело было в незадеплоенных правилах.
 // Сообщение об ошибке обязано вести к причине, иначе оно хуже, чем ничего.
+//
+// Причина причине рознь: «нужен firebase deploy» ведёт разработчика, а
+// пользователю магазинной сборки говорит лишь, что приложение сломано, и
+// выдаёт устройство проекта. Поэтому подсказки про деплой и индексы
+// добавляются только в отладочной сборке.
+
+/** Подсказка разработчику; в магазинной сборке — пустая строка. */
+const dev = (hint: string) => (__DEV__ ? ` (${hint})` : '');
 
 export function firestoreErrorCode(e: unknown): string {
   return typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
@@ -12,10 +20,10 @@ export function firestoreErrorText(e: unknown, fallback: string): string {
   switch (firestoreErrorCode(e)) {
     case 'permission-denied':
     case 'storage/unauthorized':
-      // Самая частая причина — правила в проекте старше кода
+      // У разработчика самая частая причина — правила в проекте старше кода
       return (
-        'Недостаточно прав. Похоже, правила доступа Firebase не обновлены ' +
-        '— нужен firebase deploy'
+        'Действие недоступно: недостаточно прав. Если это повторяется, напишите в поддержку' +
+        dev('правила доступа Firebase старше кода — нужен firebase deploy')
       );
     case 'unauthenticated':
       return 'Сессия истекла — войдите заново';
@@ -36,7 +44,7 @@ export function firestoreErrorText(e: unknown, fallback: string): string {
       return 'Слишком много запросов. Попробуйте через несколько минут';
     case 'failed-precondition':
       // Обычно это отсутствующий составной индекс
-      return 'Запрос не выполнен: в Firebase не хватает индекса';
+      return 'Запрос не выполнен. Попробуйте позже' + dev('в Firebase не хватает индекса');
     case 'storage/quota-exceeded':
       return 'Хранилище переполнено';
     default:
@@ -66,8 +74,10 @@ export function callableErrorText(e: unknown, fallback: string): string {
     case 'unavailable':
     case 'internal':
     case 'deadline-exceeded':
-      // Самая вероятная причина до запуска — функции ещё не развёрнуты
-      return 'Сервер не ответил. Возможно, функции ещё не развёрнуты — нужен firebase deploy';
+      // У разработчика самая вероятная причина — функции ещё не развёрнуты
+      return (
+        'Сервер не ответил. Попробуйте позже' + dev('функции не развёрнуты — нужен firebase deploy')
+      );
     case 'resource-exhausted':
       return 'Слишком много запросов. Попробуйте через несколько минут';
     default:

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
@@ -155,18 +155,23 @@ export function SplashScreen({
   const cx = width / 2;
   const cy = height / 2;
   const isWeb = Platform.OS === 'web';
-  const scaledAroundCenter = (scale: number): GProps['transform'] => {
-    'worklet';
-    return isWeb
-      ? `translate(${cx}, ${cy}) scale(${scale}) translate(${-cx}, ${-cy})`
-      : [
-          { translateX: cx },
-          { translateY: cy },
-          { scale },
-          { translateX: -cx },
-          { translateY: -cy },
-        ];
-  };
+  // useCallback не ради вызова, а ради мапперов ниже: новая функция на
+  // каждый рендер пересобирала бы оба animatedProps при каждом рендере корня
+  const scaledAroundCenter = useCallback(
+    (scale: number): GProps['transform'] => {
+      'worklet';
+      return isWeb
+        ? `translate(${cx}, ${cy}) scale(${scale}) translate(${-cx}, ${-cy})`
+        : [
+            { translateX: cx },
+            { translateY: cy },
+            { scale },
+            { translateX: -cx },
+            { translateY: -cy },
+          ];
+    },
+    [cx, cy, isWeb],
+  );
   const towerProps = useAnimatedProps(() => ({
     transform: scaledAroundCenter(towerScale.value),
     opacity: towerOpacity.value,

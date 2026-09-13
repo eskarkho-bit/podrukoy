@@ -1,10 +1,11 @@
 import { logger } from 'firebase-functions';
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { createHash, randomInt } from 'node:crypto';
 import { audit } from './audit';
+import { meterExceeded } from './meters';
 
 // Вход по номеру телефона: свой одноразовый код, а не Firebase Phone Auth.
 //
@@ -71,6 +72,20 @@ const SEND_WINDOW_MS = 60 * 60_000;
 // при коде, живущем пять минут. Потом код сгорает.
 const MAX_VERIFY_ATTEMPTS = 5;
 
+// Неверные попытки копятся и через новые коды: пять на код, потом новый код
+// и ещё пять — так подбор шёл бы бесконечно. Десять за час — и номер ждёт.
+const MAX_FAILURES_PER_WINDOW = 10;
+const FAILURE_WINDOW_MS = 60 * 60_000;
+
+// Потолки поверх лимитов на номер. С одного адреса — чтобы один источник не
+// выжигал баланс провайдера по списку чужих номеров; за адресом мобильного
+// оператора сидят сотни людей, поэтому потолок не тесный. За день — общий на
+// всех: исчерпан — вход по телефону до полуночи UTC недоступен. Это
+// осознанно: дешевле, чем счёт за тысячи СМС, а с ростом сервиса число
+// поднимается здесь.
+const MAX_SENDS_PER_IP_PER_HOUR = 30;
+const MAX_SENDS_PER_DAY = 300;
+
 /** Мобильный номер РФ в том виде, в каком его шлёт клиент. */
 const PHONE_RE = /^\+79\d{9}$/;
 
@@ -85,6 +100,17 @@ const codeHash = (phone: string, code: string) => sha256(`${phone}:${code}`);
 // В журнал номер класть нельзя — он переживает удаление аккаунта. Хэш
 // позволяет связать записи по одному номеру, не раскрывая его.
 const phoneAuditId = (phone: string) => phoneCodeDocId(phone);
+
+// Адрес в счётчике тоже хэшем: он персональные данные не хуже номера
+const ipMeterKey = (ip: string) => `phoneIp-${sha256(`ip:${ip}`).slice(0, 16)}`;
+const dayMeterKey = () => `phoneDay-${new Date().toISOString().slice(0, 10)}`;
+
+/** Адрес вызывающего: за балансировщиком — первый в X-Forwarded-For. */
+function callerIp(request: CallableRequest): string | undefined {
+  const forwarded = request.rawRequest.headers['x-forwarded-for'];
+  const first = (Array.isArray(forwarded) ? forwarded[0] : (forwarded ?? '')).split(',')[0].trim();
+  return first || request.rawRequest.ip || undefined;
+}
 
 function credentials(): { apiId: string } | null {
   const apiId = SMSRU_API_ID.value();
@@ -184,8 +210,11 @@ export type RequestCodeResult =
  * Лимиты проверяются в транзакции: два одновременных запроса не обойдут
  * кулдаун наперегонки. Ответ не раскрывает, зарегистрирован ли номер, —
  * иначе форма входа стала бы способом проверять чужие номера.
+ *
+ * ip — адрес вызывающего для потолка «с одного адреса»; без него (тесты,
+ * эмулятор) действует только дневной.
  */
-export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
+export async function sendLoginCode(phone: string, ip?: string): Promise<RequestCodeResult> {
   if (!PHONE_RE.test(phone)) {
     throw new HttpsError('invalid-argument', 'Нужен мобильный номер в формате +7 9…');
   }
@@ -202,14 +231,21 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
   const db = getFirestore();
   const ref = db.doc(`phoneCodes/${phoneCodeDocId(phone)}`);
   const now = Date.now();
+  // Сколько отправок уже было в окне — понадобится, если потолок ниже
+  // откатит бронь этой
+  let sends = 0;
 
   const verdict = await db.runTransaction(async (txn) => {
     const snap = await txn.get(ref);
     const lastSentAt: number = snap.get('lastSentAt')?.toMillis?.() ?? 0;
     const windowStartAt: number = snap.get('windowStartAt')?.toMillis?.() ?? 0;
     const windowActive = now - windowStartAt < SEND_WINDOW_MS;
-    const sends: number = windowActive ? (snap.get('sends') ?? 0) : 0;
+    sends = windowActive ? (snap.get('sends') ?? 0) : 0;
+    const failWindowStartAt: number = snap.get('failWindowStartAt')?.toMillis?.() ?? 0;
+    const failWindowActive = now - failWindowStartAt < FAILURE_WINDOW_MS;
+    const failures: number = failWindowActive ? (snap.get('failures') ?? 0) : 0;
 
+    if (failures >= MAX_FAILURES_PER_WINDOW) return 'locked';
     if (now - lastSentAt < RESEND_COOLDOWN_MS) return 'cooldown';
     if (sends >= MAX_SENDS_PER_WINDOW) return 'exhausted';
 
@@ -223,6 +259,10 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
         codeHash: codeHash(phone, smsCode),
         expiresAt: Timestamp.fromMillis(now + CODE_TTL_MS),
         attempts: 0,
+        // Счёт неверных попыток новый код не обнуляет — в этом его смысл
+        ...(failures
+          ? { failures, failWindowStartAt: Timestamp.fromMillis(failWindowStartAt) }
+          : {}),
         ...limits,
       });
     } else {
@@ -233,11 +273,36 @@ export async function sendLoginCode(phone: string): Promise<RequestCodeResult> {
     return 'ok';
   });
 
+  if (verdict === 'locked') {
+    throw new HttpsError(
+      'resource-exhausted',
+      'Слишком много неверных попыток. Попробуйте через час',
+    );
+  }
   if (verdict === 'cooldown') {
     throw new HttpsError('resource-exhausted', 'Код уже отправлен — подождите минуту');
   }
   if (verdict === 'exhausted') {
     throw new HttpsError('resource-exhausted', 'Слишком много запросов кода. Попробуйте через час');
+  }
+
+  // Потолки сверх лимитов на номер — после его брони, чтобы отказ по кулдауну
+  // не тратил их; при отказе бронь снимается, иначе человек ждал бы минуту
+  // за код, который не ушёл
+  const overIp = ip
+    ? await meterExceeded(ipMeterKey(ip), MAX_SENDS_PER_IP_PER_HOUR, 60 * 60_000)
+    : false;
+  const overDay =
+    !overIp && (await meterExceeded(dayMeterKey(), MAX_SENDS_PER_DAY, 24 * 60 * 60_000));
+  if (overIp || overDay) {
+    await ref.set({ lastSentAt: null, sends: sends }, { merge: true }).catch(() => {});
+    logger.warn('Запрос кода отклонён потолком', { reason: overIp ? 'ip' : 'day' });
+    throw new HttpsError(
+      'resource-exhausted',
+      overIp
+        ? 'Слишком много запросов кода с вашей сети. Попробуйте позже'
+        : 'Вход по телефону сегодня недоступен — попробуйте завтра или войдите по почте',
+    );
   }
 
   try {
@@ -312,22 +377,35 @@ export async function confirmLoginCode(
 
   // Исход возвращается из транзакции, а ошибка бросается после: исключение
   // внутри колбэка откатило бы и запись счётчика попыток
+  const now = Date.now();
   const verdict = await db.runTransaction(async (txn) => {
     const snap = await txn.get(ref);
-    if (!snap.exists) return 'missing';
-    if ((snap.get('expiresAt')?.toMillis?.() ?? 0) < Date.now()) {
-      txn.delete(ref);
+    // Сожжённый код — документ без хэша: счёт неверных попыток должен
+    // пережить сам код, иначе новый код обнулял бы подбор
+    if (!snap.exists || !snap.get('codeHash')) return 'missing';
+    if ((snap.get('expiresAt')?.toMillis?.() ?? 0) < now) {
+      txn.update(ref, { codeHash: null, expiresAt: null });
       return 'expired';
     }
     if ((snap.get('attempts') ?? 0) >= MAX_VERIFY_ATTEMPTS) {
-      txn.delete(ref);
+      txn.update(ref, { codeHash: null, expiresAt: null });
       return 'locked';
     }
     if (snap.get('codeHash') !== codeHash(phone, code)) {
-      txn.update(ref, { attempts: (snap.get('attempts') ?? 0) + 1 });
+      const failWindowStartAt: number = snap.get('failWindowStartAt')?.toMillis?.() ?? 0;
+      const failWindowActive = now - failWindowStartAt < FAILURE_WINDOW_MS;
+      txn.update(ref, {
+        attempts: (snap.get('attempts') ?? 0) + 1,
+        failures: (failWindowActive ? (snap.get('failures') ?? 0) : 0) + 1,
+        failWindowStartAt: failWindowActive
+          ? Timestamp.fromMillis(failWindowStartAt)
+          : Timestamp.fromMillis(now),
+      });
       return 'mismatch';
     }
-    txn.delete(ref);
+    // Код сошёлся, но здесь не сжигается: если номер не зарегистрирован, а
+    // человек нажал «войти», ему предложат создать аккаунт — тем же кодом,
+    // а не новым звонком. Сжигает код выдача токена ниже.
     return 'ok';
   });
 
@@ -370,6 +448,9 @@ export async function confirmLoginCode(
     }
   }
 
+  // Теперь код одноразовый: второй вход по перехваченному коду невозможен
+  await ref.delete();
+
   const token = await auth.createCustomToken(uid);
 
   await audit({
@@ -385,7 +466,7 @@ export async function confirmLoginCode(
 
 /** Просьба прислать код. Доступна без входа — это и есть путь к входу. */
 export const requestPhoneCode = onCall({ secrets: [SMSRU_API_ID] }, async (request) =>
-  sendLoginCode(String(request.data?.phone ?? '')),
+  sendLoginCode(String(request.data?.phone ?? ''), callerIp(request)),
 );
 
 /** Проверка кода. Возвращает custom-токен, которым клиент входит. */

@@ -1,5 +1,6 @@
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { createHash } from 'node:crypto';
 import { initTestApp, wipe } from './helpers';
 import { confirmLoginCode, phoneCodeDocId, sendLoginCode } from '../phoneAuth';
 
@@ -53,7 +54,7 @@ beforeEach(async () => {
   process.env.SMSRU_API_ID = 'test-key';
   // Основной прогон — канал СМС; звонку посвящён отдельный describe ниже
   process.env.SMSRU_CHANNEL = 'sms';
-  await wipe('phoneCodes', 'audit');
+  await wipe('phoneCodes', 'audit', 'meters');
 });
 
 afterAll(() => {
@@ -121,6 +122,38 @@ describe('отправка кода', () => {
 
     fakeSmsProvider();
     await expect(sendLoginCode(phone)).resolves.toMatchObject({ configured: true });
+  });
+
+  // Один источник не должен выжигать баланс провайдера по списку чужих
+  // номеров, а весь сервис — тратить на коды больше, чем стоит день
+  test('потолок с одного адреса: отказ, бронь по номеру снимается', async () => {
+    const phone = freshPhone();
+    const sms = fakeSmsProvider();
+    const ip = '203.0.113.7';
+    const key = `phoneIp-${createHash('sha256').update(`ip:${ip}`).digest('hex').slice(0, 16)}`;
+    await db.doc(`meters/${key}`).set({ count: 30, windowStartAt: Timestamp.now() });
+
+    await expect(sendLoginCode(phone, ip)).rejects.toMatchObject({
+      code: 'resource-exhausted',
+      message: expect.stringContaining('сети'),
+    });
+    expect(sms.sent).toHaveLength(0);
+    // Кулдаун снят: за код, который не ушёл, ждать не надо
+    expect((await codeDoc(phone).get()).get('lastSentAt')).toBeNull();
+    // С другого адреса тот же номер получает код
+    await expect(sendLoginCode(phone, '198.51.100.1')).resolves.toMatchObject({ configured: true });
+  });
+
+  test('дневной потолок на весь сервис', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    await db.doc(`meters/phoneDay-${day}`).set({ count: 300, windowStartAt: Timestamp.now() });
+    const sms = fakeSmsProvider();
+
+    await expect(sendLoginCode(freshPhone())).rejects.toMatchObject({
+      code: 'resource-exhausted',
+      message: expect.stringContaining('завтра'),
+    });
+    expect(sms.sent).toHaveLength(0);
   });
 
   test('без ключа провайдера — честное «не настроено», СМС не уходит', async () => {
@@ -217,6 +250,51 @@ describe('проверка кода', () => {
       code: 'resource-exhausted',
     });
     await expect(confirmLoginCode(phone, sms.lastCode(), true)).rejects.toMatchObject({
+      code: 'deadline-exceeded',
+    });
+  });
+
+  // Пять попыток на код, потом новый код и ещё пять — так подбор шёл бы
+  // бесконечно. Счёт неверных попыток переживает код.
+  test('неверные попытки копятся через новые коды и запирают номер на час', async () => {
+    const phone = freshPhone();
+    const sms = fakeSmsProvider();
+    await sendLoginCode(phone);
+    const wrong = sms.lastCode() === '000000' ? '000001' : '000000';
+    for (let i = 0; i < 3; i++) {
+      await confirmLoginCode(phone, wrong, true).catch(() => {});
+    }
+
+    await codeDoc(phone).set({ lastSentAt: null }, { merge: true });
+    await sendLoginCode(phone);
+    expect((await codeDoc(phone).get()).get('failures')).toBe(3);
+    expect((await codeDoc(phone).get()).get('attempts')).toBe(0);
+
+    // Десять за час — и код больше не выдаётся, пока окно не пройдёт
+    await codeDoc(phone).set({ failures: 10, lastSentAt: null }, { merge: true });
+    await expect(sendLoginCode(phone)).rejects.toMatchObject({
+      code: 'resource-exhausted',
+      message: expect.stringContaining('неверных'),
+    });
+    await codeDoc(phone).set(
+      { failWindowStartAt: Timestamp.fromMillis(Date.now() - 2 * 60 * 60_000) },
+      { merge: true },
+    );
+    await expect(sendLoginCode(phone)).resolves.toMatchObject({ configured: true });
+  });
+
+  // «Войти» по свободному номеру отвечает «создайте аккаунт» — и создать его
+  // человек должен тем же кодом, а не новым звонком
+  test('незарегистрированный номер: код не сгорает, регистрация тем же кодом проходит', async () => {
+    const phone = freshPhone();
+    const sms = fakeSmsProvider();
+    await sendLoginCode(phone);
+    const code = sms.lastCode();
+
+    await expect(confirmLoginCode(phone, code, false)).rejects.toMatchObject({ code: 'not-found' });
+    await expect(confirmLoginCode(phone, code, true)).resolves.toMatchObject({ created: true });
+    // А вот теперь код сожжён
+    await expect(confirmLoginCode(phone, code, true)).rejects.toMatchObject({
       code: 'deadline-exceeded',
     });
   });

@@ -145,7 +145,9 @@ export function ProfileScreen({
     setEditing(true);
   };
 
+  // Срабатывает и на Enter, и на потерю фокуса — второй раз уже не пишет
   const saveName = () => {
+    if (!editing) return;
     const trimmed = draft.trim();
     if (trimmed) onChangeName(trimmed);
     setEditing(false);

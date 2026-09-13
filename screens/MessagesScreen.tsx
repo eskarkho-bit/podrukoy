@@ -55,6 +55,8 @@ export type Thread = {
   // Можно ли прикладывать фото: в чате заявки — да, в поддержке — нет,
   // её правила ждут только текст
   canAttach: boolean;
+  // Сделки по заявке больше нет — читать можно, писать нельзя
+  closed?: boolean;
   messages: ChatMessage[];
 };
 
@@ -102,6 +104,16 @@ export function MessagesScreen({
     setOpenId(null);
     onThreadOpenChange(false);
   };
+
+  // Ответ пришёл, пока чат открыт: он уже прочитан — иначе бейдж вспыхивал
+  // бы на вкладке у человека, который смотрит на это самое сообщение.
+  // Обработчик — через ссылку, по той же причине, что и выше.
+  const onOpenThreadRef = useRef(onOpenThread);
+  onOpenThreadRef.current = onOpenThread;
+  const openCount = openThread?.messages.length ?? 0;
+  useEffect(() => {
+    if (openId && openCount) onOpenThreadRef.current(openId);
+  }, [openId, openCount]);
 
   // Экран въехал справа как push — выезжать обязан и свайпом от края,
   // и системной кнопкой «назад», а не только чипом в шапке
@@ -209,7 +221,9 @@ function ThreadList({
           return (
             <Animated.View
               key={thread.id}
-              entering={FadeInDown.delay(mountedWithStagger ? 120 + i * STAGGER : 0).duration(340)}
+              entering={FadeInDown.delay(
+                mountedWithStagger ? 120 + Math.min(i, 8) * STAGGER : 0,
+              ).duration(340)}
               exiting={FadeOut.duration(180)}
               layout={LinearTransition.springify().damping(20).stiffness(170)}
             >
@@ -371,7 +385,7 @@ function ThreadDetail({
           const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
           atBottom.current = contentOffset.y >= contentSize.height - layoutMeasurement.height - 40;
         }}
-        scrollEventThrottle={16}
+        scrollEventThrottle={100}
         onContentSizeChange={() => {
           // Пока экран открывается, к концу — прыжком; дальше — плавно
           if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: settled() });
@@ -475,7 +489,7 @@ function ThreadDetail({
       )}
 
       <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        {thread.canAttach && (
+        {thread.canAttach && !thread.closed && (
           <PressableScale
             accessibilityLabel="Прикрепить фото"
             style={[styles.attachBtn, sendingImage && styles.sendBtnDisabled]}
@@ -488,16 +502,26 @@ function ThreadDetail({
         <TextInput
           value={text}
           onChangeText={setText}
-          placeholder={pendingImage ? 'Подпись к фото…' : 'Написать сообщение…'}
+          placeholder={
+            thread.closed
+              ? 'Переписка закрыта: сделки по заявке больше нет'
+              : pendingImage
+                ? 'Подпись к фото…'
+                : 'Написать сообщение…'
+          }
           placeholderTextColor={t.textMuted}
           style={styles.input}
+          editable={!thread.closed}
           multiline
         />
         <PressableScale
           accessibilityLabel="Отправить"
-          style={[styles.sendBtn, !text.trim() && !pendingImage && styles.sendBtnDisabled]}
+          style={[
+            styles.sendBtn,
+            ((!text.trim() && !pendingImage) || thread.closed) && styles.sendBtnDisabled,
+          ]}
           onPress={send}
-          disabled={(!text.trim() && !pendingImage) || sendingImage}
+          disabled={(!text.trim() && !pendingImage) || sendingImage || !!thread.closed}
         >
           <Text style={styles.sendIcon}>↑</Text>
         </PressableScale>

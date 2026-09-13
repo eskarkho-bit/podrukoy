@@ -334,9 +334,9 @@ export function OrdersScreen({
             return (
               <Animated.View
                 key={order.id}
-                entering={FadeInDown.delay(mountedWithStagger ? 240 + i * STAGGER : 0).duration(
-                  360,
-                )}
+                entering={FadeInDown.delay(
+                  mountedWithStagger ? 240 + Math.min(i, 8) * STAGGER : 0,
+                ).duration(360)}
                 exiting={FadeOut.duration(180)}
                 layout={LinearTransition.springify().damping(20).stiffness(170)}
               >
@@ -499,6 +499,7 @@ export function OrdersScreen({
       {repeatOrder && (
         <RepeatSheet
           order={repeatOrder}
+          masterBlocked={!!repeatOrder.masterId && blockedMasterIds.includes(repeatOrder.masterId)}
           onClose={() => setRepeatOrder(null)}
           onSubmit={(draft) => {
             onCreateOrder(draft);

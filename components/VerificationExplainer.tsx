@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, ZoomIn, ZoomOut } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
+import { BLUR_METHOD } from './blur';
 import { palettes, Palette, space, useTheme } from '../theme';
 import { useBackClose } from './backClose';
 import { FONTS } from './typography';
@@ -48,7 +49,7 @@ export function VerificationExplainer({ open, onClose }: Props) {
         <BlurView
           intensity={26}
           tint={mode === 'dark' ? 'dark' : 'light'}
-          experimentalBlurMethod="dimezisBlurView"
+          experimentalBlurMethod={BLUR_METHOD}
           style={StyleSheet.absoluteFill}
         />
         <Pressable style={[StyleSheet.absoluteFill, styles.dim]} onPress={onClose} />

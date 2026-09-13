@@ -18,6 +18,7 @@ import { formatRuPhone, normalizeRuPhone, phoneAuthErrorText } from '../componen
 import { currentConsents, rememberConsent, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
 import { rememberSignup } from '../components/signupDraft';
+import { firestoreErrorCode } from '../components/firestoreError';
 import { LegalScreen } from './LegalScreen';
 import { Palette, palettes, useTheme } from '../theme';
 
@@ -184,6 +185,17 @@ export function AuthScreen() {
       }
       // При успехе экран пропадёт сам: сессия появится в AuthProvider
     } catch (e) {
+      // Номер свободен, а человек нажал «войти»: код ещё действует — сразу
+      // показываем поля регистрации, второй звонок не нужен
+      if (!isRegister && firestoreErrorCode(e).replace(/^functions\//, '') === 'not-found') {
+        setMode('register');
+        setError(null);
+        setNotice(
+          'Этот номер ещё не зарегистрирован. Заполните данные — код из звонка действует ещё несколько минут',
+        );
+        setLoading(false);
+        return;
+      }
       setError(phoneAuthErrorText(e));
       setLoading(false);
     }
@@ -236,7 +248,10 @@ export function AuthScreen() {
         // Согласие и профиль даются здесь, а запись в базу происходит после
         // входа, когда появится uid, — передаём их туда через модули-хранилища
         rememberConsent(currentConsents());
-        rememberSignup({ city: cityKey, address: address.trim() });
+        // Имя — и сюда: профиль создаётся по первому событию входа, когда
+        // displayName в аккаунте ещё не записан, и без черновика человек
+        // становился бы «Гостем»
+        rememberSignup({ city: cityKey, address: address.trim(), name: name.trim() });
         await register(name, e, password);
       } else await signIn(e, password);
       // При успехе экран пропадёт сам: сессия появится в AuthProvider

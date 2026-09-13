@@ -2,6 +2,7 @@ import { logger } from 'firebase-functions';
 import { onDocumentDeleted, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
+import { notifyMastersAbout } from './orderPush';
 import { audit, SYSTEM } from './audit';
 
 // Что делать, когда мастер исчезает.
@@ -40,6 +41,15 @@ export async function dropPendingOffers(masterId: string): Promise<number> {
  * мастера и его отказ от заявки (orderDecline.ts) — разошедшиеся наборы
  * оставили бы номер в одном из них.
  */
+/**
+ * Клиент отметил оплату или мастер — получение. Такую заявку в поиск не
+ * возвращают: деньги уже переходили из рук в руки, и новый исполнитель
+ * увидел бы её «оплаченной». Правила ту же проверку делают на отметке
+ * отказа; здесь она — для удаления аккаунта, где отметки нет.
+ */
+export const moneyMoved = (order: FirebaseFirestore.DocumentData) =>
+  order.paidAt != null || order.paymentReceivedAt != null;
+
 export function reopenedFields() {
   return {
     status: 'Поиск мастера',
@@ -75,11 +85,32 @@ export async function detachMasterFromOrders(masterId: string): Promise<number> 
 
   let reopened = 0;
   for (const d of orders.docs) {
-    if (d.get('status') === 'В работе') {
+    const clientId = d.get('clientId');
+    if (d.get('status') === 'В работе' && moneyMoved(d.data())) {
+      // Деньги уже переходили из рук в руки — заявка закрывается, а не ищет
+      // нового исполнителя; спор, если он есть, разбирает модерация
+      await d.ref.set(
+        {
+          status: 'Отменена',
+          masterPhone: null,
+          clientPhone: null,
+          masterBanks: null,
+          masterAcceptsCash: null,
+        },
+        { merge: true },
+      );
+      if (clientId) {
+        await pushTo(
+          [clientId],
+          'Мастер удалил аккаунт',
+          `${d.get('title') ?? 'Заявка'} закрыта. Если вы уже платили — напишите в поддержку`,
+          { href: '/' },
+        );
+      }
+    } else if (d.get('status') === 'В работе') {
       await d.ref.set(reopenedFields(), { merge: true });
       reopened += 1;
 
-      const clientId = d.get('clientId');
       if (clientId) {
         await pushTo(
           [clientId],
@@ -88,6 +119,11 @@ export async function detachMasterFromOrders(masterId: string): Promise<number> 
           { href: '/' },
         );
       }
+      // Остальные мастера города узнают о заявке заново: пуш при создании
+      // они получали, но тогда она ушла к другому, и о ней забыли
+      await notifyMastersAbout({ ...d.data(), ...reopenedFields() }, 'Заявка снова ищет мастера', {
+        excludeUid: masterId,
+      });
     } else if (d.get('masterPhone') != null || d.get('masterBanks') != null) {
       // Вместе с номером уходят и условия оплаты: переводить больше некому
       await d.ref.set(

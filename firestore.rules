@@ -119,6 +119,14 @@ service cloud.firestore {
       ]);
     }
 
+    // Ссылки на файлы — только в наше хранилище. Чужой адрес заставил бы
+    // модератора или мастера открыть страницу злоумышленника: тот узнал бы
+    // IP и время, а Image показал бы что угодно.
+    function storageUrl(u) {
+      return u is string
+        && u.matches('https://firebasestorage\\.googleapis\\.com/v0/b/domio-7ad1c\\.firebasestorage\\.app/.*');
+    }
+
     // Профиль клиента: имя, адреса, город, настройки. Читают владелец и
     // модератор: модератору профиль нужен целиком — карточка пользователя,
     // флаг блокировки, телефон для поиска. Это сознательный разворот прежнего
@@ -131,12 +139,35 @@ service cloud.firestore {
       // значения: частичный updateDoc флаг не трогает и проходит, а вот
       // setDoc без merge, «теряющий» blocked, обязан быть отклонён — иначе
       // владелец снял бы ограничение перезаписью профиля.
-      allow create: if isOwner(uid)
+      // Что владелец пишет сам — с потолками. Списки не должны расти вечно:
+      // каждый пуш читает все токены, каждое предложение — все блокировки.
+      // Телефон — только свой из Auth: чужой номер в профиле выдавал бы
+      // человека за другого в поиске модератора.
+      function validProfile() {
+        let d = request.resource.data;
+        return d.get('name', '') is string && d.get('name', '').size() <= 100
+          && d.get('addresses', []) is list && d.get('addresses', []).size() <= 20
+          && d.get('pushTokens', []) is list && d.get('pushTokens', []).size() <= 10
+          && d.get('blockedMasters', []) is list && d.get('blockedMasters', []).size() <= 200;
+      }
+
+      function ownPhone() {
+        let p = request.resource.data.get('phone', '');
+        return p == '' || p == request.auth.token.get('phone_number', '');
+      }
+
+      allow create: if isOwner(uid) && validProfile() && ownPhone()
         && !request.resource.data.keys().hasAny(['blocked', 'blockedReason']);
-      allow update: if isOwner(uid)
+      // Записанный раньше телефон проверку не проходит заново: он и так
+      // пришёл из Auth, а профиль обновляется чаще, чем меняется токен
+      allow update: if isOwner(uid) && validProfile()
+        && (request.resource.data.get('phone', '') == resource.data.get('phone', '') || ownPhone())
         && !request.resource.data.diff(resource.data).affectedKeys()
              .hasAny(['blocked', 'blockedReason']);
-      allow delete: if isOwner(uid);
+      // Заблокированный не удалит профиль, чтобы завести чистый: пустой
+      // профиль считался бы «не заблокирован». Удаление аккаунта целиком
+      // делает сервер, ему этот замок не мешает.
+      allow delete: if isOwner(uid) && resource.data.get('blocked', false) != true;
 
       // Личные подколлекции пользователя — переписка с поддержкой
       // (users/{uid}/threads/{id}/messages). Правила не наследуются вглубь
@@ -208,7 +239,26 @@ service cloud.firestore {
 
       allow read: if authed();
 
-      allow create: if isOwner(uid)
+      // Поля анкеты — с потолками: анкету читает любой авторизованный и
+      // выкачивает рассылка о каждой заявке, мегабайт мусора в ней дорог
+      // всем сразу. Образование — из закрытого списка components/education.ts.
+      function validMaster() {
+        let d = request.resource.data;
+        return d.keys().hasOnly([
+            'name', 'lastName', 'city', 'cities', 'skills', 'experienceYears', 'education',
+            'createdAt', 'verified', 'rating', 'reviewsCount', 'completedOrders', 'blocked',
+          ])
+          && d.get('name', '') is string && d.get('name', '').size() <= 100
+          && d.get('lastName', '') is string && d.get('lastName', '').size() <= 100
+          && d.get('city', '') is string && d.get('city', '').size() <= 100
+          && d.get('cities', []) is list && d.get('cities', []).size() <= 20
+          && d.get('skills', []) is list && d.get('skills', []).size() <= 12
+          && (d.get('experienceYears', null) == null || d.get('experienceYears', null) is number)
+          && (d.get('education', null) == null
+            || d.get('education', null) in ['среднее', 'среднее специальное', 'высшее']);
+      }
+
+      allow create: if isOwner(uid) && validMaster()
         && !request.resource.data.keys().hasAny([
           'verified', 'rating', 'reviewsCount', 'completedOrders', 'blocked',
         ]);
@@ -222,7 +272,7 @@ service cloud.firestore {
             && request.resource.data.get('verified', false) == false);
       }
 
-      allow update: if isOwner(uid)
+      allow update: if isOwner(uid) && validMaster()
         && verifiedKeptOrDropped()
         && keepsServerField('rating', 0)
         && keepsServerField('reviewsCount', 0)
@@ -237,8 +287,10 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verified']);
 
-      // Удаление нужно, чтобы человек мог удалить свой аккаунт целиком
-      allow delete: if isOwner(uid);
+      // Удаление нужно, чтобы человек мог удалить свой аккаунт целиком.
+      // Отстранённый — не удалит: пересозданная анкета вышла бы чистой, без
+      // блокировки и без рейтинга; его аккаунт удаляет сервер.
+      allow delete: if isOwner(uid) && resource.data.get('blocked', false) != true;
 
       // ---------- заявка на проверку ----------
       //
@@ -273,11 +325,40 @@ service cloud.firestore {
         function statusWas(s) { return resource.data.get('status', 'draft') == s; }
         function statusNow(s) { return request.resource.data.get('status', 'draft') == s; }
 
+        // Что мастер пишет сам: телефон — только цифры (по нему звонит
+        // модератор и переводят клиенты), «о себе» — не роман, снимок —
+        // только из нашего хранилища
+        function validApplication() {
+          let d = request.resource.data;
+          return d.get('phone', '') is string && d.get('phone', '').matches('[0-9]{0,11}')
+            && d.get('about', '') is string && d.get('about', '').size() <= 2000
+            && (d.get('photoUrl', null) == null || storageUrl(d.photoUrl))
+            && (d.get('biometricConsent', null) == null
+              || d.get('biometricConsent', null) is string);
+        }
+
+        // Отзыв согласия: снимок и согласие уходят вместе, анкета — в
+        // черновик. Допуск владелец снимает себе сам (masters.verified).
+        function revokesPhoto() {
+          return statusNow('draft')
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'photoUrl', 'biometricConsent', 'status',
+            ])
+            && request.resource.data.get('photoUrl', null) == null
+            && request.resource.data.get('biometricConsent', null) == null;
+        }
+
+        // Документ ровно один — application. Шаблон {docId} остался ради
+        // запросов по группе коллекций, но заводить под ним что-то ещё
+        // нельзя: каждый лишний документ «на проверке» — пуш всем
+        // модераторам и строка в очереди, которую нечем закрыть.
+        function isApplication() { return docId == 'application'; }
+
         allow read: if isOwner(uid) || isAdmin();
 
         // Черновик заводит сам мастер. Решение модератора подсунуть при
         // создании нельзя — его пишет только он сам
-        allow create: if isOwner(uid)
+        allow create: if isOwner(uid) && isApplication() && validApplication()
           && request.resource.data.status == 'draft'
           && !request.resource.data.keys().hasAny([
             'rejectionReason', 'reviewedAt', 'reviewedBy',
@@ -285,7 +366,8 @@ service cloud.firestore {
 
         // Мастер правит анкету, пока она черновик или отклонена, и сам
         // отправляет её на проверку
-        allow update: if isOwner(uid) && ownFields() && photoHasConsent()
+        allow update: if isOwner(uid) && isApplication() && validApplication()
+          && ownFields() && photoHasConsent()
           && (statusWas('draft') || statusWas('rejected'))
           && (
             (statusNow('draft') || statusNow('rejected'))
@@ -299,24 +381,32 @@ service cloud.firestore {
         // их навсегда нельзя: сменил номер — остался без переводов. Допуск
         // при этом снимает сервер (onVerificationChanged), а мастер может
         // снять его и сам тем же пакетом.
-        allow update: if isOwner(uid) && statusWas('approved')
+        allow update: if isOwner(uid) && isApplication() && validApplication()
+          && statusWas('approved')
           && (
             (statusNow('approved')
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['about']))
             || (ownFields() && photoHasConsent() && statusNow('pending') && readyToApply())
+            || revokesPhoto()
           );
+
+        // Отозвать согласие можно и пока анкета ждёт модератора: она уходит из
+        // очереди в черновик — проверять без снимка нечего
+        allow update: if isOwner(uid) && isApplication() && statusWas('pending')
+          && revokesPhoto();
 
         // Решение модератора. Данные анкеты он не переписывает — только
         // выносит вердикт.
-        allow update: if isAdmin()
+        allow update: if isAdmin() && isApplication()
           && statusWas('pending')
           && (statusNow('approved') || statusNow('rejected'))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'status', 'rejectionReason', 'reviewedAt', 'reviewedBy',
           ]);
 
-        // Часть удаления аккаунта
-        allow delete: if isOwner(uid);
+        // Часть удаления аккаунта. Причину отстранения не сотрёшь вместе с
+        // анкетой: пересозданная выглядела бы чистой.
+        allow delete: if isOwner(uid) && resource.data.get('blockedReason', null) == null;
       }
 
       // ---------- как мастер принимает оплату ----------
@@ -461,6 +551,17 @@ service cloud.firestore {
           'paymentMethod', 'paidAt', 'paymentReceivedAt', 'masterDeclinedAt',
           'firstOfferAt', 'closedByAdmin', 'adminCloseReason',
         ])
+        // Перечень закрытый: служебные отметки сервера (statsCounted,
+        // repushedAt, reminderSentAt, agreedAt) при создании подсунуть нельзя —
+        // они бы исказили статистику и выключили напоминания
+        && request.resource.data.keys().hasOnly([
+          'clientId', 'clientName', 'masterId', 'masterName', 'title', 'date', 'status',
+          'comment', 'photoUrl', 'address', 'preferredMasterId', 'city', 'category',
+          'objectId', 'serviceLabel', 'agreedPrice', 'agreedAt', 'reviewed', 'createdAt',
+        ])
+        && request.resource.data.get('agreedAt', null) == null
+        // Фото прикладывается следующим шагом, из нашего хранилища
+        && request.resource.data.get('photoUrl', null) == null
         && (request.resource.data.get('preferredMasterId', null) == null
           || request.resource.data.preferredMasterId is string);
 
@@ -545,7 +646,7 @@ service cloud.firestore {
       function clientAttachesPhoto() {
         return isOpen()
           && resource.data.get('photoUrl', null) == null
-          && request.resource.data.photoUrl is string
+          && storageUrl(request.resource.data.photoUrl)
           && unchanged('status') && unchanged('masterId') && unchanged('agreedPrice');
       }
 
@@ -634,6 +735,14 @@ service cloud.firestore {
         ]);
       }
 
+      // Имя в заявке — из анкеты, как и в предложениях: оно уходит клиенту
+      // в пуш и в реквизиты перевода
+      function masterNameFromProfile() {
+        return unchanged('masterName')
+          || request.resource.data.masterName
+            == get(/databases/$(database)/documents/masters/$(request.auth.uid)).data.get('name', '');
+      }
+
       function masterFinishes() {
         return isAssignedMaster()
           && statusIs('В работе', 'Ждёт подтверждения')
@@ -663,6 +772,11 @@ service cloud.firestore {
       function masterDeclines() {
         return isAssignedMaster()
           && resource.data.status == 'В работе'
+          // Клиент уже отметил оплату этому мастеру или мастер — получение:
+          // уйти с деньгами и вернуть заявку в поиск нельзя, спор разбирает
+          // модерация
+          && resource.data.get('paidAt', null) == null
+          && resource.data.get('paymentReceivedAt', null) == null
           && changed().hasOnly(['masterDeclinedAt'])
           && resource.data.get('masterDeclinedAt', null) == null
           && request.resource.data.masterDeclinedAt == request.time;
@@ -677,7 +791,7 @@ service cloud.firestore {
           && unchanged('agreedPrice') && unchanged('masterId');
       }
 
-      allow update: if masterFields() && receivedAtUntouchedOrNow()
+      allow update: if masterFields() && receivedAtUntouchedOrNow() && masterNameFromProfile()
         && (masterFinishes() || masterReoffersLegacy() || masterMarksReceived()
           || masterDeclines());
 
@@ -717,11 +831,24 @@ service cloud.firestore {
             || order().clientId == request.auth.uid
             || isAdmin());
 
+        // Имя — из анкеты, а не со слов: оно уходит клиенту в заголовок пуша
+        // и в саму заявку, и выдуманное «Поддержка domio» там недопустимо
+        function masterNameFromProfile() {
+          return request.resource.data.masterName
+            == get(/databases/$(database)/documents/masters/$(masterId)).data.get('name', '');
+        }
+
         allow create, update: if isVerifiedMaster()
           && request.auth.uid == masterId
           && orderIsOpen()
           && !blockedByClient()
+          && request.resource.data.keys().hasOnly([
+            'masterId', 'masterName', 'price', 'comment', 'status', 'orderTitle', 'createdAt',
+          ])
           && request.resource.data.masterId == masterId
+          && masterNameFromProfile()
+          && request.resource.data.get('orderTitle', '') is string
+          && request.resource.data.get('orderTitle', '').size() <= 200
           && request.resource.data.status == 'pending'
           && validPrice(request.resource.data.price)
           && request.resource.data.comment is string
@@ -758,12 +885,28 @@ service cloud.firestore {
         }
 
         // Картинка в сообщении — ссылка на файл в chat/ той же заявки.
-        // Подлинность ссылки правила не проверят, но требуют https и
-        // разумную длину: мусор сюда класть не должно быть смысла.
+        // Что это именно та заявка, правила не проверят, но хост — только
+        // наше хранилище, а длина разумная: мусор сюда класть не должно быть
+        // смысла.
         function validImage() {
-          return request.resource.data.imageUrl is string
-            && request.resource.data.imageUrl.matches('https://.*')
+          return storageUrl(request.resource.data.imageUrl)
             && request.resource.data.imageUrl.size() <= 2048;
+        }
+
+        // Писать можно, пока сделка жива: в поиске собеседника ещё нет, в
+        // отменённой заявке говорить не о чем — иначе телефон и адрес
+        // клиента оставались бы поводом для переписки навсегда
+        function orderTalkable() {
+          return order().status in ['В работе', 'Ждёт подтверждения', 'Завершена'];
+        }
+
+        // Заблокированный клиентом мастер не пишет: блокировка — это в первую
+        // очередь тишина
+        function senderNotBlocked() {
+          let client = /databases/$(database)/documents/users/$(order().clientId);
+          return request.auth.uid == order().clientId
+            || !(exists(client)
+              && request.auth.uid in get(client).data.get('blockedMasters', []));
         }
 
         // Модератор переписку читает (разбор спора — это в первую очередь
@@ -771,7 +914,7 @@ service cloud.firestore {
         // ему не принадлежит.
         allow read: if isParty() || isAdmin();
         // Сообщение — это текст, картинка или и то и другое; пустым не бывает
-        allow create: if isParty()
+        allow create: if isParty() && orderTalkable() && senderNotBlocked()
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 2000
@@ -832,9 +975,14 @@ service cloud.firestore {
 
       // Мастер жалуется на отзыв в собственной анкете — не в чужой
       function reviewComplaint() {
+        let review = /databases/$(database)/documents/masters/$(request.auth.uid)/reviews/$(request.resource.data.orderId);
         return request.resource.data.subjectType == 'review'
           && request.resource.data.masterId == request.auth.uid
-          && request.resource.data.reviewClientId is string;
+          // Отзыв должен существовать и быть написан тем, на кого жалуются:
+          // иначе жалоба — способ спамить модераторов и привязывать чужой
+          // uid к несуществующему отзыву
+          && exists(review)
+          && get(review).data.clientId == request.resource.data.reviewClientId;
       }
 
       // Клиент жалуется на мастера своей заявки или на его сообщение в её
