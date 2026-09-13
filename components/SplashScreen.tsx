@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
@@ -11,7 +11,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Defs, G, Mask, Polygon, Rect } from 'react-native-svg';
+import Svg, { Defs, G, Mask, Polygon, Rect, type GProps } from 'react-native-svg';
 import { springs } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { TOWER_BASE_Y, TOWER_POLYGONS, TOWER_VIEWBOX, TOWER_WINDOWS } from './DomioLogo';
@@ -142,17 +142,37 @@ export function SplashScreen({
   // Один множитель ведёт и башню, и дырки в маске: окна вырезаны из того же
   // трансформа, поэтому разъехаться им не из чего.
   //
-  // Центр масштабирования запечён в строку трансформа, а не задан пропом
-  // origin: на вебе animatedProps перетирают трансформ целиком, и origin
-  // молча пропадает — башня раздувалась бы от левого верхнего угла.
+  // Центр масштабирования запечён в сам трансформ («сдвинуть в центр →
+  // масштаб → сдвинуть назад»), а не задан пропом origin: на вебе
+  // animatedProps перетирают трансформ целиком, и origin молча пропадает —
+  // башня раздувалась бы от левого верхнего угла.
+  //
+  // Формат у платформ разный, и это не прихоть. Нативный слой принимает
+  // transform только массивом (Android приводит значение к ReadableArray и
+  // на строке падает — приложение не доживало до первого экрана), а веб
+  // сворачивает массив в объект без порядка операций, и «сдвиг назад»
+  // перетирает «сдвиг в центр» — там нужна строка.
   const cx = width / 2;
   const cy = height / 2;
+  const isWeb = Platform.OS === 'web';
+  const scaledAroundCenter = (scale: number): GProps['transform'] => {
+    'worklet';
+    return isWeb
+      ? `translate(${cx}, ${cy}) scale(${scale}) translate(${-cx}, ${-cy})`
+      : [
+          { translateX: cx },
+          { translateY: cy },
+          { scale },
+          { translateX: -cx },
+          { translateY: -cy },
+        ];
+  };
   const towerProps = useAnimatedProps(() => ({
-    transform: `translate(${cx}, ${cy}) scale(${towerScale.value}) translate(${-cx}, ${-cy})`,
+    transform: scaledAroundCenter(towerScale.value),
     opacity: towerOpacity.value,
   }));
   const holesProps = useAnimatedProps(() => ({
-    transform: `translate(${cx}, ${cy}) scale(${towerScale.value}) translate(${-cx}, ${-cy})`,
+    transform: scaledAroundCenter(towerScale.value),
   }));
   const titleStyle = useAnimatedStyle(() => ({
     opacity: titleOpacity.value,
