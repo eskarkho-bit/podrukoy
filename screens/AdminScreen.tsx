@@ -22,7 +22,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { springs, STAGGER } from '../motion';
+import { springs, STAGGER, timings } from '../motion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palettes, Palette, useTheme } from '../theme';
 import { useBackClose } from '../components/backClose';
@@ -325,8 +325,10 @@ export function AdminScreen({ open, onClose }: Props) {
 
       {openSupportUid && (
         <Animated.View
-          entering={SlideInRight.springify().damping(20).stiffness(160)}
-          exiting={SlideOutRight.duration(280)}
+          entering={SlideInRight.duration(timings.slideIn.duration).easing(timings.slideIn.easing)}
+          exiting={SlideOutRight.duration(timings.slideOut.duration).easing(
+            timings.slideOut.easing,
+          )}
           style={StyleSheet.absoluteFill}
         >
           <SupportChat
@@ -343,8 +345,10 @@ export function AdminScreen({ open, onClose }: Props) {
 
       {auditOpen && (
         <Animated.View
-          entering={SlideInRight.springify().damping(20).stiffness(160)}
-          exiting={SlideOutRight.duration(280)}
+          entering={SlideInRight.duration(timings.slideIn.duration).easing(timings.slideIn.easing)}
+          exiting={SlideOutRight.duration(timings.slideOut.duration).easing(
+            timings.slideOut.easing,
+          )}
           style={StyleSheet.absoluteFill}
         >
           <AuditLayer subject={auditSubject ?? undefined} onBack={() => setAuditOpen(false)} />

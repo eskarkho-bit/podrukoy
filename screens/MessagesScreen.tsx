@@ -29,7 +29,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { STAGGER } from '../motion';
+import { CHAT_SETTLE_MS, STAGGER, timings } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { useBackClose } from '../components/backClose';
 import { EdgeBackLayer, useEdgeBack } from '../components/edgeBack';
@@ -137,9 +137,13 @@ export function MessagesScreen({
 
       {openThread && (
         <Animated.View
-          entering={SlideInRight.springify().damping(20).stiffness(160)}
+          entering={SlideInRight.duration(timings.slideIn.duration).easing(timings.slideIn.easing)}
           // Экран, уехавший пальцем, не провожаем второй анимацией
-          exiting={edge.dragDismissed ? undefined : SlideOutRight.duration(280)}
+          exiting={
+            edge.dragDismissed
+              ? undefined
+              : SlideOutRight.duration(timings.slideOut.duration).easing(timings.slideOut.easing)
+          }
           style={[StyleSheet.absoluteFill, edge.screenStyle]}
         >
           <EdgeBackLayer gesture={edge.gesture}>
@@ -289,6 +293,12 @@ function ThreadDetail({
   // «печатает…») уводит ленту вниз, только если человек и так был внизу,
   // а не выдёргивает его из чтения истории
   const atBottom = useRef(true);
+  // Что уже было в переписке при открытии, появляется без анимации: экран и
+  // так выезжает, а пузыри, проявляющиеся поверх, давали тряску. Анимируются
+  // только сообщения, пришедшие позже.
+  const openedAt = useRef(Date.now());
+  const initialMessageIds = useRef(new Set(thread.messages.map((m) => m.id)));
+  const settled = () => Date.now() - openedAt.current > CHAT_SETTLE_MS;
 
   const send = async () => {
     if (sendingImage) return;
@@ -363,13 +373,20 @@ function ThreadDetail({
         }}
         scrollEventThrottle={16}
         onContentSizeChange={() => {
-          if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: true });
+          // Пока экран открывается, к концу — прыжком; дальше — плавно
+          if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: settled() });
         }}
       >
         {thread.messages.map((m) => (
           <Animated.View
             key={m.id}
-            entering={m.from === 'user' ? FadeInRight.duration(260) : FadeInDown.duration(260)}
+            entering={
+              initialMessageIds.current.has(m.id)
+                ? undefined
+                : m.from === 'user'
+                  ? FadeInRight.duration(260)
+                  : FadeInDown.duration(260)
+            }
             exiting={FadeOutLeft.duration(180)}
             style={[styles.bubbleWrap, m.from === 'user' && styles.bubbleWrapUser]}
           >

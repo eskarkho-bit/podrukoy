@@ -48,7 +48,7 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { springs, STAGGER } from '../motion';
+import { CHAT_SETTLE_MS, springs, STAGGER, timings } from '../motion';
 import { palettes, Palette, useTheme } from '../theme';
 import { useArmedConfirm } from '../components/armedConfirm';
 import { useBackClose } from '../components/backClose';
@@ -958,9 +958,17 @@ export function MasterScreen({ open, onClose }: Props) {
 
           {openJob && (
             <Animated.View
-              entering={SlideInRight.springify().damping(20).stiffness(160)}
+              entering={SlideInRight.duration(timings.slideIn.duration).easing(
+                timings.slideIn.easing,
+              )}
               // Экран, уехавший пальцем, не провожаем второй анимацией
-              exiting={edge.dragDismissed ? undefined : SlideOutRight.duration(280)}
+              exiting={
+                edge.dragDismissed
+                  ? undefined
+                  : SlideOutRight.duration(timings.slideOut.duration).easing(
+                      timings.slideOut.easing,
+                    )
+              }
               style={[StyleSheet.absoluteFill, edge.screenStyle]}
             >
               <EdgeBackLayer gesture={edge.gesture}>
@@ -2541,6 +2549,12 @@ export function JobDetail({
   // Позиция прокрутки принадлежит пальцу: лента сама уезжает вниз, только
   // если мастер и так был внизу, а не выдёргивает его из чтения
   const atBottom = useRef(true);
+  // Что уже было в переписке при открытии, появляется без анимации: экран и
+  // так выезжает, а десяток пузырей, проявляющихся поверх, давали тряску.
+  // Анимируются только сообщения, пришедшие позже.
+  const openedAt = useRef(Date.now());
+  const initialMessageIds = useRef(new Set(job.messages.map((m) => m.id)));
+  const settled = () => Date.now() - openedAt.current > CHAT_SETTLE_MS;
   // Отказ меняет жизнь клиента — подтверждение в два касания, как у отмены
   const { confirming: declining, press: pressDecline } = useArmedConfirm(onDecline);
 
@@ -2628,7 +2642,8 @@ export function JobDetail({
         }}
         scrollEventThrottle={16}
         onContentSizeChange={() => {
-          if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: true });
+          // Пока экран открывается, к концу — прыжком; дальше — плавно
+          if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: settled() });
         }}
       >
         <Animated.View entering={FadeInDown.delay(40).duration(360)} style={styles.detailCard}>
@@ -2855,7 +2870,13 @@ export function JobDetail({
         {job.messages.map((m) => (
           <Animated.View
             key={m.id}
-            entering={m.from === 'me' ? FadeInRight.duration(260) : FadeInDown.duration(260)}
+            entering={
+              initialMessageIds.current.has(m.id)
+                ? undefined
+                : m.from === 'me'
+                  ? FadeInRight.duration(260)
+                  : FadeInDown.duration(260)
+            }
             style={[styles.bubbleWrap, m.from === 'me' && styles.bubbleWrapMe]}
           >
             <View style={[styles.bubble, m.from === 'me' && styles.bubbleMe]}>

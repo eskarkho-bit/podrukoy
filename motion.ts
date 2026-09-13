@@ -24,7 +24,19 @@ export const springs = {
 export const timings = {
   micro: { duration: 150, easing: Easing.out(Easing.quad) },
   fade: { duration: 260, easing: Easing.inOut(Easing.quad) },
+  // Вложенный экран (переписка, карточка заявки у мастера, разделы
+  // модерации) выезжает справа и уезжает обратно. Не пружина, а кривая без
+  // перелёта: недодемпфированная пружина на входе проскакивала край и
+  // возвращалась — вместе с проявляющимися пузырями чата это читалось как
+  // тряска, особенно на слабых устройствах и эмуляторах.
+  slideIn: { duration: 320, easing: Easing.out(Easing.cubic) },
+  slideOut: { duration: 240, easing: Easing.in(Easing.cubic) },
 } as const;
+
+// Сколько после открытия чата лента «устраивается» молча: первый прокрут к
+// последнему сообщению — прыжком, а не анимацией, иначе лента едет вниз
+// одновременно с выездом экрана
+export const CHAT_SETTLE_MS = 600;
 
 // Пауза между элементами списка (stagger), мс
 export const STAGGER = 55;
