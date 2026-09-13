@@ -2646,7 +2646,7 @@ export function JobDetail({
           if (atBottom.current) scrollRef.current?.scrollToEnd({ animated: settled() });
         }}
       >
-        <Animated.View entering={FadeInDown.delay(40).duration(360)} style={styles.detailCard}>
+        <Animated.View entering={FadeIn.delay(40).duration(300)} style={styles.detailCard}>
           <View style={styles.detailHead}>
             <View style={styles.detailIconWrap}>
               <Glyph
@@ -2682,7 +2682,7 @@ export function JobDetail({
         {job.status === 'new' || job.status === 'declined' ? (
           <Animated.View
             key={job.status}
-            entering={FadeInDown.delay(90).duration(360)}
+            entering={FadeIn.delay(90).duration(300)}
             style={styles.priceCard}
           >
             <View style={styles.statusHead}>
@@ -2777,7 +2777,7 @@ export function JobDetail({
             return (
               <Animated.View
                 key={job.status}
-                entering={FadeInDown.delay(90).duration(360)}
+                entering={FadeIn.delay(90).duration(300)}
                 style={[styles.priceCard, celebratory && styles.priceCardAccepted]}
               >
                 {/* Выбор клиента — главное событие в жизни мастера на площадке.
