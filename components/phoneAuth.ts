@@ -1,5 +1,4 @@
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../firebaseConfig';
+import { callFunction } from './callables';
 
 // Вход по номеру телефона: нормализация номера и обращения к серверу.
 //
@@ -43,17 +42,16 @@ export type SmsRequestResult = 'not-configured' | { channel: CodeChannel; codeLe
 /**
  * Развёрнут ли вообще бэкенд телефонного входа.
  *
- * Пока функции не выкачены (нужен тариф Blaze), их адрес отвечает 404: на
- * телефоне SDK превращает это в not-found, а в браузере ответ без
- * CORS-заголовков обрывается ещё на preflight и приходит как internal.
- * Наша функция отправки таких кодов не бросает (её словарь — invalid-argument,
- * resource-exhausted, unavailable), поэтому оба кода означают одно и то же:
- * входа по телефону в этой среде пока нет.
+ * Пока функции не выкачены (нужен тариф Blaze), их адрес отвечает 404, и
+ * SDK превращает это в not-found. Сетевые сбои (internal, unavailable) сюда
+ * больше не входят: их отрабатывает запасной маршрут в callFunction, а если
+ * не сработал и он — человек должен услышать «нет связи», а не «входа по
+ * телефону нет».
  */
 function backendMissing(e: unknown): boolean {
   const code =
     typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
-  return code === 'functions/not-found' || code === 'functions/internal';
+  return code === 'functions/not-found';
 }
 
 /**
@@ -62,12 +60,11 @@ function backendMissing(e: unknown): boolean {
  * не развёрнуты. Приложение в обоих случаях предлагает войти по почте.
  */
 export async function requestSmsCode(phone: string): Promise<SmsRequestResult> {
-  const request = httpsCallable<
-    { phone: string },
-    { configured: boolean; channel?: string; codeLength?: number }
-  >(functions, 'requestPhoneCode');
   try {
-    const { data } = await request({ phone });
+    const data = await callFunction<
+      { phone: string },
+      { configured: boolean; channel?: string; codeLength?: number }
+    >('requestPhoneCode', { phone });
     if (data?.configured === false) return 'not-configured';
     // Старый сервер канала не сообщал — тогда это СМС с шестью цифрами
     return {
@@ -91,11 +88,10 @@ export async function verifySmsCode(
   code: string,
   register: boolean,
 ): Promise<string> {
-  const verify = httpsCallable<
+  const data = await callFunction<
     { phone: string; code: string; register: boolean },
     { token: string }
-  >(functions, 'verifyPhoneCode');
-  const { data } = await verify({ phone, code, register });
+  >('verifyPhoneCode', { phone, code, register });
   if (!data?.token) throw new Error('Сервер не вернул токен входа');
   return data.token;
 }
@@ -117,6 +113,12 @@ export function phoneAuthErrorText(
   if (/[а-яё]/i.test(message)) return message;
   const code =
     typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
-  if (code === 'functions/unavailable') return 'Нет связи с сервером. Проверьте интернет';
+  // internal — так SDK называет любой обрыв сети; оба маршрута к серверу
+  // уже перепробованы (callFunction), значит дело в связи
+  if (
+    ['functions/unavailable', 'functions/internal', 'functions/deadline-exceeded'].includes(code)
+  ) {
+    return 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз';
+  }
   return fallback;
 }

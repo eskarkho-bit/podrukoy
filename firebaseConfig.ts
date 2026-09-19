@@ -30,6 +30,18 @@ storage.maxOperationRetryTime = 10_000;
 // регион не задан, значит us-central1
 export const functions = getFunctions(app, 'us-central1');
 
+// Второй маршрут к тем же функциям — через Firebase Hosting (rewrites /api/*
+// в firebase.json). Хостинг раздаёт Fastly, а прямой адрес функций —
+// Google Frontend, и в российских мобильных сетях cloudfunctions.net с
+// run.app временами недоступны при живых Firestore и хостинге. Запрос кода
+// входа тогда молча не доходил до сервера, а приложение говорило «вход по
+// телефону недоступен». Начинаем с хостинга: он доступен в обеих сетях;
+// прямой адрес — запасной.
+const HOSTING_API = 'https://domio-7ad1c.web.app/api';
+export const functionsViaHosting = getFunctions(app, HOSTING_API);
+// Как выбирается маршрут и что считается сетевым сбоем — components/callables.ts
+export const usingEmulator = process.env.EXPO_PUBLIC_USE_EMULATOR === '1';
+
 /**
  * Идентификатор будущей заявки, выданный заранее.
  *

@@ -66,7 +66,11 @@ jest.mock('./firebaseConfig', () => ({
   auth: {},
   db: {},
   storage: {},
-  functions: {},
+  // Два маршрута к функциям — см. components/callables.ts; тесты различают их
+  // по этому полю
+  functions: { route: 'us-central1' },
+  functionsViaHosting: { route: 'https://domio-7ad1c.web.app/api' },
+  usingEmulator: false,
   // Идентификаторы заявок должны быть разными при каждом вызове — на этом
   // держится проверка идемпотентного создания
   newOrderId: jest.fn(() => `order-${Math.random().toString(36).slice(2, 10)}`),

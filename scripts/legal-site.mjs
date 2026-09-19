@@ -13,7 +13,7 @@
 // Запуск: node scripts/legal-site.mjs  → пишет legal-site/*.html
 // Выкатка: firebase deploy --only hosting
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,22 +50,28 @@ if (docs.length !== 3) {
   throw new Error(`Ожидал 3 документа, нашёл ${docs.length} — структура legal.ts изменилась?`);
 }
 
-// Обе проверки — про «упасть, а не опубликовать не то»:
+// Обе проверки — про «не опубликовать не то»:
 // 1) новая константа-подстановка, о которой скрипт не знает, ушла бы в
-//    страницу литеральным «${NAME}»;
+//    страницу литеральным «${NAME}» — это ошибка сборки;
 // 2) квадратные скобки — незаполненные реквизиты и пометки для юриста,
-//    публиковать такое нельзя. Заодно это делает полный firebase deploy
-//    безопасным: predeploy хостинга упадёт громко, а не выложит черновики.
-//    Локальный предпросмотр черновиков: ALLOW_DRAFT_LEGAL=1 node scripts/legal-site.mjs
+//    публиковать такое нельзя. Но падать из-за этого хостинг не должен: на
+//    том же сайте живёт /api — запасной маршрут к функциям для сетей, где
+//    cloudfunctions.net недоступен (см. firebaseConfig.ts). Поэтому
+//    черновики просто не попадают на сайт, а заглавная честно говорит, что
+//    документы готовятся. Локальный предпросмотр черновиков:
+//    ALLOW_DRAFT_LEGAL=1 node scripts/legal-site.mjs
 for (const doc of docs) {
   if (doc.body.includes('${')) {
     throw new Error(`В «${doc.title}» осталась неизвестная подстановка \${…} — дополните скрипт`);
   }
-  if (doc.body.includes('[') && !process.env.ALLOW_DRAFT_LEGAL) {
-    throw new Error(
-      `В «${doc.title}» остались [ЗАГЛУШКИ] — документы ещё черновики, публиковать их нельзя`,
-    );
-  }
+}
+const drafts = docs.filter((doc) => doc.body.includes('['));
+const publishDocs = !drafts.length || !!process.env.ALLOW_DRAFT_LEGAL;
+if (!publishDocs) {
+  console.warn(
+    `Документы с [ЗАГЛУШКАМИ] на сайт не попадут: ${drafts.map((d) => `«${d.title}»`).join(', ')}. ` +
+      'Впишите реквизиты в components/legal.ts (OPERATOR, CONTACT) и передеплойте хостинг.',
+  );
 }
 
 const escapeHtml = (s) =>
@@ -107,9 +113,12 @@ const page = (title, inner) => `<!doctype html>
 `;
 
 const outDir = join(root, 'legal-site');
+// Каталог собирается с нуля: страница черновика, оставшаяся от прошлого
+// предпросмотра, иначе уехала бы на сайт вместе с заглушками
+rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
-for (const doc of docs) {
+for (const doc of publishDocs ? docs : []) {
   writeFileSync(
     join(outDir, `${doc.id}.html`),
     page(
@@ -126,10 +135,14 @@ writeFileSync(
   join(outDir, 'index.html'),
   page(
     'Документы',
-    `<h1>Документы сервиса «domio»</h1>
+    publishDocs
+      ? `<h1>Документы сервиса «domio»</h1>
 <p>Мобильное приложение для вызова мастера на дом.</p>
 <ul>${docs.map((d) => `<li><a href="${d.id}.html">${escapeHtml(d.title)}</a></li>`).join('\n')}</ul>
-<p class="version">Эти же тексты показываются внутри приложения; версии совпадают.</p>`,
+<p class="version">Эти же тексты показываются внутри приложения; версии совпадают.</p>`
+      : `<h1>Сервис «domio»</h1>
+<p>Мобильное приложение для вызова мастера на дом.</p>
+<p class="version">Документы сервиса готовятся к публикации; их тексты показываются внутри приложения.</p>`,
   ),
 );
 

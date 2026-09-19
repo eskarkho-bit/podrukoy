@@ -17,7 +17,65 @@
   "hosting": {
     "public": "legal-site",
     "predeploy": ["node scripts/legal-site.mjs"],
-    "ignore": ["**/.*"]
+    "ignore": ["**/.*"],
+    "rewrites": [
+      {
+        "source": "/api/requestPhoneCode",
+        "function": {
+          "functionId": "requestPhoneCode",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/verifyPhoneCode",
+        "function": {
+          "functionId": "verifyPhoneCode",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/adminCloseOrder",
+        "function": {
+          "functionId": "adminCloseOrder",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/adminSetUserBlocked",
+        "function": {
+          "functionId": "adminSetUserBlocked",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/adminSetMasterBlocked",
+        "function": {
+          "functionId": "adminSetMasterBlocked",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/adminSetReviewHidden",
+        "function": {
+          "functionId": "adminSetReviewHidden",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/adminResolveComplaint",
+        "function": {
+          "functionId": "adminResolveComplaint",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/adminFindUserByPhone",
+        "function": {
+          "functionId": "adminFindUserByPhone",
+          "region": "us-central1"
+        }
+      }
+    ]
   },
   "emulators": {
     "firestore": {

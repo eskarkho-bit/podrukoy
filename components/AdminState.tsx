@@ -25,8 +25,8 @@ import {
   type DocumentSnapshot,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
+import { callFunction } from './callables';
 import { useAuth } from './AuthState';
 import { useAppState } from './AppState';
 import { callableErrorText, firestoreErrorText } from './firestoreError';
@@ -604,7 +604,7 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
   const call = useCallback(
     async (name: string, data: Record<string, unknown>, failText: string): Promise<boolean> => {
       try {
-        await httpsCallable(functions, name)(data);
+        await callFunction(name, data);
         return true;
       } catch (e) {
         console.warn(`${name} не выполнен:`, e);
@@ -656,8 +656,11 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
   const findByPhone = useCallback(
     async (phone: string): Promise<FoundUser[] | null> => {
       try {
-        const res = await httpsCallable(functions, 'adminFindUserByPhone')({ phone });
-        const found = (res.data as { found?: FoundUser[] })?.found;
+        const res = await callFunction<{ phone: string }, { found?: FoundUser[] }>(
+          'adminFindUserByPhone',
+          { phone },
+        );
+        const found = res?.found;
         return Array.isArray(found) ? found : [];
       } catch (e) {
         console.warn('Поиск не выполнен:', e);
