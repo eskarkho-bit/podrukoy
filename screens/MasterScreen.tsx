@@ -574,9 +574,10 @@ export function MasterScreen({ open, onClose }: Props) {
     const unsubsOpen = cities.map((city) => {
       const filters = [where('status', '==', 'Поиск мастера')];
       if (city) filters.push(where('city', '==', city));
-      // «in» принимает не больше десяти значений, а специальностей восемь
+      // «in» принимает до тридцати значений — специальностей меньше, но
+      // прежний срез до десяти прятал две последние категории
       if (skillList.length) {
-        filters.push(where('category', 'in', skillList.slice(0, 10)));
+        filters.push(where('category', 'in', skillList.slice(0, 30)));
       }
 
       return onSnapshot(
@@ -589,7 +590,9 @@ export function MasterScreen({ open, onClose }: Props) {
             snap.docs
               .filter((d) => {
                 const owner = d.data().masterId ?? null;
-                return owner === null || owner === myUid;
+                // Собственная заявка клиента-мастера в его ленте не нужна:
+                // правила цену на неё не примут
+                return (owner === null || owner === myUid) && d.data().clientId !== myUid;
               })
               .map(toJob),
           );

@@ -568,6 +568,24 @@ describe('Предложения мастеров', () => {
     );
   });
 
+  // Запрос по группе коллекций доказывает правилам только равенство полей
+  test('свои предложения по всем заявкам мастер собирает одним запросом', async () => {
+    await assertSucceeds(
+      getDocs(query(collectionGroup(as('master1'), 'offers'), where('masterId', '==', 'master1'))),
+    );
+    await assertFails(
+      getDocs(query(collectionGroup(as('master1'), 'offers'), where('masterId', '==', 'master2'))),
+    );
+    await assertFails(getDocs(query(collectionGroup(as('master1'), 'offers'))));
+  });
+
+  test('на собственную заявку мастер цену не называет', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'orders/own-by-master1'), order({ clientId: 'master1' }));
+    });
+    await assertFails(setDoc(doc(as('master1'), 'orders/own-by-master1/offers/master1'), offer()));
+  });
+
   test('нельзя писать в чужое предложение', async () => {
     await assertFails(
       setDoc(

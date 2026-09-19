@@ -156,7 +156,7 @@ async function sendSms(apiId: string, phone: string, text: string): Promise<void
  * его назначает и возвращает провайдер, мы не выбираем. POST по той же
  * причине, что у СМС: номер не должен оказаться в URL.
  */
-async function requestCall(apiId: string, phone: string): Promise<string> {
+async function requestCall(apiId: string, phone: string, ip?: string): Promise<string> {
   const res = await fetch(CALL_API, {
     method: 'POST',
     signal: AbortSignal.timeout(15_000),
@@ -164,6 +164,9 @@ async function requestCall(apiId: string, phone: string): Promise<string> {
     body: new URLSearchParams({
       api_id: apiId,
       phone: phone.replace('+', ''),
+      // Адрес вызывающего провайдер просит для своей защиты от накруток;
+      // без него звонок тоже заказывается, но с ним — надёжнее
+      ...(ip ? { ip } : {}),
       json: '1',
     }).toString(),
   });
@@ -309,7 +312,7 @@ export async function sendLoginCode(phone: string, ip?: string): Promise<Request
     if (channel === 'sms') {
       await sendSms(creds.apiId, phone, `Код входа в domio: ${smsCode}`);
     } else {
-      const callCode = await requestCall(creds.apiId, phone);
+      const callCode = await requestCall(creds.apiId, phone, ip);
       await ref.set(
         {
           codeHash: codeHash(phone, callCode),

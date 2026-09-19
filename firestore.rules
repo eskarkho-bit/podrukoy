@@ -841,6 +841,9 @@ service cloud.firestore {
         allow create, update: if isVerifiedMaster()
           && request.auth.uid == masterId
           && orderIsOpen()
+          // Своей же заявке цену не называют: клиент-мастер выбрал бы себя
+          // и написал бы себе отзыв
+          && order().clientId != request.auth.uid
           && !blockedByClient()
           && request.resource.data.keys().hasOnly([
             'masterId', 'masterName', 'price', 'comment', 'status', 'orderTitle', 'createdAt',
@@ -929,8 +932,14 @@ service cloud.firestore {
     // Свои предложения по всем заявкам сразу: мастеру нужен их список, а
     // заявки, где он ещё только предложил цену, ему не принадлежат.
     // Запрос — collectionGroup('offers').where('masterId','==',uid).
+    // Свои предложения по всем заявкам: collectionGroup('offers')
+    // .where('masterId','==',uid). Условие — по полю, а не по идентификатору
+    // документа: запрос по группе коллекций умеет доказать правилам только
+    // равенство полей, и правило по {masterId} отклоняло его всегда — мастер
+    // не видел своих отправленных цен. Что поле равно идентификатору, держит
+    // правило создания.
     match /{path=**}/offers/{masterId} {
-      allow read: if request.auth.uid == masterId;
+      allow read: if authed() && resource.data.masterId == request.auth.uid;
     }
 
     // Очередь модерации: collectionGroup('verification').where('status','==','pending')
