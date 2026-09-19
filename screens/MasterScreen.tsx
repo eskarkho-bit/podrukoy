@@ -47,6 +47,7 @@ import {
   where,
   writeBatch,
   type QueryDocumentSnapshot,
+  Timestamp,
 } from 'firebase/firestore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CHAT_SETTLE_MS, springs, STAGGER, timings } from '../motion';
@@ -168,6 +169,9 @@ export type Job = {
   // У заявок до появления completedAt второй нет.
   createdMs: number | null;
   completedMs: number | null;
+  // Когда клиент выбрал исполнителя. С этого момента мастер читает переписку:
+  // до него в заявке могли быть сообщения прежнего мастера
+  agreedAt?: Timestamp | null;
   // Заявка со старой схемой согласования — цена лежит в ней самой
   legacy: boolean;
   unread: boolean;
@@ -452,7 +456,7 @@ export function MasterScreen({ open, onClose }: Props) {
     // Непроверенному мастеру запросы делать незачем: правила их отклонят,
     // а консоль засыплет permission-denied. Отстранённому — тоже: правила
     // закрыли ему ленту, а старые подписки показывали бы её из памяти
-    if (!verified || suspended || !myUid) {
+    if (!verified || !myUid) {
       setJobs([]);
       setMyOrders([]);
       setOffersCount(0);
@@ -494,6 +498,7 @@ export function MasterScreen({ open, onClose }: Props) {
         price: v.agreedPrice ?? v.price ?? undefined,
         createdMs: v.createdAt?.toMillis?.() ?? null,
         completedMs: v.completedAt?.toMillis?.() ?? null,
+        agreedAt: v.agreedAt instanceof Timestamp ? v.agreedAt : null,
         legacy,
         unread: false,
         messages: [],
@@ -537,6 +542,7 @@ export function MasterScreen({ open, onClose }: Props) {
           myOffer: offer.price,
           createdMs: null,
           completedMs: null,
+          agreedAt: null,
           legacy: false,
           unread: false,
           messages: [],
@@ -549,8 +555,13 @@ export function MasterScreen({ open, onClose }: Props) {
             const old = prev.find((p) => p.id === j.id);
             return old ? { ...j, unread: old.unread, messages: old.messages } : j;
           })
+          // Внутри статуса — новые сверху; идентификатор лишь разводит
+          // заявки с одинаковым временем
           .sort(
-            (a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.id.localeCompare(a.id),
+            (a, b) =>
+              STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
+              (b.createdMs ?? 0) - (a.createdMs ?? 0) ||
+              b.id.localeCompare(a.id),
           ),
       );
     };
@@ -571,7 +582,10 @@ export function MasterScreen({ open, onClose }: Props) {
     // бы пятьсот заявок на телефоне
     const perCity = Math.max(10, Math.floor(FEED_LIMIT / cities.length));
 
-    const unsubsOpen = cities.map((city) => {
+    // Отстранённому лента закрыта правилами, а текущая работа и свои
+    // предложения — нет: их подписки остаются, подписки на ленту — снимаются
+    if (suspended) buckets.current.open = new Map();
+    const unsubsOpen = (suspended ? [] : cities).map((city) => {
       const filters = [where('status', '==', 'Поиск мастера')];
       if (city) filters.push(where('city', '==', city));
       // «in» принимает до тридцати значений — специальностей меньше, но
@@ -761,10 +775,24 @@ export function MasterScreen({ open, onClose }: Props) {
 
   // Переписка открытой заявки. Подписываемся только на неё: держать живыми
   // подписки на все заявки сразу незачем.
+  // Читаем только со своего назначения: правила пускают мастера к
+  // сообщениям не раньше agreedAt — заявка могла вернуться в поиск после
+  // отказа прежнего мастера, и его переписка новому не принадлежит. Порог
+  // берём из заявки той же самой меткой времени: правило сравнивает её
+  // точно, и округление до миллисекунд уже не прошло бы
+  const openAgreedAt = openJob?.agreedAt ?? null;
+  const openAgreedMs = openAgreedAt?.toMillis() ?? null;
+  const openAgreedRef = useRef(openAgreedAt);
+  openAgreedRef.current = openAgreedAt;
   useEffect(() => {
     if (!openJobId || !myUid) return;
+    const since = openAgreedRef.current;
     return onSnapshot(
-      query(collection(db, 'orders', openJobId, 'messages'), orderBy('createdAt', 'asc')),
+      query(
+        collection(db, 'orders', openJobId, 'messages'),
+        ...(since ? [where('createdAt', '>=', since)] : []),
+        orderBy('createdAt', 'asc'),
+      ),
       (snap) => {
         const messages: JobMessage[] = snap.docs.map((m) => {
           const v = m.data();
@@ -781,7 +809,7 @@ export function MasterScreen({ open, onClose }: Props) {
       },
       (e) => console.warn('Переписка недоступна:', e),
     );
-  }, [openJobId, myUid]);
+  }, [openJobId, myUid, openAgreedMs]);
 
   // Предложение — отдельный документ orders/{id}/offers/{myUid}. Из этого
   // следует всё остальное: перебить чужую цену невозможно (каждый пишет свой
@@ -872,6 +900,13 @@ export function MasterScreen({ open, onClose }: Props) {
   // Сообщение в чат — до отметки: после возврата мастер уже не участник
   // заявки, и правила его туда не пустят.
   const declineJob = async (jobId: string) => {
+    const job = jobs.find((j) => j.id === jobId);
+    // Правила отказ после отметок об оплате не пропустят — не отправляем и
+    // сообщение, которое иначе ушло бы клиенту зря
+    if (job && (job.paidMs != null || job.paymentReceivedMs != null)) {
+      showNotice('После отметки об оплате отказаться нельзя — напишите в поддержку');
+      return;
+    }
     pushMessage(jobId, 'Вынужден отказаться от заявки — простите за неудобство.');
     try {
       await updateDoc(doc(db, 'orders', jobId), { masterDeclinedAt: serverTimestamp() });
@@ -1132,14 +1167,17 @@ function MasterApplicationScreen({
       // Сначала анкета, потом файл: правила пускают этот переход и у
       // проверенного, и у ожидающего проверки. Обратный порядок при сбое
       // оставлял бы анкету со ссылкой на уже удалённый снимок.
-      await updateDoc(doc(db, 'masters', myUid, 'verification', 'application'), {
+      // Анкета и допуск — одним пакетом: порознь сбой второй записи оставил
+      // бы проверенного мастера без снимка и без согласия. Сервер повторяет
+      // снятие допуска на всякий случай (onVerificationChanged).
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'masters', myUid, 'verification', 'application'), {
         photoUrl: null,
         biometricConsent: null,
         status: 'draft',
       });
-      if (verified) {
-        await updateDoc(doc(db, 'masters', myUid), { verified: false });
-      }
+      if (verified) batch.update(doc(db, 'masters', myUid), { verified: false });
+      await batch.commit();
       await deleteVerificationPhoto(myUid);
       setPhotoUri(null);
       setFaceConsent(false);
@@ -1188,7 +1226,9 @@ function MasterApplicationScreen({
           skills,
           experienceYears,
           education,
-          createdAt: serverTimestamp(),
+          // Дата создания — только у новой анкеты: merge иначе переписывал бы
+          // её при каждом сохранении
+          ...(profile ? {} : { createdAt: serverTimestamp() }),
         },
         { merge: true },
       );
@@ -1420,6 +1460,7 @@ function MasterApplicationScreen({
           <TextInput
             style={styles.fieldInput}
             value={name}
+            maxLength={100}
             onChangeText={setName}
             placeholder="Иван"
             placeholderTextColor={t.textMuted}
@@ -1430,6 +1471,7 @@ function MasterApplicationScreen({
           <TextInput
             style={styles.fieldInput}
             value={lastName}
+            maxLength={100}
             onChangeText={setLastName}
             placeholder="Петров"
             placeholderTextColor={t.textMuted}
@@ -2867,19 +2909,22 @@ export function JobDetail({
 
                 {/* Заболел, не рассчитал время — лучше отказаться сразу, чем
                     исчезнуть: заявку вернёт в поиск сервер, клиент узнает
-                    пушем. Сданную работу бросить уже нельзя. */}
-                {job.status === 'accepted' && (
-                  <PressableScale
-                    style={[styles.declineBtn, declining && styles.declineBtnConfirm]}
-                    onPress={pressDecline}
-                  >
-                    <Text style={[styles.declineText, declining && styles.declineTextConfirm]}>
-                      {declining
-                        ? 'Точно отказаться? Заявка вернётся в поиск'
-                        : 'Отказаться от заявки'}
-                    </Text>
-                  </PressableScale>
-                )}
+                    пушем. Сданную работу бросить уже нельзя, как и работу с
+                    отметкой об оплате — деньги уже переходили из рук в руки. */}
+                {job.status === 'accepted' &&
+                  job.paidMs == null &&
+                  job.paymentReceivedMs == null && (
+                    <PressableScale
+                      style={[styles.declineBtn, declining && styles.declineBtnConfirm]}
+                      onPress={pressDecline}
+                    >
+                      <Text style={[styles.declineText, declining && styles.declineTextConfirm]}>
+                        {declining
+                          ? 'Точно отказаться? Заявка вернётся в поиск'
+                          : 'Отказаться от заявки'}
+                      </Text>
+                    </PressableScale>
+                  )}
 
                 {/* Телефон клиента сервер кладёт в заявку после выбора:
                     договориться о времени голосом быстрее, чем перепиской.
@@ -2995,6 +3040,7 @@ export function JobDetail({
               value={text}
               onChangeText={setText}
               placeholder={pendingImage ? 'Подпись к фото…' : 'Написать клиенту…'}
+              maxLength={2000}
               placeholderTextColor={t.textMuted}
               style={styles.input}
               multiline
@@ -3011,7 +3057,11 @@ export function JobDetail({
         </>
       ) : (
         <View style={styles.chatLockedRow}>
-          <Text style={styles.chatLockedText}>Чат откроется, когда клиент выберет вас</Text>
+          <Text style={styles.chatLockedText}>
+            {job.status === 'cancelled' || job.status === 'closed'
+              ? 'Переписка закрыта: сделки по заявке больше нет'
+              : 'Чат откроется, когда клиент выберет вас'}
+          </Text>
         </View>
       )}
     </KeyboardAvoidingView>

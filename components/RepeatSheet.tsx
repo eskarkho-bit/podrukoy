@@ -56,7 +56,13 @@ export function RepeatSheet({ order, masterBlocked, onClose, onSubmit }: Props) 
   const styles = themed[mode];
   const [comment, setComment] = useState(order.comment ?? '');
   // Прошлый мастер зовётся по умолчанию: раз работу подтвердили, им довольны
-  const canCallMaster = !!order.masterId && !!order.masterName && !masterBlocked;
+  // Удалённый аккаунт (так его подписывает functions/src/deletion.ts) звать
+  // некуда, как и заблокированного
+  const canCallMaster =
+    !!order.masterId &&
+    !!order.masterName &&
+    order.masterName !== 'Удалённый аккаунт' &&
+    !masterBlocked;
   const [callMaster, setCallMaster] = useState(canCallMaster);
   const [done, setDone] = useState(false);
   const submitted = useRef(false);

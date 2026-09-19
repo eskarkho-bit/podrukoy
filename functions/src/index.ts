@@ -197,134 +197,152 @@ export const onMessageCreated = onDocumentCreated(
 
 // ---------- смена статуса заявки ----------
 
-export const onOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async (event) => {
-  const before = event.data?.before.data();
-  const after = event.data?.after.data();
-  if (!before || !after) return;
+// retry: потерянное событие оставило бы заявку без телефонов сторон или с
+// необработанным отказом мастера; обработчики идемпотентны — повтор пуша
+// дешевле такой заявки
+export const onOrderStatusChanged = onDocumentUpdated(
+  { document: 'orders/{orderId}', retry: true },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
 
-  // Отметки о расчёте («оплатил», «получил») приходят тем же событием, но
-  // статус при этом обычно не меняется — смотрим на них до проверки статуса
-  await notePaymentMarks(event.params.orderId, before, after, event.id);
-  // Отказ мастера — тоже отметка без смены статуса: статус меняет уже сервер
-  if (await handleMasterDecline(event.params.orderId, before, after, event.id)) return;
-  if (before.status === after.status) return;
+    // Отметки о расчёте («оплатил», «получил») приходят тем же событием, но
+    // статус при этом обычно не меняется — смотрим на них до проверки статуса
+    await notePaymentMarks(event.params.orderId, before, after, event.id);
+    // Отказ мастера — тоже отметка без смены статуса: статус меняет уже сервер
+    if (await handleMasterDecline(event.params.orderId, before, after, event.id)) return;
+    if (before.status === after.status) return;
 
-  const title = String(after.title ?? 'Заявка');
-  const clientId = after.clientId as string | undefined;
-  const masterId = after.masterId as string | undefined;
+    const title = String(after.title ?? 'Заявка');
+    const clientId = after.clientId as string | undefined;
+    const masterId = after.masterId as string | undefined;
 
-  // Клиент не согласился с «выполнено»: работа вернулась тому же мастеру.
-  // Это не выбор исполнителя — контакты уже в заявке, и «Вас выбрали» здесь
-  // было бы ложью, — поэтому ветка стоит до общей карты статусов
-  if (before.status === 'Ждёт подтверждения' && after.status === 'В работе') {
-    await audit({
-      action: 'order.returned_to_work',
-      actor: SYSTEM,
-      subject: { type: 'order', id: event.params.orderId },
-      correlationId: event.id,
-      details: { masterId: masterId ?? null },
-    });
-    if (masterId) {
-      await pushTo([masterId], 'Клиент вернул заявку в работу', `${title}: работа ещё не принята`, {
-        href: '/profile',
+    // Клиент не согласился с «выполнено»: работа вернулась тому же мастеру.
+    // Это не выбор исполнителя — контакты уже в заявке, и «Вас выбрали» здесь
+    // было бы ложью, — поэтому ветка стоит до общей карты статусов
+    if (before.status === 'Ждёт подтверждения' && after.status === 'В работе') {
+      await audit({
+        action: 'order.returned_to_work',
+        actor: SYSTEM,
+        subject: { type: 'order', id: event.params.orderId },
+        correlationId: event.id,
+        details: { masterId: masterId ?? null },
+      });
+      if (masterId) {
+        await pushTo(
+          [masterId],
+          'Клиент вернул заявку в работу',
+          `${title}: работа ещё не принята`,
+          {
+            href: '/profile',
+          },
+        );
+      }
+      return;
+    }
+
+    // Смена статуса — единственный след того, как двигалась сделка. Без него
+    // спор «я не соглашался на эту цену» разобрать нечем.
+    const ACTION_BY_STATUS: Record<string, AuditAction> = {
+      'В работе': 'order.master_selected',
+      'Ждёт подтверждения': 'order.finished',
+      Завершена: 'order.confirmed',
+      Отменена: 'order.cancelled',
+      'Поиск мастера': 'order.reopened',
+    };
+    const action = ACTION_BY_STATUS[after.status as string];
+    if (action) {
+      await audit({
+        action,
+        actor: SYSTEM,
+        subject: { type: 'order', id: event.params.orderId },
+        correlationId: event.id,
+        details: {
+          from: String(before.status ?? ''),
+          to: String(after.status ?? ''),
+          masterId: masterId ?? null,
+          agreedPrice: typeof after.agreedPrice === 'number' ? after.agreedPrice : null,
+        },
       });
     }
-    return;
-  }
 
-  // Смена статуса — единственный след того, как двигалась сделка. Без него
-  // спор «я не соглашался на эту цену» разобрать нечем.
-  const ACTION_BY_STATUS: Record<string, AuditAction> = {
-    'В работе': 'order.master_selected',
-    'Ждёт подтверждения': 'order.finished',
-    Завершена: 'order.confirmed',
-    Отменена: 'order.cancelled',
-    'Поиск мастера': 'order.reopened',
-  };
-  const action = ACTION_BY_STATUS[after.status as string];
-  if (action) {
-    await audit({
-      action,
-      actor: SYSTEM,
-      subject: { type: 'order', id: event.params.orderId },
-      correlationId: event.id,
-      details: {
-        from: String(before.status ?? ''),
-        to: String(after.status ?? ''),
-        masterId: masterId ?? null,
-        agreedPrice: typeof after.agreedPrice === 'number' ? after.agreedPrice : null,
-      },
-    });
-  }
-
-  // Клиент выбрал исполнителя. С этого момента заявку читают только двое —
-  // сервер кладёт в неё телефоны сторон, и у обеих появляется кнопка звонка
-  if (after.status === 'В работе' && masterId) {
-    await shareOrderContacts(event.params.orderId, event.id);
-    await pushTo([masterId], 'Вас выбрали!', `${title} · ${rub(Number(after.agreedPrice ?? 0))}`, {
-      href: '/profile',
-    });
-    return;
-  }
-
-  if (after.status === 'Ждёт подтверждения' && clientId) {
-    await pushTo([clientId], 'Работа выполнена', `Подтвердите завершение: ${title}`, { href: '/' });
-    return;
-  }
-
-  // Закрытие модерацией должно и называться закрытием модерацией: клиент,
-  // о котором «Клиент отменил заявку», решил бы, что сходит с ума
-  const byAdmin = after.closedByAdmin === true && before.closedByAdmin !== true;
-  const adminReason = String(after.adminCloseReason ?? title);
-
-  if (after.status === 'Завершена') {
-    // Цена уходит в гистограмму: медиана чека в сводке модератора считается
-    // по ней, а не по заявкам. Отметка о зачёте ставится на саму заявку,
-    // поэтому повтор события второй раз её не посчитает.
-    await recordCompletedOrder(
-      event.params.orderId,
-      typeof after.agreedPrice === 'number' ? after.agreedPrice : 0,
-    );
-    if (masterId) {
-      // Счётчик заказов в анкете — клиент видит его в профиле мастера
-      await recountCompletedOrders(masterId);
+    // Клиент выбрал исполнителя. С этого момента заявку читают только двое —
+    // сервер кладёт в неё телефоны сторон, и у обеих появляется кнопка звонка
+    if (after.status === 'В работе' && masterId) {
+      await shareOrderContacts(event.params.orderId, event.id);
       await pushTo(
         [masterId],
-        byAdmin ? 'Заявка закрыта модерацией' : 'Клиент подтвердил работу',
-        byAdmin ? adminReason : title,
-        { href: '/profile' },
+        'Вас выбрали!',
+        `${title} · ${rub(Number(after.agreedPrice ?? 0))}`,
+        {
+          href: '/profile',
+        },
       );
+      return;
     }
-    if (byAdmin && clientId) {
-      await pushTo([clientId], 'Заявка закрыта модерацией', adminReason, { href: '/' });
-    }
-    return;
-  }
 
-  if (after.status === 'Отменена') {
-    // Сделки больше нет — телефоны и реквизиты сторон из заявки уходят: без
-    // этого отменённая заявка оставалась бы справочником чужих номеров
-    if (after.masterPhone != null || after.clientPhone != null || after.masterBanks != null) {
-      await getFirestore()
-        .doc(`orders/${event.params.orderId}`)
-        .set(
-          { masterPhone: null, clientPhone: null, masterBanks: null, masterAcceptsCash: null },
-          { merge: true },
+    if (after.status === 'Ждёт подтверждения' && clientId) {
+      await pushTo([clientId], 'Работа выполнена', `Подтвердите завершение: ${title}`, {
+        href: '/',
+      });
+      return;
+    }
+
+    // Закрытие модерацией должно и называться закрытием модерацией: клиент,
+    // о котором «Клиент отменил заявку», решил бы, что сходит с ума
+    const byAdmin = after.closedByAdmin === true && before.closedByAdmin !== true;
+    const adminReason = String(after.adminCloseReason ?? title);
+
+    if (after.status === 'Завершена') {
+      // Цена уходит в гистограмму: медиана чека в сводке модератора считается
+      // по ней, а не по заявкам. Отметка о зачёте ставится на саму заявку,
+      // поэтому повтор события второй раз её не посчитает.
+      await recordCompletedOrder(
+        event.params.orderId,
+        typeof after.agreedPrice === 'number' ? after.agreedPrice : 0,
+      );
+      if (masterId) {
+        // Счётчик заказов в анкете — клиент видит его в профиле мастера
+        await recountCompletedOrders(masterId);
+        await pushTo(
+          [masterId],
+          byAdmin ? 'Заявка закрыта модерацией' : 'Клиент подтвердил работу',
+          byAdmin ? adminReason : title,
+          { href: '/profile' },
         );
+      }
+      if (byAdmin && clientId) {
+        await pushTo([clientId], 'Заявка закрыта модерацией', adminReason, { href: '/' });
+      }
+      return;
     }
-    if (masterId) {
-      await pushTo(
-        [masterId],
-        byAdmin ? 'Заявка отменена модерацией' : 'Клиент отменил заявку',
-        byAdmin ? adminReason : title,
-        { href: '/profile' },
-      );
+
+    if (after.status === 'Отменена') {
+      // Сделки больше нет — телефоны и реквизиты сторон из заявки уходят: без
+      // этого отменённая заявка оставалась бы справочником чужих номеров
+      if (after.masterPhone != null || after.clientPhone != null || after.masterBanks != null) {
+        await getFirestore()
+          .doc(`orders/${event.params.orderId}`)
+          .set(
+            { masterPhone: null, clientPhone: null, masterBanks: null, masterAcceptsCash: null },
+            { merge: true },
+          );
+      }
+      if (masterId) {
+        await pushTo(
+          [masterId],
+          byAdmin ? 'Заявка отменена модерацией' : 'Клиент отменил заявку',
+          byAdmin ? adminReason : title,
+          { href: '/profile' },
+        );
+      }
+      if (byAdmin && clientId) {
+        await pushTo([clientId], 'Заявка отменена модерацией', adminReason, { href: '/' });
+      }
     }
-    if (byAdmin && clientId) {
-      await pushTo([clientId], 'Заявка отменена модерацией', adminReason, { href: '/' });
-    }
-  }
-});
+  },
+);
 
 // ---------- обращение в поддержку ----------
 
@@ -408,6 +426,14 @@ export const onVerificationChanged = onDocumentWritten(
           reapplied: wasStatus === 'approved',
         },
       });
+    }
+
+    // Отзыв согласия на снимок у одобренного: приложение снимает допуск тем
+    // же пакетом, сервер повторяет — без снимка личность не подтверждена, и
+    // адреса клиентов такому мастеру видеть нельзя
+    if (wasStatus === 'approved' && status === 'draft') {
+      await db.doc(`masters/${masterId}`).set({ verified: false }, { merge: true });
+      return;
     }
 
     if (status === 'pending') {

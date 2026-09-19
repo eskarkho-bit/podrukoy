@@ -413,6 +413,7 @@ export function OrdersScreen({
                   onChangeText={setAddrDraft}
                   placeholder="ул. Пушкина, 10"
                   placeholderTextColor={t.textMuted}
+                  maxLength={200}
                   autoFocus
                   onSubmitEditing={submitNewAddress}
                   returnKeyType="done"

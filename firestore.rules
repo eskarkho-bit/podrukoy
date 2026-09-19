@@ -912,10 +912,23 @@ service cloud.firestore {
               && request.auth.uid in get(client).data.get('blockedMasters', []));
         }
 
+        // Мастер читает переписку только со своего назначения: заявка,
+        // вернувшаяся в поиск после отказа прежнего мастера, несёт его
+        // сообщения, и новому исполнителю они не принадлежат. Запрос
+        // мастера обязан ограничить createdAt порогом agreedAt из заявки.
+        // У заявок до появления agreedAt порога нет — читаются целиком.
+        function sinceAssignment() {
+          return order().get('agreedAt', null) == null
+            || resource.data.createdAt >= order().agreedAt;
+        }
+
         // Модератор переписку читает (разбор спора — это в первую очередь
         // чтение диалога), но писать в неё не может: голос в чужой сделке
         // ему не принадлежит.
-        allow read: if isParty() || isAdmin();
+        allow read: if isAdmin()
+          || (authed() && order().clientId == request.auth.uid)
+          || (authed() && order().get('masterId', null) == request.auth.uid
+            && sinceAssignment());
         // Сообщение — это текст, картинка или и то и другое; пустым не бывает
         allow create: if isParty() && orderTalkable() && senderNotBlocked()
           && request.resource.data.senderId == request.auth.uid

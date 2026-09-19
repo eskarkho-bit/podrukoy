@@ -254,6 +254,7 @@ export function ProfileScreen({
                 autoFocus
                 onSubmitEditing={saveName}
                 onBlur={saveName}
+                maxLength={100}
                 returnKeyType="done"
               />
             </Animated.View>
@@ -312,7 +313,7 @@ export function ProfileScreen({
             </View>
             <View style={styles.masterBody}>
               <Text style={styles.masterTitle}>Проверенные мастера</Text>
-              <Text style={styles.masterSub}>Как устроена проверка — фото, телефон, карта</Text>
+              <Text style={styles.masterSub}>Как устроена проверка — фото и телефон</Text>
             </View>
             <Text style={styles.masterChevron}>›</Text>
           </PressableScale>

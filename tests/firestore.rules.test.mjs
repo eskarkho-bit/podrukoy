@@ -28,6 +28,7 @@ import {
   updateDoc,
   where,
   writeBatch,
+  orderBy,
 } from 'firebase/firestore';
 
 // Префикс demo- гарантирует, что обращения никогда не уйдут в настоящий проект
@@ -1262,6 +1263,48 @@ describe('Переписка по заявке', () => {
     await assertSucceeds(
       addDoc(collection(as('client1'), 'orders/working/messages'), message('client1')),
     );
+  });
+
+  // Заявка вернулась в поиск и ушла другому мастеру: переписка с прежним
+  // новому не принадлежит — он читает только с момента своего назначения
+  test('новый мастер не видит переписку с прежним', async () => {
+    const assignedAt = new Date('2026-09-10T10:00:00Z');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(
+        doc(db, 'orders/reassigned'),
+        order({
+          masterId: 'master2',
+          masterName: 'Пётр',
+          status: 'В работе',
+          agreedAt: assignedAt,
+        }),
+      );
+      await setDoc(doc(db, 'orders/reassigned/messages/old'), {
+        senderId: 'master1',
+        text: 'мой телефон +7 928 000-11-22',
+        time: '10:00',
+        createdAt: new Date('2026-09-09T10:00:00Z'),
+      });
+      await setDoc(doc(db, 'orders/reassigned/messages/fresh'), {
+        senderId: 'client1',
+        text: 'когда приедете?',
+        time: '11:00',
+        createdAt: new Date('2026-09-11T10:00:00Z'),
+      });
+    });
+    const messages = (uid) => collection(as(uid), 'orders/reassigned/messages');
+    await assertSucceeds(
+      getDocs(
+        query(messages('master2'), where('createdAt', '>=', assignedAt), orderBy('createdAt')),
+      ),
+    );
+    await assertFails(getDocs(query(messages('master2'), orderBy('createdAt'))));
+    await assertFails(getDoc(doc(as('master2'), 'orders/reassigned/messages/old')));
+    await assertSucceeds(getDoc(doc(as('master2'), 'orders/reassigned/messages/fresh')));
+    // Клиент и модератор читают всё
+    await assertSucceeds(getDocs(query(messages('client1'), orderBy('createdAt'))));
+    await assertSucceeds(getDocs(query(messages('admin1'), orderBy('createdAt'))));
   });
 
   test('нельзя отправить сообщение от чужого имени', async () => {

@@ -143,7 +143,15 @@ export function AuthScreen() {
           : `Код отправлен на ${formatRuPhone(normalized)}`,
       );
     } catch (e) {
-      setError(phoneAuthErrorText(e, 'Не удалось отправить код. Попробуйте ещё раз'));
+      const text = phoneAuthErrorText(e, 'Не удалось отправить код. Попробуйте ещё раз');
+      // Код уже в пути с прошлой попытки (например, после смены «вход» на
+      // «регистрацию»): поле для него должно быть на экране, иначе минуту
+      // некуда вводить
+      if (/уже отправлен/i.test(text)) {
+        setCodeSent(true);
+        setCooldownUntil(Date.now() + 60_000);
+      }
+      setError(text);
     } finally {
       setLoading(false);
     }
@@ -157,7 +165,9 @@ export function AuthScreen() {
       setError('Нужен мобильный номер РФ — на него придёт код');
       return;
     }
-    if (!new RegExp(`^\\d{${codeLength}}$`).test(code.trim())) {
+    // Четыре цифры — звонок, шесть — СМС; когда код пришёл с прошлой попытки,
+    // канал неизвестен, поэтому принимаем оба, точную проверку делает сервер
+    if (!/^\d{4}$|^\d{6}$/.test(code.trim())) {
       setError(
         codeChannel === 'call'
           ? 'Код — последние 4 цифры номера, с которого звонили'
@@ -428,7 +438,8 @@ export function AuthScreen() {
                 editable={!loading}
               />
               <Text style={styles.fieldHint}>
-                Адрес увидит только тот мастер, которого вы выберете
+                Пока заявка ищет исполнителя, адрес видят проверенные мастера вашего города; телефон
+                — только тот, кого вы выберете
               </Text>
             </Animated.View>
           )}

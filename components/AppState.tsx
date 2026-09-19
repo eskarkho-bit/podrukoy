@@ -523,6 +523,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setOffersByOrder({});
       return;
     }
+    // Заявка ушла из поиска — её предложения больше не нужны: подписка
+    // снята, а список без этого оставался бы в памяти
+    setOffersByOrder((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => ids.includes(id))),
+    );
 
     const unsubs = ids.map((orderId) =>
       onSnapshot(
@@ -939,26 +944,31 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   };
 
   // Новый адрес: добавляем в список (без дублей) и сразу делаем активным
+  // Отказ правил или сети здесь не проглатывается: экран уже показывает
+  // новое значение, и без уведомления оно молча пропало бы после перезапуска
+  const saveFailed = failed('Не удалось сохранить изменения. Проверьте связь');
+
   const addAddress = (addr: string) => {
-    const trimmed = addr.trim();
+    // Тот же потолок, что у адреса в заявке (правила: 200 символов)
+    const trimmed = addr.trim().slice(0, 200);
     if (!trimmed) return;
     const next = addresses.includes(trimmed) ? addresses : [...addresses, trimmed];
     setAddresses(next);
     setActiveAddressLocal(trimmed);
     const ref = userDoc();
-    if (ref) updateDoc(ref, { addresses: next, activeAddress: trimmed }).catch(() => {});
+    if (ref) updateDoc(ref, { addresses: next, activeAddress: trimmed }).catch(saveFailed);
   };
 
   const setActiveAddress = (addr: string) => {
     setActiveAddressLocal(addr);
     const ref = userDoc();
-    if (ref) updateDoc(ref, { activeAddress: addr }).catch(() => {});
+    if (ref) updateDoc(ref, { activeAddress: addr }).catch(saveFailed);
   };
 
   const setUserName = (name: string) => {
     setUserNameLocal(name);
     const ref = userDoc();
-    if (ref) updateDoc(ref, { name }).catch(() => {});
+    if (ref) updateDoc(ref, { name }).catch(saveFailed);
   };
 
   // Принятие новой редакции документов. Нужно и тем, кто регистрировался до
@@ -982,7 +992,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     const trimmed = next.trim();
     setCityLocal(trimmed);
     const ref = userDoc();
-    if (ref) updateDoc(ref, { city: trimmed }).catch(() => {});
+    if (ref) updateDoc(ref, { city: trimmed }).catch(saveFailed);
   };
 
   const setThemeMode = useCallback((next: ThemeMode) => {
@@ -1003,7 +1013,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const setRemindersOff = (off: boolean) => {
     setRemindersOffLocal(off);
     const ref = userDoc();
-    if (ref) updateDoc(ref, { remindersOff: off }).catch(() => {});
+    if (ref) updateDoc(ref, { remindersOff: off }).catch(saveFailed);
   };
 
   // Ошибку не глотаем: тумблер, который «выключил», а пуши идут дальше, —
@@ -1224,10 +1234,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setOverlayOpen(false);
     // Токен этого устройства уходит из профиля: после выхода сюда не должны
     // приходить уведомления ушедшего аккаунта — телефон могли передать
+    // Без сети запись не подтвердится никогда — ждём её не дольше полутора
+    // секунд: выход важнее чистоты списка токенов
     if (uid && pushToken) {
-      await updateDoc(doc(db, 'users', uid), { pushTokens: arrayRemove(pushToken) }).catch(
-        () => {},
-      );
+      await Promise.race([
+        updateDoc(doc(db, 'users', uid), { pushTokens: arrayRemove(pushToken) }).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 1500)),
+      ]);
     }
     await signOutUser();
   };
@@ -1352,7 +1365,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const ordersWithOffers: Order[] = orders.map((o) => {
     // Предложения заблокированных мастеров правила уже не пропускают; те,
     // что успели прийти до блокировки, прячем здесь
-    const list = offersByOrder[o.id]?.filter((offer) => !blockedMasterIds.includes(offer.masterId));
+    // Только у открытой заявки: после выбора мастера или отмены в списке
+    // вместо статуса иначе читалось бы «N предложений»
+    const list =
+      o.status === 'Поиск мастера'
+        ? offersByOrder[o.id]?.filter((offer) => !blockedMasterIds.includes(offer.masterId))
+        : undefined;
     if (!list?.length) return o;
     return {
       ...o,

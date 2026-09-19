@@ -246,7 +246,7 @@ function ThreadList({
                   ) : (
                     <Text style={styles.threadPreview} numberOfLines={1}>
                       {last?.from === 'user' ? 'Вы: ' : ''}
-                      {last?.text}
+                      {last?.text || (last?.imageUrl ? 'Фото' : '')}
                     </Text>
                   )}
                 </View>
@@ -512,6 +512,7 @@ function ThreadDetail({
           placeholderTextColor={t.textMuted}
           style={styles.input}
           editable={!thread.closed}
+          maxLength={2000}
           multiline
         />
         <PressableScale
