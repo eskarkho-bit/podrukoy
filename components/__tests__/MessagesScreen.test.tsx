@@ -41,7 +41,7 @@ const screen = (over: Partial<Parameters<typeof MessagesScreen>[0]> = {}) => (
     onOpenRequestHandled={noop}
     onOpenThread={noop}
     onSendMessage={noop}
-    onSendImage={async () => {}}
+    onSendImage={async () => true}
     onReportMessage={async () => true}
     onThreadOpenChange={noop}
     {...over}
@@ -78,7 +78,7 @@ describe('MessagesScreen', () => {
   // Случайный тап по галерее не должен ничего отправлять: сначала
   // предпросмотр, отправка — общей кнопкой, текст из поля — подписью
   test('фото уходит только после подтверждения и с подписью', async () => {
-    const onSendImage = jest.fn(async () => {});
+    const onSendImage = jest.fn(async () => true);
     const view = await render(screen({ openRequestId: 'order-1', onSendImage }));
 
     await fireEvent.press(view.getByLabelText('Прикрепить фото'));

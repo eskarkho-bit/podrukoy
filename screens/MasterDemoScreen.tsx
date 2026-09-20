@@ -292,6 +292,7 @@ export function MasterDemoScreen() {
         { id: `demo-m${Date.now()}`, from: 'me', text: caption, time: clock(), imageUrl: localUri },
       ],
     }));
+    return true;
   };
 
   // Действия меняют только локальное состояние — сервера у витрины нет,

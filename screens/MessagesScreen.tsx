@@ -69,7 +69,8 @@ type Props = {
   onOpenRequestHandled: () => void;
   onOpenThread: (threadId: string) => void;
   onSendMessage: (threadId: string, text: string) => void;
-  onSendImage: (threadId: string, localUri: string, caption: string) => Promise<void>;
+  // true — ушло; иначе предпросмотр и подпись остаются, чтобы повторить
+  onSendImage: (threadId: string, localUri: string, caption: string) => Promise<boolean>;
   // Жалоба на сообщение собеседника — удержанием пузыря; true — принята
   onReportMessage: (threadId: string, messageId: string, text: string) => Promise<boolean>;
   // Открытая переписка — это «вложенный» экран, поэтому нижние вкладки на время прячутся
@@ -272,7 +273,7 @@ function ThreadDetail({
   typing: boolean;
   onBack: () => void;
   onSend: (text: string) => void;
-  onSendImage: (localUri: string, caption: string) => Promise<void>;
+  onSendImage: (localUri: string, caption: string) => Promise<boolean>;
   onReport?: (messageId: string, text: string) => Promise<boolean>;
 }) {
   const { mode, colors: t } = useTheme();
@@ -322,7 +323,9 @@ function ThreadDetail({
       try {
         // Текст из поля становится подписью — правила разрешают одно
         // сообщение с фото и текстом сразу
-        await onSendImage(pendingImage, trimmed);
+        // Предпросмотр и подпись стираются только после отправки: при
+        // сбое человек нажимает «Отправить» ещё раз, а не выбирает фото заново
+        if (!(await onSendImage(pendingImage, trimmed))) return;
         setPendingImage(null);
         setText('');
         // Своё сообщение возвращает ленту вниз, даже если читали историю

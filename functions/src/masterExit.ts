@@ -61,6 +61,10 @@ export function reopenedFields() {
     clientPhone: null,
     masterBanks: null,
     masterAcceptsCash: null,
+    // Способ оплаты клиент выбирал под прежнего мастера; отметка об отказе
+    // должна быть доступна следующему
+    paymentMethod: null,
+    masterDeclinedAt: null,
     reopenedAt: new Date(),
   };
 }

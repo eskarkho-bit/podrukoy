@@ -38,7 +38,7 @@ import { educationFrom } from './education';
 import { palettes, ThemeContext, ThemeMode } from '../theme';
 import { authErrorText, useAuth } from './AuthState';
 import { phoneAuthErrorText } from './phoneAuth';
-import { firestoreErrorText } from './firestoreError';
+import { firestoreErrorCode, firestoreErrorText } from './firestoreError';
 import { currentConsents, takePendingConsent, type Consents } from './legal';
 import { takeSignupDraft } from './signupDraft';
 import { OrderDraft } from './ActionSheet';
@@ -152,7 +152,8 @@ type AppState = {
   markThreadRead: (threadId: string) => void;
   sendMessage: (threadId: string, text: string) => void;
   // Фото в чат заявки; поддержке не предлагается — её правила ждут текст
-  sendImageMessage: (threadId: string, localUri: string, caption: string) => Promise<void>;
+  // true — сообщение ушло; экран по false оставляет предпросмотр и подпись
+  sendImageMessage: (threadId: string, localUri: string, caption: string) => Promise<boolean>;
   openChat: (threadId: string) => void;
   logout: () => Promise<void>;
   // Смена пароля. Ошибка возвращается текстом, готовым к показу.
@@ -1162,7 +1163,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // Фото в чат заявки: файл уезжает в chat/ под заявкой, в сообщении остаётся
   // ссылка; подпись из поля ввода едет тем же сообщением.
   const sendImageMessage = async (threadId: string, localUri: string, caption: string) => {
-    if (!uid || threadId === SUPPORT_THREAD_ID) return;
+    if (!uid || threadId === SUPPORT_THREAD_ID) return false;
     try {
       const imageUrl = await uploadChatPhoto(threadId, uid, localUri);
       await addDoc(collection(db, 'orders', threadId, 'messages'), {
@@ -1172,8 +1173,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         time: now(),
         createdAt: serverTimestamp(),
       });
+      return true;
     } catch (e) {
       failed('Фото не отправлено. Проверьте связь')(e);
+      return false;
     }
   };
 
@@ -1301,9 +1304,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         status: 'pending',
       });
     } catch (e) {
-      deleting.current = false;
-      console.warn('Не удалось создать заявку на удаление:', e);
-      throw new Error(firestoreErrorText(e, 'Не удалось удалить аккаунт. Попробуйте ещё раз'));
+      // Просьба уже лежит с прошлой, оборванной попытки: правила не дают её
+      // переписать, но и повторять не нужно — сервер и сверка доведут её до
+      // конца, а здесь продолжаем свою часть
+      if (firestoreErrorCode(e) !== 'permission-denied') {
+        deleting.current = false;
+        console.warn('Не удалось создать заявку на удаление:', e);
+        throw new Error(firestoreErrorText(e, 'Не удалось удалить аккаунт. Попробуйте ещё раз'));
+      }
     }
 
     // Дальше — то же самое, но своими силами и без права на ошибку каждого

@@ -757,7 +757,7 @@ export function MasterScreen({ open, onClose }: Props) {
   // Фото выполненной работы или проблемы на месте — тем же чатом;
   // подпись из поля ввода едет тем же сообщением
   const pushImage = async (jobId: string, localUri: string, caption: string) => {
-    if (!myUid) return;
+    if (!myUid) return false;
     try {
       const imageUrl = await uploadChatPhoto(jobId, myUid, localUri);
       await addDoc(collection(db, 'orders', jobId, 'messages'), {
@@ -767,9 +767,11 @@ export function MasterScreen({ open, onClose }: Props) {
         time: now(),
         createdAt: serverTimestamp(),
       });
+      return true;
     } catch (e) {
       console.warn('Фото не отправлено:', e);
       showNotice(firestoreErrorText(e, 'Фото не отправлено. Проверьте связь'));
+      return false;
     }
   };
 
@@ -2632,7 +2634,8 @@ export function JobDetail({
   // «Оплату получил» — ставится один раз
   onPaymentReceived: () => void;
   onSend: (text: string) => void;
-  onSendImage: (localUri: string, caption: string) => Promise<void>;
+  // true — ушло; иначе предпросмотр и подпись остаются, чтобы повторить
+  onSendImage: (localUri: string, caption: string) => Promise<boolean>;
 }) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
@@ -2681,7 +2684,9 @@ export function JobDetail({
     if (pendingImage) {
       setSendingImage(true);
       try {
-        await onSendImage(pendingImage, trimmed);
+        // Предпросмотр и подпись стираются только после отправки: при
+        // сбое мастер нажимает «Отправить» ещё раз, а не выбирает фото заново
+        if (!(await onSendImage(pendingImage, trimmed))) return;
         setPendingImage(null);
         setText('');
         // Своё сообщение возвращает ленту вниз, даже если читали историю
