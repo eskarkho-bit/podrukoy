@@ -2,7 +2,7 @@ import { logger } from 'firebase-functions';
 import { onDocumentDeleted, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
-import { notifyMastersAbout } from './orderPush';
+import { notifyMastersAbout, orderBurstExceeded } from './orderPush';
 import { audit, SYSTEM } from './audit';
 
 // Что делать, когда мастер исчезает.
@@ -89,51 +89,75 @@ export async function detachMasterFromOrders(masterId: string): Promise<number> 
 
   let reopened = 0;
   for (const d of orders.docs) {
-    const clientId = d.get('clientId');
-    if (d.get('status') === 'В работе' && moneyMoved(d.data())) {
-      // Деньги уже переходили из рук в руки — заявка закрывается, а не ищет
-      // нового исполнителя; спор, если он есть, разбирает модерация
-      await d.ref.set(
-        {
-          status: 'Отменена',
-          masterPhone: null,
-          clientPhone: null,
-          masterBanks: null,
-          masterAcceptsCash: null,
-        },
-        { merge: true },
-      );
+    // Решение — транзакцией по свежему документу: между выборкой и записью
+    // клиент мог отменить заявку, принять работу или отметить оплату
+    const outcome = await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(d.ref);
+      if (!fresh.exists || fresh.get('masterId') !== masterId) return null;
+      const data = fresh.data() ?? {};
+      if (fresh.get('status') === 'В работе' && moneyMoved(data)) {
+        // Деньги уже переходили из рук в руки — заявка закрывается, а не ищет
+        // нового исполнителя; спор, если он есть, разбирает модерация
+        tx.set(
+          d.ref,
+          {
+            status: 'Отменена',
+            masterPhone: null,
+            clientPhone: null,
+            masterBanks: null,
+            masterAcceptsCash: null,
+          },
+          { merge: true },
+        );
+        return { kind: 'closed' as const, data };
+      }
+      if (fresh.get('status') === 'В работе') {
+        tx.set(d.ref, reopenedFields(), { merge: true });
+        return { kind: 'reopened' as const, data };
+      }
+      if (fresh.get('masterPhone') != null || fresh.get('masterBanks') != null) {
+        // Вместе с номером уходят и условия оплаты: переводить больше некому
+        tx.set(
+          d.ref,
+          { masterPhone: null, masterBanks: null, masterAcceptsCash: null },
+          { merge: true },
+        );
+      }
+      return { kind: 'kept' as const, data };
+    });
+    if (!outcome) continue;
+
+    const clientId = outcome.data.clientId;
+    if (outcome.kind === 'closed') {
       if (clientId) {
         await pushTo(
           [clientId],
           'Мастер удалил аккаунт',
-          `${d.get('title') ?? 'Заявка'} закрыта. Если вы уже платили — напишите в поддержку`,
+          `${outcome.data.title ?? 'Заявка'} закрыта. Если вы уже платили — напишите в поддержку`,
           { href: '/' },
         );
       }
-    } else if (d.get('status') === 'В работе') {
-      await d.ref.set(reopenedFields(), { merge: true });
+    } else if (outcome.kind === 'reopened') {
       reopened += 1;
-
       if (clientId) {
         await pushTo(
           [clientId],
           'Мастер отказался от заявки',
-          `${d.get('title') ?? 'Заявка'} снова ищет исполнителя`,
+          `${outcome.data.title ?? 'Заявка'} снова ищет исполнителя`,
           { href: '/' },
         );
       }
       // Остальные мастера города узнают о заявке заново: пуш при создании
-      // они получали, но тогда она ушла к другому, и о ней забыли
-      await notifyMastersAbout({ ...d.data(), ...reopenedFields() }, 'Заявка снова ищет мастера', {
-        excludeUid: masterId,
-      });
-    } else if (d.get('masterPhone') != null || d.get('masterBanks') != null) {
-      // Вместе с номером уходят и условия оплаты: переводить больше некому
-      await d.ref.set(
-        { masterPhone: null, masterBanks: null, masterAcceptsCash: null },
-        { merge: true },
-      );
+      // они получали, но тогда она ушла к другому, и о ней забыли. Тот же
+      // лимит, что у новых заявок: связка «клиент + уходящий мастер» не
+      // должна будить весь город без счёта.
+      if (!clientId || !(await orderBurstExceeded(String(clientId)))) {
+        await notifyMastersAbout(
+          { ...outcome.data, ...reopenedFields() },
+          'Заявка снова ищет мастера',
+          { excludeUid: masterId },
+        );
+      }
     }
   }
   return reopened;

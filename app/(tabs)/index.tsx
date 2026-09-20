@@ -29,6 +29,7 @@ export default function OrdersRoute() {
       covered={s.masterOpen || s.adminOpen}
       blocked={s.blocked}
       blockedReason={s.blockedReason}
+      onNotice={s.showNotice}
     />
   );
 }

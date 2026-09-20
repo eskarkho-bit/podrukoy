@@ -1,7 +1,7 @@
 import { logger } from 'firebase-functions';
 import { getFirestore } from 'firebase-admin/firestore';
 import { pushTo } from './push';
-import { notifyMastersAbout } from './orderPush';
+import { notifyMastersAbout, orderBurstExceeded } from './orderPush';
 import { audit } from './audit';
 import { moneyMoved, reopenedFields } from './masterExit';
 
@@ -71,9 +71,13 @@ export async function handleMasterDecline(
     );
   }
   // Остальные мастера города узнают о заявке заново: пуш при создании они
-  // получали, но тогда она ушла к другому, и о ней забыли
-  await notifyMastersAbout({ ...after, ...reopenedFields() }, 'Заявка снова ищет мастера', {
-    excludeUid: masterId,
-  });
+  // получали, но тогда она ушла к другому, и о ней забыли. Тот же лимит, что
+  // у новых заявок: связка «клиент + отказывающийся мастер» не должна будить
+  // весь город без счёта.
+  if (!clientId || !(await orderBurstExceeded(clientId))) {
+    await notifyMastersAbout({ ...after, ...reopenedFields() }, 'Заявка снова ищет мастера', {
+      excludeUid: masterId,
+    });
+  }
   return true;
 }

@@ -176,8 +176,9 @@ service cloud.firestore {
       // Первый сегмент выделен нарочно: в rules v2 голый {document=**}
       // матчит и ноль сегментов, то есть накрыл бы сам документ профиля —
       // и владелец снял бы себе blocked через это правило.
+      // Треды описаны ниже отдельно: у них свои замки
       match /{sub}/{document=**} {
-        allow read, write: if isOwner(uid);
+        allow read, write: if isOwner(uid) && sub != 'threads';
       }
 
       // ---------- обращение в поддержку ----------
@@ -186,6 +187,25 @@ service cloud.firestore {
       // владельца: тред поддержки читает модератор — иначе отвечать некому.
       // Замок держит threadId: остальные треды и весь профиль закрыты как были.
       match /threads/{threadId} {
+
+        // Владелец ведёт ровно один тред — support — и только поля превью:
+        // произвольный тред с kind == 'support' попадал бы в очередь
+        // модератора, а ответить в него было бы нельзя. Превью — не длиннее
+        // самого сообщения.
+        function ownThreadFields() {
+          let d = request.resource.data;
+          return d.keys().hasOnly([
+              'name', 'icon', 'kind', 'unread', 'lastText', 'lastFrom', 'updatedAt', 'supportStatus',
+            ])
+            && d.get('kind', 'support') == 'support'
+            && d.get('lastText', '') is string && d.get('lastText', '').size() <= 2000;
+        }
+
+        allow read: if isOwner(uid) || (isAdmin() && threadId == 'support');
+        allow create: if isOwner(uid) && threadId == 'support' && ownThreadFields();
+        allow update: if isOwner(uid) && threadId == 'support' && ownThreadFields();
+        // Часть удаления аккаунта
+        allow delete: if isOwner(uid);
 
         // Пометки при ответе: непрочитанность у клиента и превью для списка
         // обращений. Имя и иконку треда модератор не переписывает.
@@ -203,7 +223,19 @@ service cloud.firestore {
             || request.resource.data.supportStatus in ['новое', 'в работе', 'закрыто']);
 
         match /messages/{messageId} {
-          allow read: if isAdmin() && threadId == 'support';
+          allow read: if isOwner(uid) || (isAdmin() && threadId == 'support');
+
+          // Владелец пишет от себя; от лица поддержки — только автоприветствие
+          // с отметкой auto, о котором сервер не шлёт пуш. Написанное не
+          // правится; удалить — только вместе с аккаунтом.
+          allow create: if isOwner(uid) && threadId == 'support'
+            && request.resource.data.text is string
+            && request.resource.data.text.size() >= 1
+            && request.resource.data.text.size() <= 2000
+            && (request.resource.data.from == 'user'
+              || (request.resource.data.from == 'master'
+                && request.resource.data.get('auto', false) == true));
+          allow delete: if isOwner(uid);
 
           // Ответ — только от лица поддержки. Править и удалять написанное
           // модератор не может: у него нет allow на это, а правило владельца
@@ -679,9 +711,14 @@ service cloud.firestore {
           && unchanged('masterId') && unchanged('agreedPrice');
       }
 
+      // После отметки об оплате — своей или мастера — отменить нельзя, как и
+      // мастеру отказаться: деньги уже переходили из рук в руки, а отмена
+      // стёрла бы реквизиты получателя; спор разбирает модерация
       function clientCancels() {
         return request.resource.data.status == 'Отменена'
           && resource.data.status in ['Поиск мастера', 'Есть предложения', 'В работе']
+          && resource.data.get('paidAt', null) == null
+          && resource.data.get('paymentReceivedAt', null) == null
           && unchanged('masterId') && unchanged('agreedPrice');
       }
 

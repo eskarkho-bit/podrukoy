@@ -213,7 +213,7 @@ function ThreadList({
           <EmptyScene kind="messages" />
           <Text style={styles.emptyTitle}>Пока нет сообщений</Text>
           <Text style={styles.emptySub}>
-            Здесь появятся ответы мастера, когда вы создадите заявку
+            Чат с мастером появится здесь, когда вы выберете его в заявке
           </Text>
         </Animated.View>
       ) : (

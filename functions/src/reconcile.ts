@@ -42,8 +42,31 @@ type Counters = {
   deletionsResumed: number;
   ordersRepushed: number;
   metersPurged: number;
+  phoneCodesPurged: number;
   errors: number;
 };
+
+/** Документ кода входа, к которому сутки не обращались, никому не нужен. */
+const PHONE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Хэши кодов входа: сам код живёт пять минут, а документ с ним и счётчиками
+ * лимитов — пока к номеру обращаются. Сутки тишины — и он удаляется: иначе
+ * коллекция росла бы на каждый набранный номер, включая чужие и ошибочные.
+ */
+async function purgePhoneCodes(limit: number): Promise<number> {
+  const db = getFirestore();
+  const snap = await db
+    .collection('phoneCodes')
+    .where('lastSentAt', '<', new Date(Date.now() - PHONE_CODE_TTL_MS))
+    .limit(limit)
+    .get();
+  if (snap.empty) return 0;
+  const batch = db.batch();
+  snap.docs.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
+  return snap.size;
+}
 
 /**
  * Берёт блокировку прогона.
@@ -184,6 +207,7 @@ export const reconcile = onSchedule(
       deletionsResumed: 0,
       ordersRepushed: 0,
       metersPurged: 0,
+      phoneCodesPurged: 0,
       errors: 0,
     };
 
@@ -200,6 +224,7 @@ export const reconcile = onSchedule(
       // Счётчики лимитов (meters.ts) живут, пока живо их окно, — тут они и
       // умирают: без этого коллекция росла бы на каждый вход по телефону
       counters.metersPurged += await purgeExpiredMeters(BATCH);
+      counters.phoneCodesPurged += await purgePhoneCodes(BATCH);
     } catch (e) {
       counters.errors += 1;
       logger.error('Прогон сверки прерван', e);

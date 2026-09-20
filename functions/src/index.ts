@@ -14,6 +14,7 @@ import { meterExceeded } from './meters';
 import { shareOrderContacts } from './orderContacts';
 import { notePaymentMarks } from './orderPayment';
 import { handleMasterDecline } from './orderDecline';
+import { claimOnce } from './once';
 import { audit, SYSTEM, type AuditAction } from './audit';
 import { recordCompletedOrder } from './orderStats';
 import { recomputeRating, recountCompletedOrders } from './masterStats';
@@ -174,6 +175,17 @@ export const onMessageCreated = onDocumentCreated(
     const clientId = order.get('clientId');
     const masterId = order.get('masterId');
 
+    // Отметка о последнем сообщении — в самой заявке: по ней список чатов
+    // сортируется и считает непрочитанное, не подписываясь на переписку
+    // каждой заявки. Текста здесь нет — только кто и когда.
+    await db.doc(`orders/${event.params.orderId}`).set(
+      {
+        lastMessageAt: message.createdAt ?? FieldValue.serverTimestamp(),
+        lastMessageBy: String(message.senderId ?? ''),
+      },
+      { merge: true },
+    );
+
     // Уведомляем того, кто не отправлял
     const to = message.senderId === clientId ? masterId : clientId;
     if (!to) return;
@@ -221,6 +233,11 @@ export const onOrderStatusChanged = onDocumentUpdated(
     // Клиент не согласился с «выполнено»: работа вернулась тому же мастеру.
     // Это не выбор исполнителя — контакты уже в заявке, и «Вас выбрали» здесь
     // было бы ложью, — поэтому ветка стоит до общей карты статусов
+    // Отметка «уже обработано» — до пушей: с retry событие после сбоя на
+    // полпути приходит снова, и без неё пуш ушёл бы дважды
+    const transition = `${before.status}>${after.status}`;
+    if (!(await claimOnce(event.params.orderId, `status:${transition}`))) return;
+
     if (before.status === 'Ждёт подтверждения' && after.status === 'В работе') {
       await audit({
         action: 'order.returned_to_work',
@@ -293,6 +310,9 @@ export const onOrderStatusChanged = onDocumentUpdated(
     // о котором «Клиент отменил заявку», решил бы, что сходит с ума
     const byAdmin = after.closedByAdmin === true && before.closedByAdmin !== true;
     const adminReason = String(after.adminCloseReason ?? title);
+    // Клиент удалил аккаунт — сданную работу закрыл сервер, подтверждать
+    // было некому; «клиент подтвердил» здесь было бы ложью
+    const byDeletion = after.closedByDeletion === true && before.closedByDeletion !== true;
 
     if (after.status === 'Завершена') {
       // Цена уходит в гистограмму: медиана чека в сводке модератора считается
@@ -307,8 +327,12 @@ export const onOrderStatusChanged = onDocumentUpdated(
         await recountCompletedOrders(masterId);
         await pushTo(
           [masterId],
-          byAdmin ? 'Заявка закрыта модерацией' : 'Клиент подтвердил работу',
-          byAdmin ? adminReason : title,
+          byAdmin
+            ? 'Заявка закрыта модерацией'
+            : byDeletion
+              ? 'Заявка закрыта: клиент удалил аккаунт'
+              : 'Клиент подтвердил работу',
+          byAdmin ? adminReason : byDeletion ? `${title} · работа засчитана` : title,
           { href: '/profile' },
         );
       }
@@ -442,7 +466,14 @@ export const onVerificationChanged = onDocumentWritten(
       // клиенты переводят оплату, не должен работать непроверенным
       const reapplied = wasStatus === 'approved';
       if (reapplied) {
-        await db.doc(`masters/${masterId}`).set({ verified: false }, { merge: true });
+        // Транзакция с перепроверкой: модератор мог одобрить повторную
+        // анкету раньше, чем событие доехало, — тогда снимать допуск поздно
+        const applicationRef = db.doc(`masters/${masterId}/verification/application`);
+        await db.runTransaction(async (tx) => {
+          const current = await tx.get(applicationRef);
+          if (current.get('status') !== 'pending') return;
+          tx.set(db.doc(`masters/${masterId}`), { verified: false }, { merge: true });
+        });
       }
       const master = await db.doc(`masters/${masterId}`).get();
       const delivered = await pushToAdmins(

@@ -127,6 +127,8 @@ type Props = {
   covered?: boolean;
   // Блокировка модерацией: создание заявок закрыто, баннер объясняет почему
   blocked?: boolean;
+  // Короткое уведомление вместо экрана — для отказов до открытия шторки
+  onNotice?: (text: string) => void;
   blockedReason?: string | null;
 };
 
@@ -153,6 +155,7 @@ export function OrdersScreen({
   onOverlayOpenChange,
   covered,
   blocked,
+  onNotice,
   blockedReason,
 }: Props) {
   const { mode, colors: t } = useTheme();
@@ -217,6 +220,17 @@ export function OrdersScreen({
     setActiveObject(null);
   };
 
+  // Заблокированному шторку не открываем: правила заявку не примут, и
+  // «Заявка создана» на экране успеха было бы ложью. Баннер с причиной уже на
+  // главной — сюда только подсказка, куда идти
+  const pickObject = (obj: SceneObject) => {
+    if (blocked) {
+      onNotice?.('Создание заявок ограничено модерацией. Напишите в поддержку, если не согласны');
+      return;
+    }
+    setActiveObject(obj);
+  };
+
   const focusedRoom = ROOMS.find((r) => r.id === roomId) ?? null;
   const caption = focusedRoom ? focusedRoom.title : area;
 
@@ -277,7 +291,7 @@ export function OrdersScreen({
               setRoomId(room.id);
               setStage('room');
             }}
-            onSelectObject={setActiveObject}
+            onSelectObject={pickObject}
             onBack={goBack}
             paused={sceneHidden}
           />
@@ -444,7 +458,7 @@ export function OrdersScreen({
           onClose={() => setListOpen(false)}
           onPick={(obj) => {
             setListOpen(false);
-            setActiveObject(obj);
+            pickObject(obj);
           }}
         />
       )}

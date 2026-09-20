@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -207,6 +208,12 @@ export function ProfileScreen({
   };
 
   const submitDelete = async () => {
+    // У телефонного аккаунта поле кода появляется только после запроса — до
+    // него просить «введите код» значило бы просить ввести в никуда
+    if (byPhone && !deleteCodeSent) {
+      setDeleteError('Сначала получите код на свой номер — кнопка выше');
+      return;
+    }
     if (!deleteSecret) {
       setDeleteError(
         byPhone
@@ -499,7 +506,7 @@ export function ProfileScreen({
           style={styles.row}
         >
           <Text style={styles.rowLabel}>О приложении</Text>
-          <Text style={styles.rowValue}>domio · v1.0.0</Text>
+          <Text style={styles.rowValue}>domio · v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
         </Animated.View>
 
         {/* Право на переносимость из политики конфиденциальности: файл со

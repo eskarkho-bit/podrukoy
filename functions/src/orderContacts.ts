@@ -72,7 +72,10 @@ export async function shareOrderContacts(orderId: string, correlationId: string)
 
   const written = await db.runTransaction(async (tx) => {
     const fresh = await tx.get(ref);
+    // Пока событие ехало, клиент мог отменить заявку: в отменённую номера
+    // не кладём — ветка «Отменена» их уже стёрла, и второй раз не придёт
     if (!fresh.exists || fresh.get('masterId') !== masterId) return false;
+    if (fresh.get('status') !== 'В работе') return false;
     tx.set(
       ref,
       {

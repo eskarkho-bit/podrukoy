@@ -1014,6 +1014,16 @@ describe('Отказ мастера от заявки', () => {
     );
   });
 
+  test('после отметки об оплате клиент не отменяет заявку', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'orders/working'), {
+        paymentMethod: 'cash',
+        paidAt: new Date(),
+      });
+    });
+    await assertFails(updateDoc(doc(as('client1'), 'orders/working'), { status: 'Отменена' }));
+  });
+
   test('после отметки клиента об оплате отказаться нельзя', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await updateDoc(doc(ctx.firestore(), 'orders/working'), {
@@ -2085,6 +2095,51 @@ describe('Профиль пользователя', () => {
 
   test('чужая переписка с поддержкой недоступна', async () => {
     await assertFails(getDoc(doc(as('client2'), 'users/client1/threads/support')));
+  });
+
+  // Произвольный тред с kind == 'support' попадал бы в очередь модератора,
+  // а ответить в него было бы нельзя
+  test('владелец ведёт только тред support и пишет в него от себя', async () => {
+    const thread = doc(as('client1'), 'users/client1/threads/support');
+    await assertSucceeds(
+      setDoc(thread, {
+        name: 'Поддержка',
+        icon: '🛟',
+        kind: 'support',
+        unread: false,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      addDoc(collection(thread, 'messages'), {
+        from: 'user',
+        text: 'Не приходит код',
+        time: '12:00',
+        createdAt: serverTimestamp(),
+      }),
+    );
+    // Автоприветствие от лица поддержки — только с отметкой auto
+    await assertSucceeds(
+      addDoc(collection(thread, 'messages'), {
+        from: 'master',
+        auto: true,
+        text: 'Здравствуйте!',
+        time: '12:00',
+        createdAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      addDoc(collection(thread, 'messages'), {
+        from: 'master',
+        text: 'Я поддержка',
+        time: '12:01',
+        createdAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(doc(as('client1'), 'users/client1/threads/fake'), { name: 'x', kind: 'support' }),
+    );
+    await assertFails(setDoc(thread, { kind: 'support', lastText: 'x'.repeat(2001) }));
   });
 
   test('свой профиль и анкету можно удалить — это часть удаления аккаунта', async () => {

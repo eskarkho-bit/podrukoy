@@ -2,6 +2,7 @@ import { logger } from 'firebase-functions';
 import { getFirestore } from 'firebase-admin/firestore';
 import { audit, SYSTEM } from './audit';
 import { pushTo } from './push';
+import { claimOnce } from './once';
 
 // Расчёт между сторонами.
 //
@@ -63,7 +64,8 @@ const rub = (n: number) => `${n.toLocaleString('ru-RU')} ₽`;
  * Зовётся на каждое обновление документа, статус при этом может и не
  * меняться. Обе отметки ставятся один раз (правила не дают ни снять, ни
  * переставить), поэтому «появилось поле» — это и есть событие. Повтор
- * доставки увидит одинаковые before и after и ничего не сделает.
+ * доставки того же события несёт те же before и after — от второго пуша
+ * спасает отметка claimOnce в самой заявке.
  */
 export async function notePaymentMarks(
   orderId: string,
@@ -77,7 +79,7 @@ export async function notePaymentMarks(
   const clientId = typeof after.clientId === 'string' ? after.clientId : null;
   const masterId = typeof after.masterId === 'string' ? after.masterId : null;
 
-  if (before.paidAt == null && after.paidAt != null) {
+  if (before.paidAt == null && after.paidAt != null && (await claimOnce(orderId, 'paid'))) {
     await audit({
       action: 'order.paid_marked',
       actor: clientId ? { type: 'user', uid: clientId } : SYSTEM,
@@ -97,7 +99,11 @@ export async function notePaymentMarks(
     logger.info('Клиент отметил оплату', { orderId, method });
   }
 
-  if (before.paymentReceivedAt == null && after.paymentReceivedAt != null) {
+  if (
+    before.paymentReceivedAt == null &&
+    after.paymentReceivedAt != null &&
+    (await claimOnce(orderId, 'received'))
+  ) {
     await audit({
       action: 'order.payment_received',
       actor: masterId ? { type: 'user', uid: masterId } : SYSTEM,

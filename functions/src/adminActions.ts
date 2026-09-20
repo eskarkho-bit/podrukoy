@@ -404,9 +404,11 @@ export async function findUserByPhone(
   const profiles = await db.collection('users').where('phone', '==', phone).limit(10).get();
   profiles.docs.forEach((d) => uids.add(d.id));
 
+  // В анкете номер лежит одиннадцатью цифрами, как его ввёл мастер: через 7
+  // или через 8 — ищем оба написания
   const applications = await db
     .collectionGroup('verification')
-    .where('phone', '==', digits)
+    .where('phone', 'in', [digits, `8${digits.slice(1)}`])
     .limit(10)
     .get();
   applications.docs.forEach((d) => {

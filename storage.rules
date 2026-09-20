@@ -83,8 +83,10 @@ service firebase.storage {
 
       allow read: if isParty() || isAdmin();
 
-      // Пока сделка жива — как и сами сообщения в firestore.rules
-      allow write: if isParty()
+      // Пока сделка жива — как и сами сообщения в firestore.rules. Только
+      // create: отправленное фото, как и сообщение, не переписывается —
+      // иначе снимок в чужой переписке можно было бы подменить задним числом
+      allow create: if isParty()
         && order().status in ['В работе', 'Ждёт подтверждения', 'Завершена']
         && request.resource.size < 10 * 1024 * 1024
         && isImage();

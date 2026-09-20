@@ -29,7 +29,9 @@ const entriesFor = async (action: string) =>
   );
 
 beforeEach(async () => {
-  await wipe('audit', 'users');
+  await wipe('audit', 'users', 'orders');
+  // Отметка «пуш уже ушёл» ставится в самой заявке — ей нужно существовать
+  await db.doc(`orders/${ORDER_ID}`).set(ORDER);
 });
 
 describe('paymentTermsOf', () => {
@@ -92,6 +94,15 @@ describe('notePaymentMarks', () => {
     );
     expect(await entriesFor('order.paid_marked')).toHaveLength(1);
     expect(await entriesFor('order.payment_received')).toHaveLength(1);
+  });
+
+  // Событие с retry приходит снова с теми же before/after: отметка в заявке
+  // не даёт второго пуша и второй записи
+  test('повтор того же события не шлёт второй пуш', async () => {
+    const after = { ...ORDER, paidAt: new Date() };
+    await notePaymentMarks(ORDER_ID, ORDER, after, 'test');
+    await notePaymentMarks(ORDER_ID, ORDER, after, 'test');
+    expect(await entriesFor('order.paid_marked')).toHaveLength(1);
   });
 
   test('без способа оплаты след всё равно есть', async () => {

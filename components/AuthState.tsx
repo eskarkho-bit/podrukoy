@@ -67,7 +67,9 @@ export function authErrorText(e: unknown): string {
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
     case 'auth/user-not-found':
-      return 'Неверный email или пароль';
+      // На форме входа речь о паре email+пароль; при смене пароля и удалении
+      // аккаунта email уже известен, и неверным может быть только пароль
+      return auth.currentUser ? 'Неверный пароль' : 'Неверный email или пароль';
     case 'auth/too-many-requests':
       return 'Слишком много попыток. Попробуйте через несколько минут';
     case 'auth/network-request-failed':
@@ -115,6 +117,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // аккаунт, и мы тоже не сообщаем: иначе форма превратится в способ
   // проверять, зарегистрирован ли человек в сервисе.
   const resetPassword = async (email: string) => {
+    // Письмо со ссылкой шлёт Firebase на языке auth.languageCode; без
+    // явного значения оно уходило по-английски
+    auth.languageCode = 'ru';
     await sendPasswordResetEmail(auth, email.trim().toLowerCase());
   };
 

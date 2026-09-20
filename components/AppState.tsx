@@ -300,6 +300,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setBlockedMasterIds([]);
       setBlockedMasterNames({});
       setProfileReady(false);
+      // Следующий вошедший не должен унаследовать блокировку, тему и
+      // прочитанность чатов прошлого аккаунта
+      setBlockedLocal(false);
+      setBlockedReason(null);
+      setThemeModeLocal('light');
+      setReadThreads(new Map());
       deleting.current = false;
       return;
     }

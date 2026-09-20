@@ -85,7 +85,15 @@ export async function runDeletion(uid: string, correlationId: string): Promise<v
                 masterAcceptsCash: null,
               }
             : {}),
-          ...(awaiting ? { status: 'Завершена', completedAt: FieldValue.serverTimestamp() } : {}),
+          ...(awaiting
+            ? {
+                status: 'Завершена',
+                completedAt: FieldValue.serverTimestamp(),
+                // По отметке сервер шлёт мастеру честный пуш — «клиент удалил
+                // аккаунт», а не «подтвердил работу»
+                closedByDeletion: true,
+              }
+            : {}),
           clientName: ANONYMOUS,
           clientPhone: null,
           address: '',

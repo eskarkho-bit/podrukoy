@@ -287,7 +287,9 @@ export function ActionSheet({ object, address, onClose, onComplete }: Props) {
                   <AnimatedCheck size={30} color={t.accent} />
                 </View>
                 <Text style={styles.doneTitle}>Заявка создана</Text>
-                <Text style={styles.doneSub}>Мастер скоро свяжется с вами</Text>
+                <Text style={styles.doneSub}>
+                  Мастера рядом уже видят её — ждите предложения с ценой
+                </Text>
               </Animated.View>
             </Pressable>
           ) : (

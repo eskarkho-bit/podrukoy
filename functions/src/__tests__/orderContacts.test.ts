@@ -95,6 +95,15 @@ describe('shareOrderContacts', () => {
 
   // Мастер мог удалить аккаунт, пока событие ехало: заявка снова открыта,
   // её читают все мастера города — номера в неё попасть не должны
+  // Пока событие ехало, клиент отменил заявку — номера в неё уже не кладут
+  test('в отменённую заявку номера не пишутся', async () => {
+    await seedOrder({ status: 'Отменена' });
+    await shareOrderContacts('o1', 'test');
+    const order = await db.doc('orders/o1').get();
+    expect(order.get('masterPhone')).toBeUndefined();
+    expect(order.get('clientPhone')).toBeUndefined();
+  });
+
   test('в заявку без мастера номера не пишутся', async () => {
     await seedOrder({ masterId: null, status: 'Поиск мастера' });
     await shareOrderContacts('o1', 'test');

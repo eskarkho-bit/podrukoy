@@ -694,7 +694,9 @@ export function PendingCard({
             <PressableScale
               style={[styles.btn, styles.btnReject, busy && styles.btnDim]}
               onPress={() => onDecide(false, reason)}
-              disabled={busy}
+              // Мастеру уходит именно этот текст: «Причина не указана»
+              // ничего не объясняет и не даёт исправить анкету
+              disabled={busy || !reason.trim()}
             >
               <Text style={styles.btnRejectText}>Отказать</Text>
             </PressableScale>
