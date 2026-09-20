@@ -92,6 +92,15 @@ export type Order = {
   // Только у старых заявок: предложение внутри самой заявки
   price?: number | null;
   priceStatus?: PriceStatus;
+  // Когда клиент выбрал исполнителя: по этому времени ждём телефон мастера
+  agreedAtMs?: number | null;
+  // Закрыта модерацией — с причиной, которую видят обе стороны
+  closedByAdmin?: boolean;
+  adminCloseReason?: string | null;
+  // Кто и когда написал последним: ставит сервер, по нему список чатов
+  // сортируется и считает непрочитанное
+  lastMessageAtMs?: number | null;
+  lastMessageBy?: string | null;
 };
 
 type Props = {
@@ -115,7 +124,7 @@ type Props = {
   onMarkPaid: (orderId: string) => void;
   // Клиент выбирает одно из предложений — этот выбор и назначает мастера
   onAcceptOffer: (orderId: string, masterId: string) => void;
-  onSubmitReview: (orderId: string, stars: number, text: string) => void;
+  onSubmitReview: (orderId: string, stars: number, text: string) => Promise<boolean> | void;
   // Старые заявки, где предложение лежит в самой заявке
   onAcceptPrice: (orderId: string) => void;
   onDeclinePrice: (orderId: string) => void;
@@ -129,6 +138,9 @@ type Props = {
   blocked?: boolean;
   // Короткое уведомление вместо экрана — для отказов до открытия шторки
   onNotice?: (text: string) => void;
+  // В профиле указан город: без него заявку увидят только мастера без
+  // привязки к городу, и создавать её молча нельзя
+  hasCity?: boolean;
   blockedReason?: string | null;
 };
 
@@ -156,6 +168,7 @@ export function OrdersScreen({
   covered,
   blocked,
   onNotice,
+  hasCity = true,
   blockedReason,
 }: Props) {
   const { mode, colors: t } = useTheme();
@@ -226,6 +239,10 @@ export function OrdersScreen({
   const pickObject = (obj: SceneObject) => {
     if (blocked) {
       onNotice?.('Создание заявок ограничено модерацией. Напишите в поддержку, если не согласны');
+      return;
+    }
+    if (!hasCity) {
+      onNotice?.('Сначала укажите населённый пункт в профиле — по нему заявку находят мастера');
       return;
     }
     setActiveObject(obj);
@@ -341,7 +358,9 @@ export function OrdersScreen({
             // Пока заявка в поиске, полезнее числа откликов, чем слово «Поиск
             // мастера»: именно оно говорит, есть ли что решать
             const pending = (order.offers ?? []).filter((o) => o.status === 'pending').length;
-            const waitingReview = order.status === 'Завершена' && !order.reviewed;
+            // Оценивать некого, если заявку закрыла модерация без мастера
+            const waitingReview =
+              order.status === 'Завершена' && !order.reviewed && !!order.masterId;
             // Статусы, где дело за клиентом, зовут действием, а не названием
             // состояния — и зелёным, как всё, что ждёт его решения
             const waitingConfirm = order.status === 'Ждёт подтверждения';

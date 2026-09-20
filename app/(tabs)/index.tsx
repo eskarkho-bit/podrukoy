@@ -30,6 +30,7 @@ export default function OrdersRoute() {
       blocked={s.blocked}
       blockedReason={s.blockedReason}
       onNotice={s.showNotice}
+      hasCity={!!s.city}
     />
   );
 }

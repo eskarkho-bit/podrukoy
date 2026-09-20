@@ -57,6 +57,8 @@ export type Thread = {
   canAttach: boolean;
   // Сделки по заявке больше нет — читать можно, писать нельзя
   closed?: boolean;
+  // Время последнего сообщения — для порядка в списке
+  lastAtMs?: number | null;
   messages: ChatMessage[];
 };
 

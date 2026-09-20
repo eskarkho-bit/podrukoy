@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import {
   Image,
+  Alert,
+  KeyboardAvoidingView,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -59,7 +62,7 @@ type Props = {
   onChat: () => void;
   // Выбор предложения — именно он назначает мастера и делает цену согласованной
   onAcceptOffer: (masterId: string) => void;
-  onSubmitReview: (stars: number, text: string) => void;
+  onSubmitReview: (stars: number, text: string) => Promise<boolean> | void;
   // Старые заявки, где предложение лежало в самой заявке
   onAcceptPrice: () => void;
   onDeclinePrice: () => void;
@@ -70,6 +73,7 @@ type Props = {
 const CANCELLABLE = ['Поиск мастера', 'Есть предложения', 'В работе'];
 // Статусы, в которых стороны рассчитываются: мастер выбран, заявка живая
 const SETTLING = ['В работе', 'Ждёт подтверждения', 'Завершена'];
+const TALKABLE = ['В работе', 'Ждёт подтверждения', 'Завершена'];
 
 // Правило цвета: жёлтый — ждём других, зелёный — дело за вами. «Ждёт
 // подтверждения» — единственный статус, где от клиента требуется поступок
@@ -184,7 +188,12 @@ export function OrderSheet({
   const agreed = order.agreedPrice != null;
   const awaitingConfirm = order.status === 'Ждёт подтверждения';
   const canReview = order.status === 'Завершена' && !order.reviewed && !!order.masterId;
-  const cancellable = CANCELLABLE.includes(order.status);
+  // После отметки об оплате отмена — через поддержку: правила её не
+  // пропустят, а кнопка обещала бы то, чего не будет
+  const moneyMoved = order.paidMs != null || order.paymentReceivedMs != null;
+  const cancellable = CANCELLABLE.includes(order.status) && !moneyMoved;
+  // Писать можно, пока сделка жива, — тот же список, что в правилах
+  const talkable = TALKABLE.includes(order.status) && order.masterName !== 'Удалённый аккаунт';
   // Расчёт показываем, как только есть с кем рассчитываться
   const settling = !!order.masterId && SETTLING.includes(order.status);
 
@@ -193,7 +202,13 @@ export function OrderSheet({
   // номерами обменяются первым же сообщением
   const canCall = !!order.masterId && !!order.masterPhone;
   const dial = () => {
-    if (order.masterPhone) Linking.openURL(`tel:${order.masterPhone}`).catch(() => {});
+    const phone = order.masterPhone;
+    if (!phone) return;
+    // Планшет или эмулятор без звонилки: номер показываем, чтобы набрать
+    // вручную, а не молчать
+    Linking.openURL(`tel:${phone}`).catch(() =>
+      Alert.alert('Не удалось открыть звонилку', `Номер мастера: ${formatPhone(phone)}`),
+    );
   };
 
   // Заявки до появления offers: предложение лежит в самой заявке и
@@ -202,7 +217,10 @@ export function OrderSheet({
   const legacyDeclined = order.priceStatus === 'declined' && order.price != null;
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.wrap]}>
+    <KeyboardAvoidingView
+      style={[StyleSheet.absoluteFill, styles.wrap]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <Animated.View
         entering={FadeIn.duration(260)}
         exiting={FadeOut.duration(220)}
@@ -246,6 +264,20 @@ export function OrderSheet({
             остаётся на месте, остальное прокручивается внутри карточки */}
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
           <StatusStepper status={order.status} />
+
+          {/* Решение модерации — не только в пуше, который исчезает */}
+          {order.closedByAdmin && (
+            <Animated.View entering={FadeInDown.delay(100).duration(300)} style={styles.adminCard}>
+              <Text style={styles.adminTitle}>
+                {order.status === 'Отменена'
+                  ? 'Заявка отменена модерацией'
+                  : 'Заявка закрыта модерацией'}
+              </Text>
+              {!!order.adminCloseReason && (
+                <Text style={styles.adminText}>{order.adminCloseReason}</Text>
+              )}
+            </Animated.View>
+          )}
 
           {order.photoUri ? (
             <Animated.View entering={FadeInDown.delay(120).duration(300)}>
@@ -316,10 +348,8 @@ export function OrderSheet({
                 </PressableScale>
               </View>
 
-              <PressableScale style={[styles.offerDiscuss, styles.iconLabelRow]} onPress={onChat}>
-                <Glyph glyph="💬" size={16} colors={themedIconColors(t)} />
-                <Text style={styles.offerDiscussText}>Обговорить цену</Text>
-              </PressableScale>
+              {/* Чата до выбора мастера нет — правила пускают в него только
+                  стороны сделки; торг здесь один: принять или отклонить */}
             </Animated.View>
           )}
 
@@ -384,7 +414,8 @@ export function OrderSheet({
           {/* Писать некому, пока мастер не выбран: до этого у заявки нет
             собеседника, и сообщение осталось бы без ответа. Как только сервер
             положил в заявку телефон, рядом с чатом встаёт звонок. */}
-          {(order.masterId || legacyOffer) &&
+          {order.masterId &&
+            talkable &&
             (canCall ? (
               <Animated.View
                 entering={FadeInDown.delay(200).duration(300)}
@@ -558,7 +589,7 @@ export function OrderSheet({
       </Animated.View>
 
       <VerificationExplainer open={verifOpen} onClose={() => setVerifOpen(false)} />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -740,7 +771,9 @@ function PaymentBlock({
             </Text>
           ) : (
             <Text style={styles.payText}>
-              Номер появится в заявке через минуту — его кладёт сервер
+              {order.agreedAtMs != null && Date.now() - order.agreedAtMs < 2 * 60_000
+                ? 'Номер появится в заявке через минуту — его кладёт сервер'
+                : 'Номер мастера в заявке не появился — уточните у него в чате или рассчитайтесь наличными'}
             </Text>
           )}
           <Text style={styles.payText}>
@@ -803,11 +836,18 @@ function PaymentBlock({
 
 // ---------- Отзыв о работе ----------
 
-function ReviewForm({ onSubmit }: { onSubmit: (stars: number, text: string) => void }) {
+function ReviewForm({
+  onSubmit,
+}: {
+  onSubmit: (stars: number, text: string) => Promise<boolean> | boolean | void;
+}) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const [stars, setStars] = useState(0);
   const [text, setText] = useState('');
+  // Второе касание, пока первое пишется, давало бы отказ правил на уже
+  // оставленный отзыв
+  const [busy, setBusy] = useState(false);
 
   return (
     <Animated.View entering={FadeInDown.delay(180).duration(300)} style={styles.reviewCard}>
@@ -839,16 +879,21 @@ function ReviewForm({ onSubmit }: { onSubmit: (stars: number, text: string) => v
       />
 
       <PressableScale
-        style={[styles.reviewBtn, stars === 0 && styles.reviewBtnDim]}
-        onPress={() => {
-          if (stars === 0) return;
+        style={[styles.reviewBtn, (stars === 0 || busy) && styles.reviewBtnDim]}
+        onPress={async () => {
+          if (stars === 0 || busy) return;
           hapticImpact();
-          onSubmit(stars, text.trim());
+          setBusy(true);
+          try {
+            await onSubmit(stars, text.trim());
+          } finally {
+            setBusy(false);
+          }
         }}
-        disabled={stars === 0}
+        disabled={stars === 0 || busy}
       >
         <Text style={styles.reviewBtnText}>
-          {stars === 0 ? 'Поставьте оценку' : 'Отправить отзыв'}
+          {stars === 0 ? 'Поставьте оценку' : busy ? 'Отправляем…' : 'Отправить отзыв'}
         </Text>
       </PressableScale>
     </Animated.View>
@@ -858,6 +903,16 @@ function ReviewForm({ onSubmit }: { onSubmit: (stars: number, text: string) => v
 const makeStyles = (t: Palette) =>
   StyleSheet.create({
     wrap: { justifyContent: 'flex-end' },
+    adminCard: {
+      backgroundColor: t.accentSoft,
+      borderWidth: 1,
+      borderColor: t.border,
+      borderRadius: 14,
+      padding: 12,
+      marginBottom: 12,
+    },
+    adminTitle: { fontSize: 13, fontWeight: '800', color: t.text },
+    adminText: { fontSize: 12.5, lineHeight: 17, color: t.textMuted, marginTop: 4 },
     dim: { backgroundColor: t.dim },
     card: {
       margin: 12,

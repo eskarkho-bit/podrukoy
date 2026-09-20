@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import {
   addDoc,
@@ -144,7 +145,8 @@ type AppState = {
   blockedMasters: { id: string; name: string }[];
   blockMaster: (masterId: string, name: string) => void;
   unblockMaster: (masterId: string) => void;
-  submitReview: (orderId: string, stars: number, text: string) => void;
+  // true — отзыв записан; форма по false остаётся открытой
+  submitReview: (orderId: string, stars: number, text: string) => Promise<boolean>;
   // Заявки, созданные до появления offers
   acceptPrice: (orderId: string) => void;
   declinePrice: (orderId: string) => void;
@@ -217,6 +219,21 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // сообщение, а не сам факт открытия: иначе чат, открытый однажды, больше
   // никогда не становился бы непрочитанным
   const [readThreads, setReadThreads] = useState<Map<string, string>>(new Map());
+  // Прочитанность — на устройстве, по аккаунту: без этого после перезапуска
+  // каждый чат с последним сообщением мастера снова горел бы непрочитанным
+  const readKey = uid ? `read-threads-${uid}` : null;
+  useEffect(() => {
+    if (!readKey) return;
+    let alive = true;
+    AsyncStorage.getItem(readKey)
+      .then((raw) => {
+        if (alive && raw) setReadThreads(new Map(Object.entries(JSON.parse(raw))));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [readKey]);
   // Профиль прочитан хотя бы раз — только тогда есть куда писать токен
   const [profileReady, setProfileReady] = useState(false);
   const profileTokensRef = useRef<string[]>([]);
@@ -320,19 +337,29 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           // значения нужны тем, кто регистрировался до появления этих полей.
           const signup = takeSignupDraft();
           const address = signup?.address || DEFAULT_ADDRESS;
-          setDoc(ref, {
-            // Имя из черновика — для регистрации по телефону: у такого
-            // аккаунта displayName пуст, а имя человек уже написал
-            name: user?.displayName ?? signup?.name ?? 'Гость',
-            email: user?.email ?? '',
-            phone: user?.phoneNumber ?? '',
-            addresses: [address],
-            activeAddress: address,
-            city: signup?.city ?? '',
-            themeMode: 'light',
-            consents: takePendingConsent() ?? {},
-            createdAt: serverTimestamp(),
-          }).catch((e) => console.warn('Не удалось создать профиль:', e));
+          const createProfile = () =>
+            setDoc(ref, {
+              // Имя из черновика — для регистрации по телефону: у такого
+              // аккаунта displayName пуст, а имя человек уже написал
+              name: user?.displayName ?? signup?.name ?? 'Гость',
+              email: user?.email ?? '',
+              phone: user?.phoneNumber ?? '',
+              addresses: [address],
+              activeAddress: address,
+              city: signup?.city ?? '',
+              themeMode: 'light',
+              consents: takePendingConsent() ?? {},
+              createdAt: serverTimestamp(),
+            }).catch((e) => console.warn('Не удалось создать профиль:', e));
+          // Профиль исчез, потому что аккаунт удаляют с другого устройства:
+          // воссоздавать его — значит вернуть персональные данные после
+          // удаления. Просьба об удалении лежит в deletions/{uid}.
+          getDoc(doc(db, 'deletions', uid))
+            .then((req) => {
+              if (req.exists() && req.get('status') !== 'done') return;
+              return createProfile();
+            })
+            .catch(() => createProfile());
           return;
         }
         const d = snap.data();
@@ -384,9 +411,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [uid]);
 
   // ---------- push-токен ----------
-  // Токен устройства — один на запуск: разрешение на уведомления спрашивается
-  // здесь же, и второй раз просить его после смены аккаунта незачем
+  // Токен устройства — один на запуск, но спрашивать разрешение на
+  // уведомления имеет смысл только у вошедшего: на экране входа системный
+  // вопрос ни к чему не привязан и его отклоняют
+  const tokenAsked = useRef(false);
   useEffect(() => {
+    if (!uid || tokenAsked.current) return;
+    tokenAsked.current = true;
     let alive = true;
     getPushToken().then((token) => {
       if (alive) setPushToken(token);
@@ -394,7 +425,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [uid]);
 
   // Складываем в профиль список токенов: у одного человека может быть
   // несколько устройств, и серверу потом нужно знать их все. Пишем, когда
@@ -448,6 +479,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
                 reviewed: !!v.reviewed,
                 price: v.price ?? null,
                 priceStatus: v.priceStatus ?? 'none',
+                agreedAtMs: v.agreedAt?.toMillis?.() ?? null,
+                closedByAdmin: v.closedByAdmin === true,
+                adminCloseReason:
+                  typeof v.adminCloseReason === 'string' ? v.adminCloseReason : null,
+                lastMessageAtMs: v.lastMessageAt?.toMillis?.() ?? null,
+                lastMessageBy: typeof v.lastMessageBy === 'string' ? v.lastMessageBy : null,
                 // для сортировки: у только что созданной заявки serverTimestamp
                 // ещё null, поэтому такие показываем сверху
                 createdMs: v.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER,
@@ -675,6 +712,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               icon: v.icon,
               unread: !!v.unread,
               canAttach: false,
+              lastAtMs: v.updatedAt?.toMillis?.() ?? null,
               messages: old?.messages ?? [],
             };
           }),
@@ -832,9 +870,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // оценку второй раз или, наоборот, потерять её.
   const submitReview = async (orderId: string, stars: number, text: string) => {
     const order = orders.find((o) => o.id === orderId);
-    if (!uid || !order || !order.masterId) return;
-    if (order.status !== 'Завершена' || order.reviewed) return;
-    if (!Number.isInteger(stars) || stars < 1 || stars > 5) return;
+    if (!uid || !order || !order.masterId) return false;
+    if (order.status !== 'Завершена' || order.reviewed) return false;
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) return false;
 
     try {
       const batch = writeBatch(db);
@@ -848,8 +886,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       });
       batch.update(doc(db, 'orders', orderId), { reviewed: true });
       await batch.commit();
+      return true;
     } catch (e) {
       failed('Не удалось отправить отзыв. Проверьте связь')(e);
+      return false;
     }
   };
 
@@ -1114,7 +1154,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (!uid) return;
     const thread = [...orderThreads, ...supportThreads].find((t) => t.id === threadId);
     const lastId = thread?.messages[thread.messages.length - 1]?.id ?? '';
-    setReadThreads((prev) => new Map(prev).set(threadId, lastId));
+    setReadThreads((prev) => {
+      const next = new Map(prev).set(threadId, lastId);
+      if (readKey) {
+        AsyncStorage.setItem(readKey, JSON.stringify(Object.fromEntries(next))).catch(() => {});
+      }
+      return next;
+    });
     if (threadId === SUPPORT_THREAD_ID) {
       updateDoc(doc(db, 'users', uid, 'threads', threadId), { unread: false }).catch(() => {});
     }
@@ -1200,37 +1246,45 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // Открыть чат из другого экрана и перевести на вкладку «Сообщения».
   // Для поддержки создаём тред с приветствием, для заявки он появится сам,
   // как только кто-то напишет первое сообщение.
-  const openChat = async (threadId: string) => {
-    if (uid && threadId === SUPPORT_THREAD_ID && !supportThreads.find((t) => t.id === threadId)) {
-      const threadRef = doc(db, 'users', uid, 'threads', threadId);
-      try {
-        await setDoc(
-          threadRef,
-          {
-            name: 'Поддержка',
-            icon: '🛟',
-            kind: 'support',
-            unread: false,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
-        // Приветствие автоматическое и не притворяется живым человеком:
-        // отвечает модератор, когда прочитает. Отметка auto говорит серверу
-        // не слать об этом сообщении пуш — человек и так смотрит на экран.
-        await addDoc(collection(threadRef, 'messages'), {
-          from: 'master',
-          text: 'Здравствуйте! Опишите вопрос — мы читаем все обращения и ответим здесь же.',
-          auto: true,
-          time: now(),
-          createdAt: serverTimestamp(),
-        });
-      } catch (e) {
-        console.warn('Не удалось открыть переписку:', e);
-      }
-    }
+  const openChat = (threadId: string) => {
+    // Экран — сразу, запись — следом: без сети кнопка иначе выглядела бы
+    // мёртвой, а переписка появится на экране, как только тред запишется
     setOpenThreadRequest(threadId);
     router.navigate('/messages');
+    if (uid && threadId === SUPPORT_THREAD_ID && !supportThreads.find((t) => t.id === threadId)) {
+      const threadRef = doc(db, 'users', uid, 'threads', threadId);
+      setDoc(
+        threadRef,
+        {
+          name: 'Поддержка',
+          icon: '🛟',
+          kind: 'support',
+          unread: false,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+        .then(() =>
+          // Приветствие автоматическое и не притворяется живым человеком:
+          // отвечает модератор, когда прочитает. Отметка auto говорит серверу
+          // не слать об этом сообщении пуш — человек и так смотрит на экран.
+          // Идентификатор фиксированный: второе открытие до прихода списка
+          // не должно рождать второе приветствие; правила не дают переписать
+          // сообщение, поэтому повтор просто отклоняется
+          setDoc(doc(threadRef, 'messages', 'welcome'), {
+            from: 'master',
+            text: 'Здравствуйте! Опишите вопрос — мы читаем все обращения и ответим здесь же.',
+            auto: true,
+            time: now(),
+            createdAt: serverTimestamp(),
+          }),
+        )
+        .catch((e) => {
+          if (firestoreErrorCode(e) !== 'permission-denied') {
+            console.warn('Не удалось открыть переписку:', e);
+          }
+        });
+    }
   };
 
   // ---------- аккаунт ----------
@@ -1367,9 +1421,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         ? t.unread && seen !== last?.id
         : !!last && last.from === 'master' && seen !== last.id;
     const order = t.id === SUPPORT_THREAD_ID ? undefined : orders.find((o) => o.id === t.id);
-    const closed = !!order && !TALKABLE.includes(order.status);
-    return unread === t.unread && closed === !!t.closed ? t : { ...t, unread, closed };
+    // Закрыт и чат с мастером, удалившим аккаунт: писать ему некуда
+    const closed =
+      !!order && (!TALKABLE.includes(order.status) || order.masterName === 'Удалённый аккаунт');
+    const lastAtMs = order ? (order.lastMessageAtMs ?? null) : (t.lastAtMs ?? null);
+    return unread === t.unread && closed === !!t.closed && lastAtMs === (t.lastAtMs ?? null)
+      ? t
+      : { ...t, unread, closed, lastAtMs };
   });
+  // Свежие сверху — по последнему сообщению, а не по порядку прихода подписок
+  threads.sort((a, b) => (b.lastAtMs ?? 0) - (a.lastAtMs ?? 0));
 
   const hasUnreadMessages = threads.some((t) => t.unread);
   const ordersActive = orders.filter((o) => !CLOSED.includes(o.status)).length;

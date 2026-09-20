@@ -15,9 +15,14 @@ import { PressableScale } from '../components/PressableScale';
 import { DomioLogo } from '../components/DomioLogo';
 import { authErrorText, useAuth } from '../components/AuthState';
 import { formatRuPhone, normalizeRuPhone, phoneAuthErrorText } from '../components/phoneAuth';
-import { currentConsents, rememberConsent, type LegalDocId } from '../components/legal';
+import {
+  currentConsents,
+  rememberConsent,
+  takePendingConsent,
+  type LegalDocId,
+} from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
-import { rememberSignup } from '../components/signupDraft';
+import { rememberSignup, takeSignupDraft } from '../components/signupDraft';
 import { firestoreErrorCode } from '../components/firestoreError';
 import { LegalScreen } from './LegalScreen';
 import { Palette, palettes, useTheme } from '../theme';
@@ -201,10 +206,16 @@ export function AuthScreen() {
         setMode('register');
         setError(null);
         setNotice(
-          'Этот номер ещё не зарегистрирован. Заполните данные — код из звонка действует ещё несколько минут',
+          'Этот номер ещё не зарегистрирован. Заполните данные — код действует ещё несколько минут',
         );
         setLoading(false);
         return;
+      }
+      // Регистрация не прошла — черновик и согласие не должны прилипнуть к
+      // следующему аккаунту на этом устройстве
+      if (isRegister) {
+        takeSignupDraft();
+        takePendingConsent();
       }
       setError(phoneAuthErrorText(e));
       setLoading(false);
@@ -266,6 +277,10 @@ export function AuthScreen() {
       } else await signIn(e, password);
       // При успехе экран пропадёт сам: сессия появится в AuthProvider
     } catch (err) {
+      if (isRegister) {
+        takeSignupDraft();
+        takePendingConsent();
+      }
       setError(authErrorText(err));
       setLoading(false);
     }
