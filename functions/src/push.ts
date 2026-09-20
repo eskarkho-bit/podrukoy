@@ -10,7 +10,9 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 // Expo принимает не больше 100 сообщений за запрос
 const CHUNK = 100;
 
-export type PushTarget = { href: string };
+// threadId — переписка, которую открыть по нажатию: у клиента чат заявки
+// или поддержки, у мастера — заявка в его разделе
+export type PushTarget = { href: string; threadId?: string };
 
 type ExpoMessage = {
   to: string;

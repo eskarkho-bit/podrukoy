@@ -43,7 +43,17 @@ export function DashboardBlock({ dashboard }: { dashboard: DashboardData | null 
 
   return (
     <Animated.View entering={FadeInDown.delay(80).duration(360)} style={styles.wrap}>
-      <Text style={styles.title}>Дашборд</Text>
+      <Text style={styles.title}>
+        Дашборд
+        {dashboard.updatedMs
+          ? ` · пересчитан ${new Date(dashboard.updatedMs).toLocaleString('ru-RU', {
+              day: 'numeric',
+              month: 'short',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}`
+          : ''}
+      </Text>
 
       <View style={styles.tilesRow}>
         <Tile value={String(dashboard.activeMasters)} label="активных мастеров" />

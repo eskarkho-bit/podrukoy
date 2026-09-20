@@ -1,5 +1,12 @@
 import { ReactNode } from 'react';
-import { AccessibilityRole, Insets, Pressable, StyleProp, ViewStyle } from 'react-native';
+import {
+  AccessibilityRole,
+  AccessibilityState,
+  Insets,
+  Pressable,
+  StyleProp,
+  ViewStyle,
+} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -20,6 +27,8 @@ type Props = {
   // «группа». Задаются там, где содержимое кнопки не текст.
   accessibilityRole?: AccessibilityRole;
   accessibilityLabel?: string;
+  // Состояние переключателя для скринридера
+  accessibilityState?: AccessibilityState;
   // Мелким кнопкам зона касания добивается до 44pt слопом, а не размером:
   // видимая часть остаётся компактной, промахнуться — сложнее
   hitSlop?: Insets | number;
@@ -35,6 +44,7 @@ export function PressableScale({
   disabled,
   accessibilityRole,
   accessibilityLabel,
+  accessibilityState,
   hitSlop,
 }: Props) {
   const scale = useSharedValue(1);
@@ -48,6 +58,7 @@ export function PressableScale({
       disabled={disabled}
       accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel}
+      accessibilityState={accessibilityState}
       hitSlop={hitSlop}
       onPress={onPress}
       onPressIn={() => {

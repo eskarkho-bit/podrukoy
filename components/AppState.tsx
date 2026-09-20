@@ -543,7 +543,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           },
         }));
       })
-      .catch((e) => console.warn('Анкета мастера недоступна:', e));
+      .catch((e) => {
+        // Сбой сети — не приговор: следующий снимок предложений попробует снова
+        masterCardsAsked.current.delete(masterId);
+        console.warn('Анкета мастера недоступна:', e);
+      });
   };
 
   // Подписываемся только на заявки в поиске: после выбора мастера предложения
@@ -1197,6 +1201,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           kind: 'support',
           lastText: text,
           lastFrom: 'user',
+          // Закрытое модератором обращение с новым сообщением снова «новое»:
+          // иначе оно пряталось бы под фильтром, и ответа не дождаться
+          supportStatus: 'новое',
           updatedAt: serverTimestamp(),
         },
         { merge: true },

@@ -53,6 +53,7 @@ function RootShell() {
     consents,
     acceptConsents,
     logout,
+    openChat,
   } = useAppState();
   // Профиль ещё грузится, пока consents === null: показывать в этот момент
   // требование принять документы значит мигать им у тех, кто их уже принял
@@ -80,11 +81,22 @@ function RootShell() {
   // Нажатие на уведомление ведёт на нужный экран. Без роутера этого нельзя
   // было сделать в принципе — вкладка жила в useState и адреса не имела.
   const coldStartHandled = useRef(false);
+  // openChat пересоздаётся на каждый рендер провайдера — через ссылку, чтобы
+  // подписка на уведомления не перевешивалась вместе с ним
+  const openChatRef = useRef(openChat);
+  openChatRef.current = openChat;
   useEffect(() => {
     if (!user) return;
 
     const go = (response: Notifications.NotificationResponse | null) => {
-      const href = response?.notification.request.content.data?.href;
+      const data = response?.notification.request.content.data;
+      const href = data?.href;
+      const threadId = data?.threadId;
+      // Уведомление о сообщении ведёт в саму переписку, а не в список
+      if (href === '/messages' && typeof threadId === 'string') {
+        openChatRef.current(threadId);
+        return;
+      }
       if (typeof href === 'string') router.navigate(href as never);
     };
 

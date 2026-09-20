@@ -349,7 +349,11 @@ export function ProfileScreen({
 
         <Animated.View entering={FadeInDown.delay(160 + STAGGER).duration(340)} style={styles.row}>
           <Text style={styles.rowLabel}>Тёмная тема</Text>
-          <Toggle value={mode === 'dark'} onChange={(v) => setMode(v ? 'dark' : 'light')} />
+          <Toggle
+            value={mode === 'dark'}
+            onChange={(v) => setMode(v ? 'dark' : 'light')}
+            label="Тёмная тема"
+          />
         </Animated.View>
 
         <Animated.View
@@ -357,7 +361,7 @@ export function ProfileScreen({
           style={styles.row}
         >
           <Text style={styles.rowLabel}>Push-уведомления</Text>
-          <Toggle value={pushOn} onChange={onChangePush} />
+          <Toggle value={pushOn} onChange={onChangePush} label="Push-уведомления" />
         </Animated.View>
         {/* Email-уведомлений у сервиса нет — и тумблера для них тоже:
             выключатель, за которым ничего не стоит, обманывает */}
@@ -367,7 +371,11 @@ export function ProfileScreen({
           style={styles.row}
         >
           <Text style={styles.rowLabel}>Напоминать о повторных работах</Text>
-          <Toggle value={remindersOn} onChange={onChangeReminders} />
+          <Toggle
+            value={remindersOn}
+            onChange={onChangeReminders}
+            label="Напоминания о повторяемых работах"
+          />
         </Animated.View>
 
         <Animated.View
@@ -642,7 +650,16 @@ export function ProfileScreen({
 const KNOB_OFF = 2;
 const KNOB_ON = 18;
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  value,
+  onChange,
+  label,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+  // Подпись для скринридера: сам тумблер — только дорожка и кружок
+  label: string;
+}) {
   const { mode, colors: t } = useTheme();
   const styles = themed[mode];
   const on = useSharedValue(value ? 1 : 0);
@@ -695,6 +712,8 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
         onPress={() => onChange(!value)}
         hitSlop={{ top: 9, bottom: 9, left: 6, right: 6 }}
         accessibilityRole="switch"
+        accessibilityLabel={label}
+        accessibilityState={{ checked: value }}
       >
         <Animated.View style={[styles.toggleTrack, trackStyle]}>
           <Animated.View style={[styles.toggleKnob, knobStyle]} />

@@ -202,7 +202,13 @@ export function AuthScreen() {
     } catch (e) {
       // Номер свободен, а человек нажал «войти»: код ещё действует — сразу
       // показываем поля регистрации, второй звонок не нужен
-      if (!isRegister && firestoreErrorCode(e).replace(/^functions\//, '') === 'not-found') {
+      // Именно наш ответ, а не отсутствующая функция: у той тот же код
+      // not-found, но без русского текста
+      if (
+        !isRegister &&
+        firestoreErrorCode(e).replace(/^functions\//, '') === 'not-found' &&
+        /не зарегистрирован/.test(e instanceof Error ? e.message : '')
+      ) {
         setMode('register');
         setError(null);
         setNotice(

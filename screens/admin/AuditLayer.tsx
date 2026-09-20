@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -110,10 +110,15 @@ export function AuditLayer({
 
   const filter: AuditFilter = subject ? { subject } : action ? { action } : {};
 
+  // Быстрое переключение чипов: ответ на прежний фильтр может прийти позже
+  // ответа на новый — счётчик запросов отбрасывает устаревшие
+  const requestSeq = useRef(0);
   const load = useCallback(
     async (reset: boolean, after?: unknown) => {
+      const seq = ++requestSeq.current;
       setLoading(true);
       const page = await loadAudit(filter, after);
+      if (seq !== requestSeq.current) return;
       setEntries((prev) => (reset ? page.entries : prev.concat(page.entries)));
       setCursor(page.cursor);
       setLoading(false);

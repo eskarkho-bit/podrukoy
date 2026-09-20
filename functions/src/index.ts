@@ -202,7 +202,7 @@ export const onMessageCreated = onDocumentCreated(
         ? String(order.get('clientName') ?? 'Клиент')
         : String(order.get('masterName') ?? 'Мастер'),
       body,
-      { href: fromClient ? '/profile' : '/messages' },
+      { href: fromClient ? '/profile' : '/messages', threadId: event.params.orderId },
     );
   },
 );
@@ -405,6 +405,7 @@ export const onSupportMessageCreated = onDocumentCreated(
 
     await pushTo([event.params.uid], 'Поддержка', 'Вам ответили — откройте переписку', {
       href: '/messages',
+      threadId: 'support',
     });
   },
 );
