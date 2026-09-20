@@ -65,6 +65,8 @@ export type Pending = {
   photoUrl: string | null;
   /** Когда подана — чтобы видеть, что залежалось */
   appliedMs: number | null;
+  /** Отстранён: одобрять его анкету не стоит, пока отстранение не снято */
+  blocked: boolean;
 };
 
 export type SupportStatus = 'новое' | 'в работе' | 'закрыто';
@@ -343,9 +345,13 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
   const [pending, setPending] = useState<Pending[]>([]);
   useEffect(() => {
     if (!active) return;
+    // Обработчик асинхронный (дочитывает анкеты): два снимка подряд могут
+    // закончиться не по порядку, и старый вернул бы уже решённую анкету
+    let generation = 0;
     return onSnapshot(
       query(collectionGroup(db, 'verification'), where('status', '==', 'pending')),
       async (snap) => {
+        const mine = ++generation;
         // Имя, город и специальности лежат в самой анкете, а не в заявке:
         // дублировать их незачем, а модератору они нужны
         const rows = await Promise.all(
@@ -367,9 +373,11 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
               about: String(v.about ?? ''),
               photoUrl: typeof v.photoUrl === 'string' ? v.photoUrl : null,
               appliedMs: ms(v.appliedAt),
+              blocked: profile?.get('blocked') === true,
             } as Pending;
           }),
         );
+        if (mine !== generation) return;
         setPending(rows.filter((r): r is Pending => r !== null));
       },
       (e) => console.warn('Очередь модерации недоступна:', e),
@@ -522,13 +530,14 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
     [loadOrdersPage, ordersFilter],
   );
 
-  // Первая страница — при открытии раздела
-  const [ordersPrimed, setOrdersPrimed] = useState(false);
+  // Первая страница — при каждом открытии раздела: список не подписка, и
+  // за время, пока раздел был закрыт, заявки успели поменяться
   useEffect(() => {
-    if (!active || ordersPrimed) return;
-    setOrdersPrimed(true);
+    if (!active) return;
     loadOrdersPage(ordersFilter, true);
-  }, [active, ordersPrimed, loadOrdersPage, ordersFilter]);
+    // Только при открытии: смена фильтра грузит страницу сама
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // «Поиск» по заявкам — это точный переход по id: полнотекстового поиска
   // у Firestore нет, и притворяться не будем
@@ -616,8 +625,21 @@ export function AdminStateProvider({ open, children }: { open: boolean; children
   );
 
   const closeOrder = useCallback(
-    (orderId: string, outcome: 'Отменена' | 'Завершена', reason: string) =>
-      call('adminCloseOrder', { orderId, outcome, reason }, 'Не удалось закрыть заявку'),
+    async (orderId: string, outcome: 'Отменена' | 'Завершена', reason: string) => {
+      const ok = await call(
+        'adminCloseOrder',
+        { orderId, outcome, reason },
+        'Не удалось закрыть заявку',
+      );
+      // Список — разовая страница, а не подписка: строку правим на месте,
+      // иначе закрытая заявка оставалась бы в нём со старым статусом
+      if (ok) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === orderId ? { ...o, status: outcome, closedByAdmin: true } : o)),
+        );
+      }
+      return ok;
+    },
     [call],
   );
 

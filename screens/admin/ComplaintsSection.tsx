@@ -168,6 +168,7 @@ export function ComplaintsSection() {
     setBusyId(c.id);
     await resolveComplaint(c.id, 'отклонена', note);
     setBusyId(null);
+    if (archive !== null) setArchive(await loadComplaintsArchive());
   };
 
   // Жалоба клиента: меры (блокировка, закрытие заявки) принимаются в своих
@@ -176,6 +177,8 @@ export function ComplaintsSection() {
     setBusyId(c.id);
     await resolveComplaint(c.id, 'решена', note);
     setBusyId(null);
+    // Решённая жалоба уходит из очереди в архив — если он открыт, перечитать
+    if (archive !== null) setArchive(await loadComplaintsArchive());
   };
 
   const toggleArchive = async () => {

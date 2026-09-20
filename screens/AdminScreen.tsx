@@ -674,6 +674,12 @@ export function PendingCard({
         </View>
       </View>
 
+      {item.blocked && (
+        <Text style={styles.blockedNote}>
+          ⛔ Мастер отстранён — одобрять анкету, пока отстранение не снято, не стоит
+        </Text>
+      )}
+
       {item.skills.length > 0 && <Text style={styles.skills}>{item.skills.join(' · ')}</Text>}
 
       {item.about ? <Text style={styles.about}>{item.about}</Text> : null}
@@ -902,6 +908,7 @@ const makeStyles = (t: Palette) =>
     meta: { fontSize: 12, fontWeight: '600', color: t.textMuted, marginTop: 3 },
     metaBad: { color: t.danger, fontWeight: '700' },
     skills: { fontSize: 12, fontWeight: '700', color: t.textSoft, marginTop: 10 },
+    blockedNote: { fontSize: 12, fontWeight: '700', color: t.danger, marginTop: 10 },
     about: { fontSize: 12.5, fontWeight: '400', color: t.text, lineHeight: 17, marginTop: 8 },
     row: { flexDirection: 'row', gap: 8, marginTop: 12 },
     btn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
