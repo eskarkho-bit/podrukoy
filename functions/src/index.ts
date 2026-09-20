@@ -239,6 +239,11 @@ export const onOrderStatusChanged = onDocumentUpdated(
     if (!(await claimOnce(event.params.orderId, `status:${transition}`))) return;
 
     if (before.status === 'Ждёт подтверждения' && after.status === 'В работе') {
+      // Отметка для мастера: тот же статус «В работе», но повод не
+      // праздновать, а доделать — экран по ней не показывает конфетти
+      await getFirestore()
+        .doc(`orders/${event.params.orderId}`)
+        .set({ returnedToWorkAt: FieldValue.serverTimestamp() }, { merge: true });
       await audit({
         action: 'order.returned_to_work',
         actor: SYSTEM,

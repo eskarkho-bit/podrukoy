@@ -76,6 +76,11 @@ jest.mock('./firebaseConfig', () => ({
   newOrderId: jest.fn(() => `order-${Math.random().toString(36).slice(2, 10)}`),
 }));
 
+// Локальное хранилище: в тестах нет нативного модуля, берём заглушку пакета
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
 jest.mock('expo-file-system', () => ({
   File: jest.fn(() => ({ write: jest.fn(), uri: 'file://export.json' })),
   Paths: { cache: 'cache' },

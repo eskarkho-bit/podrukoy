@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Alert,
   Linking,
   Platform,
   ScrollView,
@@ -37,6 +39,7 @@ import {
   collectionGroup,
   deleteDoc,
   doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -79,7 +82,7 @@ import {
   uploadChatPhoto,
   uploadVerificationPhoto,
 } from '../components/photoUpload';
-import { firestoreErrorText } from '../components/firestoreError';
+import { firestoreErrorCode, firestoreErrorText } from '../components/firestoreError';
 import { fileComplaint } from '../components/complaints';
 import { LEGAL_DOCS, type LegalDocId } from '../components/legal';
 import { CityPicker } from '../components/CityPicker';
@@ -172,6 +175,16 @@ export type Job = {
   // Когда клиент выбрал исполнителя. С этого момента мастер читает переписку:
   // до него в заявке могли быть сообщения прежнего мастера
   agreedAt?: Timestamp | null;
+  // Клиент вернул работу с приёмки: тот же статус «В работе», но повод не
+  // праздновать, а доделать
+  returnedToWork?: boolean;
+  // Закрыта модерацией — с причиной, которую видят обе стороны
+  closedByAdmin?: boolean;
+  adminCloseReason?: string | null;
+  // Кто и когда написал последним: ставит сервер, по нему считается
+  // непрочитанное без подписки на переписку каждой заявки
+  lastMessageAtMs?: number | null;
+  lastMessageBy?: string | null;
   // Заявка со старой схемой согласования — цена лежит в ней самой
   legacy: boolean;
   unread: boolean;
@@ -338,11 +351,49 @@ export function MasterScreen({ open, onClose }: Props) {
 
   const openJob = jobs.find((j) => j.id === openJobId) ?? null;
 
+  // Заявки, от которых мастер отказался в этой сессии: сервер вернёт их в
+  // поиск, и в ленте они всплыли бы как «новые» — звать самого себя обратно
+  // незачем
+  const declinedIds = useRef(new Set<string>());
+  // Открытая заявка — через ссылку: merge() живёт в подписках ленты и не
+  // должен пересоздавать их при каждом открытии карточки
+  const openJobIdRef = useRef(openJobId);
+  openJobIdRef.current = openJobId;
+
+  // Когда мастер последний раз открывал переписку каждой заявки — на
+  // устройстве, по аккаунту: непрочитанное считается от этой отметки и
+  // переживает перезапуск
+  const seenAt = useRef<Record<string, number>>({});
+  const seenKey = myUid ? `master-seen-${myUid}` : null;
+  useEffect(() => {
+    if (!seenKey) return;
+    let alive = true;
+    AsyncStorage.getItem(seenKey)
+      .then((raw) => {
+        if (alive && raw) seenAt.current = JSON.parse(raw) as Record<string, number>;
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [seenKey]);
+  const markSeen = (jobId: string) => {
+    seenAt.current = { ...seenAt.current, [jobId]: Date.now() };
+    setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, unread: false } : j)));
+    if (seenKey) AsyncStorage.setItem(seenKey, JSON.stringify(seenAt.current)).catch(() => {});
+  };
+
+  // Заявки, по которым есть моё предложение, но которых нет в ленте: она
+  // ограничена городом и лимитом, а предложение живёт, пока заявка открыта.
+  // Читаем такую заявку отдельно — открытую правила мастеру отдают; отказ
+  // значит, что её отдали другому или закрыли
+  const offerOrders = useRef(new Map<string, QueryDocumentSnapshot | null>());
+
   // Заявка исчезла из списка — клиент выбрал другого или модерация закрыла:
   // открытой не остаётся ничего, иначе подписка на её переписку упиралась
   // бы в отказ правил, а «назад» вело в пустоту
   useEffect(() => {
-    if (openJobId && jobs.length && !jobs.some((j) => j.id === openJobId)) setOpenJobId(null);
+    if (openJobId && !jobs.some((j) => j.id === openJobId)) setOpenJobId(null);
   }, [jobs, openJobId]);
 
   // Пока раздел закрыт, его содержимое не рисуется: подписки и состояние
@@ -499,6 +550,11 @@ export function MasterScreen({ open, onClose }: Props) {
         createdMs: v.createdAt?.toMillis?.() ?? null,
         completedMs: v.completedAt?.toMillis?.() ?? null,
         agreedAt: v.agreedAt instanceof Timestamp ? v.agreedAt : null,
+        returnedToWork: v.returnedToWorkAt != null,
+        closedByAdmin: v.closedByAdmin === true,
+        adminCloseReason: typeof v.adminCloseReason === 'string' ? v.adminCloseReason : null,
+        lastMessageAtMs: v.lastMessageAt?.toMillis?.() ?? null,
+        lastMessageBy: typeof v.lastMessageBy === 'string' ? v.lastMessageBy : null,
         legacy,
         unread: false,
         messages: [],
@@ -515,6 +571,14 @@ export function MasterScreen({ open, onClose }: Props) {
       // Свои заявки кладём поверх ленты: там точнее статус
       buckets.current.mine.forEach((j) => all.set(j.id, j));
 
+      // Отказ в этой сессии: заявка вернулась в поиск, но самому себе она
+      // больше не нужна
+      declinedIds.current.forEach((id) => {
+        const j = all.get(id);
+        if (j && j.status === 'new') all.delete(id);
+      });
+
+      const missing: string[] = [];
       buckets.current.offers.forEach((offer) => {
         const job = all.get(offer.orderId);
         if (job) {
@@ -523,6 +587,14 @@ export function MasterScreen({ open, onClose }: Props) {
             myOffer: offer.price,
             status: job.status === 'new' ? 'offered' : job.status,
           });
+          return;
+        }
+        // Заявки нет в ленте. Открытую мы дочитываем отдельно — тогда она
+        // показывается как обычное предложение и его можно отозвать
+        const extra = offerOrders.current.get(offer.orderId);
+        if (extra === undefined) missing.push(offer.orderId);
+        if (extra && extra.data().status === 'Поиск мастера') {
+          all.set(offer.orderId, { ...toJob(extra), myOffer: offer.price, status: 'offered' });
           return;
         }
         // Заявки не видно: её либо отдали другому мастеру, либо закрыли.
@@ -549,11 +621,29 @@ export function MasterScreen({ open, onClose }: Props) {
         });
       });
 
+      // Заявки вне ленты дочитываются один раз; после чтения merge повторяется
+      missing.forEach((id) => {
+        offerOrders.current.set(id, null);
+        getDoc(doc(db, 'orders', id))
+          .then((snap) => {
+            offerOrders.current.set(id, snap.exists() ? (snap as QueryDocumentSnapshot) : null);
+            merge();
+          })
+          .catch(() => {});
+      });
+
       setJobs((prev) =>
         [...all.values()]
           .map((j) => {
             const old = prev.find((p) => p.id === j.id);
-            return old ? { ...j, unread: old.unread, messages: old.messages } : j;
+            // Непрочитанное — последнее сообщение не моё и позже, чем я
+            // открывал переписку; открытая сейчас заявка прочитана по определению
+            const unread =
+              !!j.lastMessageBy &&
+              j.lastMessageBy !== myUid &&
+              (j.lastMessageAtMs ?? 0) > (seenAt.current[j.id] ?? 0) &&
+              j.id !== openJobIdRef.current;
+            return old ? { ...j, unread, messages: old.messages } : { ...j, unread };
           })
           // Внутри статуса — новые сверху; идентификатор лишь разводит
           // заявки с одинаковым временем
@@ -819,7 +909,7 @@ export function MasterScreen({ open, onClose }: Props) {
   // Переписки до выбора нет — правила пускают в чат только участников
   // заявки, поэтому всё, что мастер хочет сказать, идёт в комментарий.
   const sendOffer = async (jobId: string, price: number, comment: string) => {
-    if (!myUid || !master) return;
+    if (!myUid || !master) return false;
     const job = jobs.find((j) => j.id === jobId);
     try {
       await setDoc(doc(db, 'orders', jobId, 'offers', myUid), {
@@ -835,9 +925,17 @@ export function MasterScreen({ open, onClose }: Props) {
         orderTitle: job?.title ?? 'Заявка',
         createdAt: serverTimestamp(),
       });
+      return true;
     } catch (e) {
       console.warn('Не удалось отправить предложение:', e);
-      showNotice(firestoreErrorText(e, 'Не удалось отправить предложение. Проверьте связь'));
+      // Отказ правил здесь — не «нет прав», а закрытая дверь: клиент
+      // заблокировал мастера либо заявку уже отдали другому
+      showNotice(
+        firestoreErrorCode(e) === 'permission-denied'
+          ? 'Предложение не принято: клиент не принимает ваши предложения или заявка уже закрыта'
+          : firestoreErrorText(e, 'Не удалось отправить предложение. Проверьте связь'),
+      );
+      return false;
     }
   };
 
@@ -854,7 +952,7 @@ export function MasterScreen({ open, onClose }: Props) {
   // Пересмотр цены у заявки, созданной до появления offers: там предложение
   // лежит в самой заявке. Новые заявки этим путём не ходят.
   const offerPriceLegacy = async (jobId: string, price: number) => {
-    if (!myUid) return;
+    if (!myUid) return false;
     const previous = jobs.find((j) => j.id === jobId)?.price;
     try {
       await updateDoc(doc(db, 'orders', jobId), {
@@ -868,18 +966,14 @@ export function MasterScreen({ open, onClose }: Props) {
           at: new Date().toISOString(),
         }),
       });
+      return true;
     } catch (e) {
       console.warn('Не удалось предложить цену:', e);
       showNotice(firestoreErrorText(e, 'Не удалось отправить цену. Проверьте связь'));
-      return;
+      return false;
     }
-
-    pushMessage(
-      jobId,
-      previous == null
-        ? `Готов взяться. Моя цена — ${rub(price)}.`
-        : `Пересмотрел цену: теперь ${rub(price)}.`,
-    );
+    // Сообщение в чат здесь не шлём: до выбора мастера правила его не
+    // пропустят — цена и так видна клиенту в самой заявке
   };
 
   // Мастер отмечает работу выполненной — подтверждать её будет клиент
@@ -912,6 +1006,7 @@ export function MasterScreen({ open, onClose }: Props) {
     pushMessage(jobId, 'Вынужден отказаться от заявки — простите за неудобство.');
     try {
       await updateDoc(doc(db, 'orders', jobId), { masterDeclinedAt: serverTimestamp() });
+      declinedIds.current.add(jobId);
     } catch (e) {
       console.warn('Не удалось отказаться от заявки:', e);
       showNotice(firestoreErrorText(e, 'Не удалось отказаться от заявки. Проверьте связь'));
@@ -936,12 +1031,12 @@ export function MasterScreen({ open, onClose }: Props) {
 
   const handleOpenJob = (jobId: string) => {
     setOpenJobId(jobId);
-    patchJob(jobId, (j) => ({ ...j, unread: false }));
+    markSeen(jobId);
   };
 
   const handleBackFromJob = () => {
     // Ответ мог прийти, пока заявка была открыта — помечаем прочитанным на выходе
-    if (openJobId) patchJob(openJobId, (j) => ({ ...j, unread: false }));
+    if (openJobId) markSeen(openJobId);
     setOpenJobId(null);
   };
 
@@ -1189,6 +1284,9 @@ function MasterApplicationScreen({
     }
     setLoading(false);
   };
+  // Отзыв необратим и снимает допуск — подтверждение в два касания, как у
+  // отмены заявки
+  const { confirming: revoking, press: pressRevoke } = useArmedConfirm(revokeFace);
 
   const save = async (sendForReview: boolean) => {
     if (name.trim().length < 2) {
@@ -1199,9 +1297,22 @@ function MasterApplicationScreen({
       setError('Сессия не найдена — войдите в приложение заново');
       return;
     }
+    // Снимок без согласия хранить нельзя — правила такую анкету отклонят.
+    // Снятая галочка при загруженном фото — это отзыв, и делается он
+    // отдельной кнопкой, которая удаляет и файл
+    if (!faceConsent && (photoUri || application.photoUrl)) {
+      setError(
+        'Без согласия фотографию хранить нельзя: верните галочку или удалите снимок кнопкой «Отозвать согласие»',
+      );
+      return;
+    }
+    if (profile?.blocked && sendForReview) {
+      setError('Доступ приостановлен модерацией — на проверку анкета сейчас не уйдёт');
+      return;
+    }
     if (sendForReview) {
       if (!phoneValid(phone)) {
-        setError('Телефон нужен в виде 11 цифр — по нему с вами свяжутся');
+        setError('Телефон нужен в виде 11 цифр, начиная с 7 или 8 — по нему с вами свяжутся');
         return;
       }
       if (!photoUri) {
@@ -1244,7 +1355,7 @@ function MasterApplicationScreen({
         const appRef = doc(db, 'masters', myUid, 'verification', 'application');
         if (needsRecheck) {
           if (!phoneValid(phone)) {
-            setError('Телефон нужен в виде 11 цифр — по нему с вами свяжутся');
+            setError('Телефон нужен в виде 11 цифр, начиная с 7 или 8 — по нему с вами свяжутся');
             setLoading(false);
             return;
           }
@@ -1309,7 +1420,9 @@ function MasterApplicationScreen({
             about: about.trim(),
             photoUrl: photoUrl ?? null,
             biometricConsent: faceConsent ? LEGAL_DOCS.biometrics.version : null,
-            status: 'draft',
+            // Отклонённая остаётся отклонённой, пока её не отправят снова:
+            // иначе причина отказа исчезала бы с экрана после «Сохранить»
+            status: application.status === 'rejected' ? 'rejected' : 'draft',
           },
           { merge: true },
         );
@@ -1375,6 +1488,18 @@ function MasterApplicationScreen({
             />
             <SummaryRow label="Телефон" value={phone || '—'} />
             <SummaryRow label="Фото" value={application.photoUrl ? 'загружено' : 'нет'} />
+            {/* Право отозвать согласие действует и пока анкета в очереди:
+                снимок уходит, анкета возвращается в черновик */}
+            {application.photoUrl && (
+              <PressableScale style={styles.revokeBtn} onPress={pressRevoke} disabled={loading}>
+                <Text style={styles.revokeText}>
+                  {revoking
+                    ? 'Точно? Фото удалится, анкета вернётся в черновик'
+                    : 'Отозвать согласие и удалить фото'}
+                </Text>
+              </PressableScale>
+            )}
+            {error && <Text style={styles.fieldError}>{error}</Text>}
           </Animated.View>
         </ScrollView>
       </View>
@@ -1444,6 +1569,19 @@ function MasterApplicationScreen({
               label="Телефон"
               hint="по нему свяжется модератор; на него же клиенты переводят оплату"
             />
+          </Animated.View>
+        )}
+
+        {profile?.blocked && (
+          <Animated.View entering={FadeInDown.delay(120).duration(360)} style={styles.rejectCard}>
+            <Text style={styles.rejectTitle}>Доступ к заявкам приостановлен</Text>
+            <Text style={styles.rejectText}>
+              {application.blockedReason ||
+                'Решение модерации. Напишите в поддержку, если не согласны.'}
+            </Text>
+            <Text style={styles.rejectHint}>
+              Анкету можно править, но на проверку она не уйдёт.
+            </Text>
           </Animated.View>
         )}
 
@@ -1650,10 +1788,16 @@ function MasterApplicationScreen({
                   {application.photoUrl && (
                     <PressableScale
                       style={styles.revokeBtn}
-                      onPress={revokeFace}
+                      onPress={pressRevoke}
                       disabled={loading}
                     >
-                      <Text style={styles.revokeText}>Отозвать согласие и удалить фото</Text>
+                      <Text style={styles.revokeText}>
+                        {revoking
+                          ? verified
+                            ? 'Точно? Фото удалится, допуск к заявкам снимется'
+                            : 'Точно? Фото удалится'
+                          : 'Отозвать согласие и удалить фото'}
+                      </Text>
                     </PressableScale>
                   )}
                 </View>
@@ -2281,10 +2425,14 @@ export function ProfileTab({
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials}</Text>
           </View>
-          <Text style={styles.profileName}>{fullName || email}</Text>
+          <Text style={styles.profileName}>{fullName || email || 'Мастер'}</Text>
           <View style={styles.chipRow}>
+            {/* Отстранённому «проверенный» показывать нельзя: допуск у него
+                снят, и чип обещал бы ленту, которой нет */}
             <View style={styles.verifiedChip}>
-              <Text style={styles.verifiedText}>✓ проверенный мастер</Text>
+              <Text style={styles.verifiedText}>
+                {profile.blocked ? '⛔ доступ приостановлен' : '✓ проверенный мастер'}
+              </Text>
             </View>
             {email === FOUNDER_EMAIL && (
               <View style={styles.founderChip}>
@@ -2466,6 +2614,13 @@ export function PaymentSettings({
         </PressableScale>
       </View>
 
+      {!current.acceptsCash && current.banks.length === 0 && (
+        <Text style={styles.payWarn}>
+          Не выбрано ни одного способа — клиенту всё равно предложат и наличные, и перевод. Отметьте
+          хотя бы один банк.
+        </Text>
+      )}
+
       <Text style={styles.payLabel}>Перевод по СБП — в какие банки</Text>
       <View style={styles.payChipRow}>
         {BANKS.map((bank) => {
@@ -2625,9 +2780,10 @@ export function JobDetail({
   job: Job;
   typing: boolean;
   onBack: () => void;
-  onSendOffer: (price: number, comment: string) => void;
+  // true — предложение записано; поля очищаются только после этого
+  onSendOffer: (price: number, comment: string) => Promise<boolean>;
   onWithdrawOffer: () => void;
-  onOfferLegacy: (price: number) => void;
+  onOfferLegacy: (price: number) => Promise<boolean>;
   onFinish: () => void;
   // Отказ от взятой заявки — заявка вернётся в поиск
   onDecline: () => void;
@@ -2664,14 +2820,15 @@ export function JobDetail({
   const priceValid = Number.isFinite(price) && price > 0;
 
   // Переписка открыта только выбранному мастеру: правила пускают в чат
-  // участников заявки, а до выбора мастер ей не участник
-  const canChat =
-    job.legacy || job.status === 'accepted' || job.status === 'awaiting' || job.status === 'done';
+  // участников заявки, а до выбора мастер ей не участник — и у старых
+  // заявок с ценой в самом документе тоже
+  const canChat = job.status === 'accepted' || job.status === 'awaiting' || job.status === 'done';
 
-  const submitPrice = () => {
+  const submitPrice = async () => {
     if (!priceValid) return;
-    if (job.legacy) onOfferLegacy(price);
-    else onSendOffer(price, offerComment);
+    const ok = job.legacy ? await onOfferLegacy(price) : await onSendOffer(price, offerComment);
+    // При сбое цена и комментарий остаются: набирать заново не придётся
+    if (!ok) return;
     setPriceDraft('');
     setOfferComment('');
     atBottom.current = true;
@@ -2848,36 +3005,59 @@ export function JobDetail({
                     sub: 'Клиент сравнивает цены и выбирает мастера',
                     price: job.myOffer ?? job.price ?? null,
                   }
-                : job.status === 'accepted'
+                : job.status === 'accepted' && job.returnedToWork
                   ? {
-                      icon: '🎉',
-                      title: 'Клиент выбрал вас',
-                      sub: 'Договоритесь о времени в чате',
+                      icon: '🔁',
+                      title: 'Клиент вернул работу',
+                      sub: 'Что-то не готово — уточните в чате и сдайте снова',
                       price: job.price ?? null,
                     }
-                  : job.status === 'awaiting'
+                  : job.status === 'accepted'
                     ? {
-                        icon: '⏳',
-                        title: 'Работа сдана',
-                        sub: 'Ждём, когда клиент подтвердит выполнение',
+                        icon: '🎉',
+                        title: 'Клиент выбрал вас',
+                        sub: 'Договоритесь о времени в чате',
                         price: job.price ?? null,
                       }
-                    : job.status === 'cancelled'
-                      ? { icon: '🚫', title: 'Клиент отменил заявку', sub: null, price: null }
-                      : job.status === 'closed'
-                        ? {
-                            icon: '🔒',
-                            title: 'Заявка закрыта',
-                            sub: 'Выбрали другого мастера либо клиент её отменил',
-                            price: job.myOffer ?? null,
-                          }
-                        : {
-                            icon: '✅',
-                            title: 'Работа завершена',
-                            sub: 'Заказ лежит в истории',
-                            price: job.price ?? null,
-                          };
-            const celebratory = job.status === 'accepted' || job.status === 'done';
+                    : job.status === 'awaiting'
+                      ? {
+                          icon: '⏳',
+                          title: 'Работа сдана',
+                          sub: 'Ждём, когда клиент подтвердит выполнение',
+                          price: job.price ?? null,
+                        }
+                      : job.status === 'cancelled'
+                        ? job.closedByAdmin
+                          ? {
+                              icon: '🚫',
+                              title: 'Заявка отменена модерацией',
+                              sub: job.adminCloseReason || null,
+                              price: null,
+                            }
+                          : { icon: '🚫', title: 'Клиент отменил заявку', sub: null, price: null }
+                        : job.status === 'closed'
+                          ? {
+                              icon: '🔒',
+                              title: 'Заявка закрыта',
+                              sub: 'Выбрали другого мастера либо клиент её отменил',
+                              price: job.myOffer ?? null,
+                            }
+                          : job.closedByAdmin
+                            ? {
+                                icon: '✅',
+                                title: 'Заявка закрыта модерацией',
+                                sub: job.adminCloseReason || 'Заказ лежит в истории',
+                                price: job.price ?? null,
+                              }
+                            : {
+                                icon: '✅',
+                                title: 'Работа завершена',
+                                sub: 'Заказ лежит в истории',
+                                price: job.price ?? null,
+                              };
+            // Возврат с приёмки — не праздник: тот же статус, другой повод
+            const chosen = job.status === 'accepted' && !job.returnedToWork;
+            const celebratory = chosen || job.status === 'done';
             return (
               <Animated.View
                 key={job.status}
@@ -2886,7 +3066,7 @@ export function JobDetail({
               >
                 {/* Выбор клиента — главное событие в жизни мастера на площадке.
                     Один залп, только на «выбрали», не на «завершена». */}
-                {job.status === 'accepted' && <ConfettiBurst />}
+                {chosen && <ConfettiBurst />}
                 <View style={styles.statusHead}>
                   <View style={[styles.statusIconWrap, celebratory && styles.statusIconWrapOn]}>
                     <Glyph
@@ -2938,9 +3118,13 @@ export function JobDetail({
                   <PressableScale
                     style={styles.callBtn}
                     onPress={() => {
-                      if (job.clientPhone) {
-                        Linking.openURL(`tel:${job.clientPhone}`).catch(() => {});
-                      }
+                      const phone = job.clientPhone;
+                      if (!phone) return;
+                      // Планшет или эмулятор без звонилки: номер показываем, чтобы
+                      // набрать вручную, а не молчать
+                      Linking.openURL(`tel:${phone}`).catch(() =>
+                        Alert.alert('Не удалось открыть звонилку', `Номер клиента: ${phone}`),
+                      );
                     }}
                   >
                     <Glyph glyph="📞" size={15} colors={themedIconColors(t)} />
@@ -3065,7 +3249,9 @@ export function JobDetail({
           <Text style={styles.chatLockedText}>
             {job.status === 'cancelled' || job.status === 'closed'
               ? 'Переписка закрыта: сделки по заявке больше нет'
-              : 'Чат откроется, когда клиент выберет вас'}
+              : job.legacy
+                ? 'Чат откроется, когда клиент примет цену'
+                : 'Чат откроется, когда клиент выберет вас'}
           </Text>
         </View>
       )}
@@ -3344,6 +3530,7 @@ const makeStyles = (t: Palette) =>
     consentText: { flex: 1, fontSize: 11.5, fontWeight: '400', color: t.textMuted, lineHeight: 17 },
     consentLink: { color: t.accent, fontWeight: '800' },
     revokeBtn: { paddingVertical: 8, marginTop: 4 },
+    payWarn: { color: t.danger, fontSize: 12.5, lineHeight: 17, marginBottom: 10 },
     revokeText: { color: t.danger, fontWeight: '700', fontSize: 11.5 },
     draftBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
     draftBtnText: { color: t.textMuted, fontWeight: '700', fontSize: 12.5 },

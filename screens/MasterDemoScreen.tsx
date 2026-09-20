@@ -297,12 +297,13 @@ export function MasterDemoScreen() {
 
   // Действия меняют только локальное состояние — сервера у витрины нет,
   // но пластика экранов ровно та же, что в бою
-  const sendOffer = (jobId: string, price: number) => {
+  const sendOffer = async (jobId: string, price: number) => {
     patchJob(jobId, (j) => ({
       ...j,
       myOffer: price,
       status: j.status === 'new' ? 'offered' : j.status,
     }));
+    return true;
   };
 
   const withdrawOffer = (jobId: string) => {

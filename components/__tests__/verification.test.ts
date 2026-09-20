@@ -14,6 +14,13 @@ describe('phoneValid', () => {
     expect(phoneValid('8-999-123-45-67')).toBe(true);
   });
 
+  // Сервер отдаёт клиенту только номера вида +7…: с другой первой цифрой
+  // «Позвонить» у клиента не появилось бы
+  test('первая цифра — 7 или 8', () => {
+    expect(phoneValid('19991234567')).toBe(false);
+    expect(phoneValid('89991234567')).toBe(true);
+  });
+
   test('короче или длиннее — не годится', () => {
     expect(phoneValid('7999123456')).toBe(false);
     expect(phoneValid('799912345678')).toBe(false);

@@ -65,6 +65,7 @@ export function reopenedFields() {
     // должна быть доступна следующему
     paymentMethod: null,
     masterDeclinedAt: null,
+    returnedToWorkAt: null,
     reopenedAt: new Date(),
   };
 }

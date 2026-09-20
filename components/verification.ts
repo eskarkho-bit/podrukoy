@@ -55,5 +55,8 @@ export function applicationFrom(data: Record<string, unknown> | undefined): Appl
 
 /** Телефон в виде, пригодном для звонка: только цифры, 11 знаков. */
 export function phoneValid(phone: string): boolean {
-  return /^\d{11}$/.test(phone.replace(/\D/g, ''));
+  // Сервер кладёт номер в заявку клиенту только в виде +7…: одиннадцать цифр
+  // с любой другой первой прошли бы форму, а кнопки «Позвонить» у клиента
+  // не появилось бы никогда
+  return /^[78]\d{10}$/.test(phone.replace(/\D/g, ''));
 }
