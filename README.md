@@ -45,7 +45,7 @@ npm start
 | --------------------------------- | ----------------------------------------------------- |
 | `npm start`                       | Metro + QR-код                                        |
 | `npm run android` / `ios` / `web` | запуск на платформе                                   |
-| `npm run test:rules`              | 204 теста правил доступа на эмуляторе Firestore       |
+| `npm run test:rules`              | 209 тестов правил доступа на эмуляторе Firestore      |
 | `npm run rules:check`             | не отстали ли правила в бою от репозитория            |
 | `npm run rules:deploy`            | выкатить правила Firestore и индексы                  |
 | `npm run storage:deploy`          | выкатить правила Storage (нужен подключённый Storage) |
